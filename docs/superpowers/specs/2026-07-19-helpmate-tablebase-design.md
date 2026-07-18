@@ -28,6 +28,7 @@ placements (tens of TB); v1 does not attempt it in one pass.
 | Material transitions | Full dependency closure: sub-slices for captures and promotions are built first |
 | Rules | En passant exact; castling ignored; 50-move rule ignored |
 | Algorithm | Forward-scan fixed-point passes; predecessor-bitmap frontier as later optimization |
+| Solution counts | Stored per-cell count of optimal lines, saturating at 255 |
 | Stack | C++20 core (CMake), pybind11 Python bindings, CLI, stats reports |
 
 ## Value semantics
@@ -44,6 +45,22 @@ placements (tens of TB); v1 does not attempt it in one pass.
   → sentinel **255 = unsolvable**. Illegal index cells (piece overlap, adjacent kings,
   pawn on rank 1/8, side not to move already giving check) → same sentinel space,
   flagged invalid during init.
+
+### Solution counts
+
+For chess composition, the number of *distinct* minimal-length solutions matters
+(1 = sound composition candidate, 2+ = duals/multiple solutions). Alongside DTM, each
+cell stores the count of optimal lines `N(p)`:
+
+- `N(mate) = 1`; otherwise `N(p) = Σ N(s)` over exactly the successors `s` reached by
+  an optimal move (`dtm(s) = dtm(p) − 1`).
+- Lines differing anywhere in move order are distinct — the composition convention;
+  White's dual continuations and transpositions are counted separately.
+- Stored as one byte per cell, **saturating**: 0–254 exact, 255 = "≥ 255". Cells with
+  DTM = unsolvable have count 0.
+- Symmetry-safe: counts are summed over the real position's legal moves; symmetric
+  duplicate solutions are therefore included even when successors canonicalize to the
+  same index cell.
 
 ## Architecture
 
@@ -84,8 +101,9 @@ wrappers over `generator`/`probe`.
   EP captures change material, so their results are probed in sub-slice tables.
   This is exact and adds no index states.
 
-Approximate sizes (with-pawns figures, per slice, 1 byte/cell, 2 planes):
-3 pieces ≈ 0.2 MB · 4 ≈ 15 MB · 5 ≈ 900 MB · 6 pieces ≈ 55 GB → needs
+Approximate sizes (with-pawns figures, per slice, 1 byte/cell, 4 planes —
+DTM + solution count, × both sides to move):
+3 pieces ≈ 0.4 MB · 4 ≈ 30 MB · 5 ≈ 1.8 GB · 6 pieces ≈ 110 GB → needs
 nibble-packing/identical-piece dedup or the out-of-core extension.
 
 ## Generation
@@ -105,7 +123,12 @@ nibble-packing/identical-piece dedup or the out-of-core extension.
    receives value d, mark approximate predecessors (reverse piece moves; a superset is
    fine) so pass d+1 scans candidates only. Correctness never depends on bitmap
    exactness because every candidate is re-verified by forward move generation.
-5. **Finalize.** Remaining unresolved → unsolvable; compute stats; write file
+5. **Count sweep.** Second sweep with the same pass structure, in increasing DTM
+   order: pass d computes `N` for all cells with `dtm = d` by summing counts of their
+   `dtm = d−1` successors (sub-slice lookups and the EP adjustment apply here too, so
+   sub-slice files must include count planes). Saturating byte arithmetic, cap 255.
+   Roughly doubles generation time.
+6. **Finalize.** Remaining unresolved → unsolvable; compute stats; write file
    atomically (temp file + rename).
 
 Parallelism: index range split across N threads per pass. Race-free because pass d
@@ -118,11 +141,13 @@ only writes d into unresolved cells and only reads values < d.
 - **Header**: magic `HM8P`, format version, material string, symmetry kind, index
   layout parameters, payload encoding id, max DTM, per-distance counts, generator
   version, build timestamp.
-- **Payload**: plane wtm, then plane btm; encoding v1 = 1 byte/cell. Nibble packing
-  and zstd block compression are future encodings selected via the header; probe
-  supports whatever encodings exist.
+- **Payload**: four planes in order — DTM wtm, DTM btm, count wtm, count btm;
+  encoding v1 = 1 byte/cell. Nibble packing and zstd block compression are future
+  encodings selected via the header; probe supports whatever encodings exist.
 - **Sidecar** `tables/<SLICE>.stats.json`: distance histogram, unsolvable counts,
-  deepest positions as FENs — so reports never rescan the binary table.
+  uniqueness histogram (how many positions per DTM have exactly 1, 2, …, ≥255
+  optimal solutions), deepest positions and deepest *unique-solution* positions as
+  FENs — so reports never rescan the binary table.
 
 ## Interfaces
 
@@ -130,9 +155,11 @@ CLI:
 
 ```
 helpmate gen KBkqrbp [--tables DIR] [--threads N]
-helpmate probe "FEN"      # DTM in plies + h#n notation, or "unsolvable"
-helpmate line  "FEN"      # one optimal helpmate line in algebraic notation
-helpmate stats KBkqrbp    # histogram, unsolvable %, deepest positions
+helpmate probe "FEN"      # DTM in plies + h#n notation + solution count, or "unsolvable"
+helpmate line  "FEN"      # optimal helpmate line(s); --all prints every optimal line (count permitting)
+helpmate stats KBkqrbp    # histograms (distance, uniqueness), unsolvable %, deepest positions
+helpmate mine  KBkqrbp --dtm 8 --count 1   # scan a slice for composition candidates
+                                           # (positions with given DTM and solution count)
 ```
 
 Python (pybind11, packaged with scikit-build-core so `pip install -e .` works):
@@ -140,8 +167,11 @@ Python (pybind11, packaged with scikit-build-core so `pip install -e .` works):
 ```python
 import helpmate
 tb = helpmate.Tablebase("tables/")
-tb.probe(fen)          # -> int plies, or None if unsolvable
-tb.line(fen)           # -> list[str] moves
+tb.probe(fen)          # -> (dtm_plies, count) tuple, or None if unsolvable
+                       #    count is exact up to 254; 255 means ">= 255"
+tb.line(fen)           # -> list[str] moves (one optimal line)
+tb.lines(fen, max=100) # -> list of optimal lines (enumerated on demand)
+tb.mine("KBkqrbp", dtm=8, count=1)  # -> iterator of FENs (composition mining)
 tb.stats("KBkqrbp")    # -> dict
 helpmate.generate("KBkqrbp", tables="tables/", threads=8)
 ```
@@ -159,8 +189,9 @@ an existing slice, otherwise reported explicitly.
   python-chess on random few-piece positions; index ⇄ position round-trips covering
   every symmetry class; file header round-trip.
 - **Oracle cross-check**: an independent cooperative IDDFS solver (shares only the
-  movegen) re-solves thousands of sampled positions per generated slice; any mismatch
-  fails the build.
+  movegen) re-solves thousands of sampled positions per generated slice — verifying
+  both the DTM *and* the number of optimal lines (oracle enumerates them, capped at
+  255); any mismatch fails the build.
 - **Golden tests**: published 3–4 piece helpmate compositions with known h#n values
   must probe exactly.
 - **Exhaustive tiny-slice check**: 3-piece slices fully compared against a brute-force
