@@ -1,61 +1,31 @@
 #include "indexing/kk.h"
 #include "chess/types.h"
-#include <set>
-#include <climits>
+#include <cstdlib>
 
 namespace hm {
 
 bool kings_adjacent(int a, int b) {
-    int file_delta = abs(sq_file(a) - sq_file(b));
-    int rank_delta = abs(sq_rank(a) - sq_rank(b));
+    int file_delta = std::abs(sq_file(a) - sq_file(b));
+    int rank_delta = std::abs(sq_rank(a) - sq_rank(b));
     return file_delta <= 1 && rank_delta <= 1;
 }
 
 static KKTable build(bool pawns) {
     KKTable t;
     t.index_of.fill(-1);
-
-    int max_transform = pawns ? 2 : 8;
-
-    // Track which canonical pairs we've already added
-    std::set<std::pair<int, int>> added;
-
-    // Iterate all possible (wk, bk) pairs
     for (int wk = 0; wk < 64; ++wk) {
+        bool ok = pawns ? sq_file(wk) < 4
+                        : (sq_file(wk) < 4 && sq_rank(wk) <= sq_file(wk));
+        if (!ok) continue;
+        // Pawnless: when wK is on the a1-h8 diagonal, positions with bK above the
+        // diagonal are transpose-images of ones below it; restrict bK to rank<=file
+        // to keep exactly one representative (564 -> 462).
+        bool wk_on_diag = !pawns && sq_rank(wk) == sq_file(wk);
         for (int bk = 0; bk < 64; ++bk) {
-            if (wk == bk || kings_adjacent(wk, bk)) continue;
-
-            // Find canonical representative by applying transforms
-            int best_wk = -1, best_bk = -1;
-            int best_index = INT_MAX;
-
-            for (int trans = 0; trans < max_transform; ++trans) {
-                int wk_t = transform_sq(wk, trans);
-                int bk_t = transform_sq(bk, trans);
-
-                // Check if wK is in canonical region
-                bool in_region = pawns ? sq_file(wk_t) < 4
-                                       : (sq_file(wk_t) < 4 && sq_rank(wk_t) <= sq_file(wk_t));
-                if (!in_region) continue;
-
-                // Pick the lexicographically smallest canonical form
-                int idx = wk_t * 64 + bk_t;
-                if (idx < best_index) {
-                    best_index = idx;
-                    best_wk = wk_t;
-                    best_bk = bk_t;
-                }
-            }
-
-            // If we found a canonical representative, add it (but only once)
-            if (best_wk != -1) {
-                std::pair<int, int> key = {best_wk, best_bk};
-                if (added.find(key) == added.end()) {
-                    added.insert(key);
-                    t.index_of[best_wk * 64 + best_bk] = t.size++;
-                    t.squares_of.push_back({(uint8_t)best_wk, (uint8_t)best_bk});
-                }
-            }
+            if (bk == wk || kings_adjacent(wk, bk)) continue;
+            if (wk_on_diag && sq_rank(bk) > sq_file(bk)) continue;
+            t.index_of[wk * 64 + bk] = t.size++;
+            t.squares_of.push_back({(uint8_t)wk, (uint8_t)bk});
         }
     }
     return t;

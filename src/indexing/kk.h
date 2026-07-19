@@ -2,6 +2,7 @@
 #include <array>
 #include <vector>
 #include <cstdint>
+#include <utility>
 
 namespace hm {
 // t in [0,8): bit0 = mirror files (a<->h), bit1 = mirror ranks, bit2 = transpose (a1-h8 diag).
