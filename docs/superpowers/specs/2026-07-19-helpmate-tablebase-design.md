@@ -219,6 +219,10 @@ an existing slice, otherwise reported explicitly.
 
 - Full 8-piece slice generation (needs out-of-core streaming; the format and slice
   DAG are designed so this can be added without breaking existing tables).
-- Castling, 50-move rule, underpromotion-restricted conventions, fairy pieces.
+- Castling, 50-move rule, fairy pieces.
+- Optional rule variants that *restrict* promotion choice (e.g. a "queen promotions
+  only" mode). Full FIDE promotions — Q, R, B, N, including all underpromotions —
+  are always in effect; what's out of scope is only the ability to turn some of
+  them off.
 - Web UI board viewer.
 - Table compression beyond the versioned-encoding hook.
