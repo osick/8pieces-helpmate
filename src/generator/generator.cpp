@@ -2,6 +2,8 @@
 #include "generator/eval.h"
 #include "chess/board.h"
 #include <filesystem>
+#include <fstream>
+#include <map>
 
 namespace hm {
 
@@ -96,15 +98,83 @@ void SliceGen::run_all_passes() {
     }
 }
 
+nlohmann::json SliceGen::stats_json() const {
+    using nlohmann::json;
+    static const char* kStm[2] = {"wtm", "btm"};
+
+    json cells_invalid, cells_unsolvable, histogram, uniqueness;
+    for (int s = 0; s < 2; ++s) {
+        uint64_t invalid = 0, unsolvable = 0;
+        std::map<int, uint64_t> hist;
+        std::map<int, std::map<int, uint64_t>> uniq;
+        for (uint64_t c = 0; c < ps_; ++c) {
+            uint8_t d = dtm_[s][c];
+            if (d == DTM_INVALID) { ++invalid; continue; }
+            if (d == DTM_UNSOLVABLE) { ++unsolvable; continue; }
+            ++hist[d];
+            ++uniq[d][cnt_[s][c]];
+        }
+        cells_invalid[kStm[s]] = invalid;
+        cells_unsolvable[kStm[s]] = unsolvable;
+
+        json hj = json::object();
+        for (auto& [depth, count] : hist) hj[std::to_string(depth)] = count;
+        histogram[kStm[s]] = hj;
+
+        json uj = json::object();
+        for (auto& [depth, counts] : uniq) {
+            json cj = json::object();
+            for (auto& [cnt, n] : counts) cj[std::to_string(cnt)] = n;
+            uj[std::to_string(depth)] = cj;
+        }
+        uniqueness[kStm[s]] = uj;
+    }
+
+    json deepest = json::array(), deepest_unique = json::array();
+    if (max_dtm_ >= 0) {
+        std::vector<PlacedPiece> pp;
+        int s = (max_dtm_ % 2) ? 0 : 1;                 // parity: odd depths are wtm, even are btm
+        for (uint64_t c = 0; c < ps_ && deepest.size() < 5; ++c) {
+            if (dtm_[s][c] != (uint8_t)max_dtm_) continue;
+            idx_.decode(c, pp);
+            deepest.push_back(Board::from_pieces(pp, (Color)s).fen());
+        }
+        for (int d = max_dtm_; d >= 0 && deepest_unique.empty(); --d) {
+            int ss = (d % 2) ? 0 : 1;
+            for (uint64_t c = 0; c < ps_ && deepest_unique.size() < 5; ++c) {
+                if (dtm_[ss][c] != (uint8_t)d || cnt_[ss][c] != 1) continue;
+                idx_.decode(c, pp);
+                deepest_unique.push_back(Board::from_pieces(pp, (Color)ss).fen());
+            }
+        }
+    }
+
+    json j;
+    j["material"] = mat_.name();
+    j["plane_size"] = ps_;
+    j["max_dtm"] = max_dtm_ < 0 ? (int)DTM_UNSOLVABLE : max_dtm_;
+    j["cells"] = {{"invalid", cells_invalid}, {"unsolvable", cells_unsolvable}};
+    j["dtm_histogram"] = histogram;
+    j["uniqueness"] = uniqueness;
+    j["deepest"] = deepest;
+    j["deepest_unique"] = deepest_unique;
+    j["generator_version"] = "0.1.0";
+    return j;
+}
+
 void SliceGen::finalize_and_write() {
     for (int s = 0; s < 2; ++s)
         for (uint64_t c = 0; c < ps_; ++c)
             if (dtm_[s][c] == DTM_UNSET) dtm_[s][c] = DTM_UNSOLVABLE;
-    std::string meta = "{}";                           // extended in Task 13
+    nlohmann::json j = stats_json();
+    std::string meta = j.dump(2);
     std::filesystem::create_directories(opt_.tables_dir);
-    TableWriter::write(opt_.tables_dir + "/" + mat_.name() + ".hm", mat_, ps_,
+    std::string base = opt_.tables_dir + "/" + mat_.name();
+    TableWriter::write(base + ".hm", mat_, ps_,
                        max_dtm_ < 0 ? DTM_UNSOLVABLE : (uint8_t)max_dtm_, meta,
                        dtm_[0].data(), dtm_[1].data(), cnt_[0].data(), cnt_[1].data());
+    std::ofstream out(base + ".stats.json", std::ios::trunc);
+    out << meta;
 }
 
 std::vector<std::string> generate(const Material& root, const GenOptions& opt) {

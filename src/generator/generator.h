@@ -4,6 +4,7 @@
 #include "format/table_file.h"
 #include "indexing/material.h"
 #include "indexing/slice_index.h"
+#include <nlohmann/json.hpp>
 #include <cstdint>
 #include <map>
 #include <stdexcept>
@@ -45,6 +46,7 @@ public:
     void run_all_passes();                            // Task 10: scan until fixed point; sets max_dtm_
     void count_sweep();                               // Task 12
     void finalize_and_write();                        // Task 10 (stats extended in Task 13)
+    nlohmann::json stats_json() const;                // Task 13
     // test accessors:
     const std::vector<uint8_t>& dtm(Color stm) const;
     const std::vector<uint8_t>& cnt(Color stm) const;
