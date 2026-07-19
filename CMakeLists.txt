@@ -25,14 +25,14 @@ add_library(chessmg_core STATIC
 target_include_directories(chessmg_core SYSTEM PUBLIC ${chessmg_SOURCE_DIR}/chessmg/libcmg)
 target_compile_options(chessmg_core PRIVATE -O2 -w)
 
-set(HELPMATE_SOURCES src/chess/board.cpp src/chess/san.cpp src/indexing/material.cpp)  # tasks append here
+set(HELPMATE_SOURCES src/chess/board.cpp src/chess/san.cpp src/indexing/material.cpp src/indexing/kk.cpp)  # tasks append here
 add_library(helpmate_core STATIC ${HELPMATE_SOURCES})
 target_include_directories(helpmate_core PUBLIC src)
 target_link_libraries(helpmate_core PUBLIC chessmg_core nlohmann_json::nlohmann_json Threads::Threads)
 target_compile_options(helpmate_core PRIVATE -O2 -Wall -Wextra)
 
 enable_testing()
-add_executable(helpmate_tests tests/cpp/test_sanity.cpp tests/cpp/test_board.cpp tests/cpp/test_san.cpp tests/cpp/test_material.cpp)
+add_executable(helpmate_tests tests/cpp/test_sanity.cpp tests/cpp/test_board.cpp tests/cpp/test_san.cpp tests/cpp/test_material.cpp tests/cpp/test_kk.cpp)
 target_link_libraries(helpmate_tests PRIVATE helpmate_core Catch2::Catch2WithMain)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
