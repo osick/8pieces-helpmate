@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <stdexcept>
+#include <system_error>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -30,7 +31,7 @@ void TableWriter::write(const std::string& path, const Material& mat, uint64_t p
     hdr.json_len = static_cast<uint32_t>(meta_json.size());
 
     std::string tmp_path = path + ".tmp";
-    {
+    try {
         std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
         if (!out) throw std::runtime_error("TableWriter::write: cannot open " + tmp_path);
         out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
@@ -40,6 +41,10 @@ void TableWriter::write(const std::string& path, const Material& mat, uint64_t p
         out.write(reinterpret_cast<const char*>(cnt_w), static_cast<std::streamsize>(plane_size));
         out.write(reinterpret_cast<const char*>(cnt_b), static_cast<std::streamsize>(plane_size));
         if (!out) throw std::runtime_error("TableWriter::write: write failed for " + tmp_path);
+    } catch (...) {
+        std::error_code ec;
+        std::filesystem::remove(tmp_path, ec);  // best-effort cleanup; ignore removal errors
+        throw;
     }
     std::filesystem::rename(tmp_path, path);
 }
@@ -88,10 +93,20 @@ std::optional<TableReader> TableReader::open(const std::string& path) {
     const uint8_t* base = static_cast<const uint8_t*>(mapped);
     const TableHeader* hdr = reinterpret_cast<const TableHeader*>(base);
 
+    // Validate without overflowable arithmetic: json_len and plane_size come from an
+    // untrusted mmap'd header, and `4 * plane_size` can wrap mod 2^64 for crafted files.
     bool ok = std::memcmp(hdr->magic, "HM8P", 4) == 0 &&
               hdr->version == 1 &&
-              hdr->encoding == 1 &&
-              filesize == sizeof(TableHeader) + hdr->json_len + 4ull * hdr->plane_size;
+              hdr->encoding == 1;
+    if (ok) {
+        uint64_t after_header = filesize - sizeof(TableHeader);  // filesize >= sizeof(TableHeader) already checked
+        if (hdr->json_len > after_header) {
+            ok = false;
+        } else {
+            uint64_t remaining = after_header - hdr->json_len;
+            ok = (remaining % 4 == 0) && (hdr->plane_size == remaining / 4);
+        }
+    }
     if (!ok) {
         munmap(mapped, filesize);
         return std::nullopt;

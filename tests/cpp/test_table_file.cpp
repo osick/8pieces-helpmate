@@ -1,7 +1,9 @@
 #include <catch2/catch_test_macros.hpp>
 #include "format/table_file.h"
 #include "indexing/material.h"
+#include <cstring>
 #include <filesystem>
+#include <fstream>
 using namespace hm;
 TEST_CASE("header is 64 bytes") { CHECK(sizeof(TableHeader) == 64); }
 TEST_CASE("write/read round trip") {
@@ -23,4 +25,34 @@ TEST_CASE("write/read round trip") {
         CHECK(r->get(Color::Black, i).dtm == db[i]); CHECK(r->get(Color::Black, i).count == cb[i]);
     }
     CHECK(!TableReader::open((dir / "missing.hm").string()));
+}
+TEST_CASE("reader rejects a header with an overflow-crafted plane_size") {
+    auto dir = std::filesystem::temp_directory_path() / "hm_test_tables";
+    std::filesystem::create_directories(dir);
+    auto path = (dir / "overflow.hm").string();
+    TableHeader hdr{};
+    std::memcpy(hdr.magic, "HM8P", 4);
+    hdr.version = 1;
+    hdr.encoding = 1;
+    hdr.symmetry = 1;
+    std::memcpy(hdr.material, "Kvk", 3);
+    hdr.plane_size = (1ull << 62);  // 4 * plane_size overflows uint64_t
+    hdr.max_dtm = 0;
+    hdr.json_len = 0;
+    {
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+    }
+    CHECK(!TableReader::open(path));
+}
+TEST_CASE("reader rejects a truncated file") {
+    auto dir = std::filesystem::temp_directory_path() / "hm_test_tables";
+    std::filesystem::create_directories(dir);
+    auto path = (dir / "trunc.hm").string();
+    const uint64_t n = 100;
+    std::vector<uint8_t> p(n, 1);
+    TableWriter::write(path, *Material::parse("Kvk"), n, 5, "{}", p.data(), p.data(), p.data(), p.data());
+    auto sz = std::filesystem::file_size(path);
+    std::filesystem::resize_file(path, sz - 3);
+    CHECK(!TableReader::open(path));
 }
