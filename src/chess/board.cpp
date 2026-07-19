@@ -187,7 +187,27 @@ std::vector<Move> Board::legal_moves() const {
     // const_cast is needed to get a mutable Position& from a const method.
     Position& p = impl_->pos;
     auto conv = [&](auto& list) {
-        for (::Move m : list) out.push_back(Move{(uint8_t)m.from(), (uint8_t)m.to(), (uint8_t)m.flags()});
+        for (::Move sm : list) {
+            uint8_t from = (uint8_t)sm.from(), to = (uint8_t)sm.to(), flags = (uint8_t)sm.flags();
+            // Workaround for a ChessMG/surge defect: when the side to move is in check
+            // from a knight (or, via case fallthrough, the pawn that just double-pushed),
+            // surge's single-check branch answers with "capture the checker" moves that
+            // are unconditionally flagged plain CAPTURE -- even when the capturing piece
+            // is a pawn landing on its own promotion rank. That silently drops the
+            // promotion, so play() would leave an actual pawn sitting on rank 1/8 (an
+            // impossible position). Recover the four promotion-capture variants surge's
+            // ordinary (not-in-check) pawn code would have produced for the same capture.
+            if (flags == CAPTURE) {
+                auto sp = p.at(static_cast<Square>(from));
+                if (sp != NO_PIECE && type_of(static_cast<::Piece>(sp)) == PAWN &&
+                    (sq_rank(to) == 0 || sq_rank(to) == 7)) {
+                    for (MoveFlags pf : {PC_KNIGHT, PC_BISHOP, PC_ROOK, PC_QUEEN})
+                        out.push_back(Move{from, to, (uint8_t)pf});
+                    continue;
+                }
+            }
+            out.push_back(Move{from, to, flags});
+        }
     };
     if (p.turn() == WHITE) {
         MoveList<WHITE> l(p);
