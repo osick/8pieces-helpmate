@@ -30,6 +30,7 @@ placements (tens of TB); v1 does not attempt it in one pass.
 | Algorithm | Forward-scan fixed-point passes; predecessor-bitmap frontier as later optimization |
 | Solution counts | Stored per-cell count of optimal lines, saturating at 255 |
 | Stack | C++20 core (CMake), pybind11 Python bindings, CLI, stats reports |
+| Move generation | [osick/ChessMG](https://github.com/osick/ChessMG) C++ core (MIT), behind a thin adapter |
 
 ## Value semantics
 
@@ -66,9 +67,22 @@ cell stores the count of optimal lines `N(p)`:
 
 C++20, CMake, four core libraries plus two thin frontends:
 
-1. **`chess`** — board representation and legal move generation. Piece list + 64-square
-   mailbox with precomputed attack tables. Implements check/checkmate/stalemate
-   detection, en passant, promotions (to Q/R/B/N). No castling anywhere.
+1. **`chess`** — thin adapter over the C++20 core of
+   [osick/ChessMG](https://github.com/osick/ChessMG) (MIT; `libcmg` + `libsurge`,
+   magic-bitboard movegen, perft-verified to depth 8, ~200M NPS), vendored via CMake
+   `FetchContent`. ChessMG provides exactly the primitives the generator needs:
+   - direct position setup from a piece list (`set_position` — no FEN parsing in the
+     inner loop) and incremental `put_piece`/`remove_piece`/`move_piece` for sweeping
+     adjacent indices;
+   - legal move generation, en passant, promotions;
+   - position-state classification (`CHECKMATE`, `STALEMATE`, `CHECK`,
+     `ILLEGAL_PAWN_SQUARE`, `ILLEGAL_KING_CONTACT`, `ILLEGAL_POSITION`) that maps
+     one-to-one onto the init pass.
+   Castling is unused (positions never carry castling rights). The adapter isolates
+   the generator/probe code from ChessMG's API, so internals can be swapped or
+   specialized without touching callers; missing features (e.g. a future un-move
+   generator) are contributed upstream to ChessMG. Move output is UCI; a small SAN
+   formatter lives in the adapter for `helpmate line` display.
 2. **`indexing`** — bijection position ⇄ dense index inside a slice; symmetry
    canonicalization; the material-slice DAG (which sub-slices are reachable via
    captures/promotions).
@@ -185,9 +199,11 @@ an existing slice, otherwise reported explicitly.
 
 ## Testing & verification
 
-- **Unit tests** (Catch2 via CTest): movegen perft counts cross-checked against
-  python-chess on random few-piece positions; index ⇄ position round-trips covering
-  every symmetry class; file header round-trip.
+- **Unit tests** (Catch2 via CTest): adapter movegen perft counts cross-checked
+  against python-chess on random few-piece positions — an independent guard against
+  edge-case bugs inherited from ChessMG/surge (any found are fixed upstream in
+  ChessMG); index ⇄ position round-trips covering every symmetry class; file header
+  round-trip.
 - **Oracle cross-check**: an independent cooperative IDDFS solver (shares only the
   movegen) re-solves thousands of sampled positions per generated slice — verifying
   both the DTM *and* the number of optimal lines (oracle enumerates them, capped at
