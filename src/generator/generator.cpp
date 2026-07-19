@@ -24,7 +24,30 @@ void SliceGen::init_pass() {
     }
 }
 
-void SliceGen::count_sweep() {}                        // Task 12 implements this
+void SliceGen::count_sweep() {
+    // Pass d reads only counts of cells with dtm d-1, which the previous
+    // iteration finalized; sub-slice tables were fully counted before this
+    // slice (topological build order); eval_board merges EP branches with
+    // the same min/sum rule.
+    for (uint64_t c = 0; c < ps_; ++c) if (dtm_[1][c] == 0) cnt_[1][c] = 1;
+    std::vector<PlacedPiece> pp; Board b;
+    for (int d = 1; d <= max_dtm_; ++d) {
+        int s = (d % 2) ? 0 : 1;
+        for (uint64_t c = 0; c < ps_; ++c) {
+            if (dtm_[s][c] != d) continue;
+            idx_.decode(c, pp);
+            b.reset(pp, (Color)s);
+            unsigned total = 0;
+            for (const Move& m : b.legal_moves()) {
+                b.make(m);
+                ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
+                b.unmake(m);
+                if (v.dtm == d - 1) total = std::min(255u, total + (unsigned)v.count);
+            }
+            cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
+        }
+    }
+}
 
 const std::vector<uint8_t>& SliceGen::dtm(Color stm) const { return dtm_[(int)stm]; }
 const std::vector<uint8_t>& SliceGen::cnt(Color stm) const { return cnt_[(int)stm]; }
@@ -91,7 +114,7 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt) {
         if (std::filesystem::exists(path)) continue;
         SliceGen g(m, opt);
         g.run_all_passes();
-        g.count_sweep();                               // no-op until Task 12 implements it
+        g.count_sweep();
         g.finalize_and_write();
         written.push_back(path);
     }
