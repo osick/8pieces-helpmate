@@ -63,3 +63,35 @@ TEST_CASE("promotion moves carry promotion type") {
         if (m.promotion()) { promos++; CHECK(m.from == 52); CHECK(m.to == 60); }
     CHECK(promos == 4);                                             // Q R B N
 }
+TEST_CASE("copy preserves ep square") {
+    auto b = Board::from_fen("8/8/8/8/1p6/8/P7/K1k5 w - - 0 1");
+    Move dp{};
+    for (auto& m : b->legal_moves()) if (m.uci() == "a2a4") dp = m;
+    REQUIRE(dp.uci() == "a2a4");
+    b->make(dp);
+    REQUIRE(b->ep_square() == 16);
+    Board copy_ctor(*b);
+    CHECK(copy_ctor.ep_square() == b->ep_square());
+    CHECK(copy_ctor.fen() == b->fen());
+    Board copy_assign;
+    copy_assign = *b;
+    CHECK(copy_assign.ep_square() == b->ep_square());
+    CHECK(copy_assign.fen() == b->fen());
+}
+TEST_CASE("copy preserves captured-piece history for unmake") {
+    auto b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1");
+    std::string before = b->fen();
+    Move capture{};
+    for (auto& m : b->legal_moves()) if (m.uci() == "b4f4") capture = m;
+    REQUIRE(capture.uci() == "b4f4"); CHECK(capture.is_capture());
+    b->make(capture);
+
+    Board copy_ctor(*b);
+    copy_ctor.unmake(capture);
+    CHECK(copy_ctor.fen() == before);
+
+    Board copy_assign;
+    copy_assign = *b;
+    copy_assign.unmake(capture);
+    CHECK(copy_assign.fen() == before);
+}

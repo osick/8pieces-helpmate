@@ -71,10 +71,31 @@ struct Board::Impl {
     Position pos;
 };
 
+// Position's (compiler-generated) copy constructor copy-constructs its
+// `history[256]` array of UndoInfo elementwise, and UndoInfo has a
+// user-provided copy constructor -- `UndoInfo(const UndoInfo& prev) :
+// entry(prev.entry), captured(NO_PIECE), epsq(NO_SQUARE) {}` -- written for
+// ply-advance (history[ply] = UndoInfo(history[ply-1])), which intentionally
+// resets captured/epsq for the *new* ply. That same constructor fires for a
+// whole-Position copy too, silently discarding every history entry's
+// `captured` and `epsq`. Restore both fields, across the full history array
+// (not just the current ply), so unmake() chains still work after a copy.
+static void restore_history_fields(Position& dst, const Position& src) {
+    for (int i = 0; i < 256; ++i) {
+        dst.history[i].captured = src.history[i].captured;
+        dst.history[i].epsq = src.history[i].epsq;
+    }
+}
+
 Board::Board() : impl_(std::make_unique<Impl>()) {}
-Board::Board(const Board& other) : impl_(std::make_unique<Impl>(*other.impl_)) {}
+Board::Board(const Board& other) : impl_(std::make_unique<Impl>(*other.impl_)) {
+    restore_history_fields(impl_->pos, other.impl_->pos);
+}
 Board& Board::operator=(const Board& other) {
-    if (this != &other) impl_ = std::make_unique<Impl>(*other.impl_);
+    if (this != &other) {
+        impl_ = std::make_unique<Impl>(*other.impl_);
+        restore_history_fields(impl_->pos, other.impl_->pos);
+    }
     return *this;
 }
 Board::~Board() = default;
@@ -94,7 +115,6 @@ std::optional<Board> Board::from_fen(const std::string& fen) {
     }
 
     auto pieces = b.pieces();
-    if (pieces.empty()) return std::nullopt;  // parse failure heuristic
     int white_kings = 0, black_kings = 0;
     for (auto& pp : pieces) {
         if (pp.piece.type == PieceType::King) {
@@ -162,7 +182,9 @@ bool Board::opponent_in_check() const {
 
 std::vector<Move> Board::legal_moves() const {
     std::vector<Move> out;
-    Position& p = const_cast<Position&>(impl_->pos);
+    // unique_ptr::operator->() const still yields a non-const pointee, so no
+    // const_cast is needed to get a mutable Position& from a const method.
+    Position& p = impl_->pos;
     auto conv = [&](auto& list) {
         for (::Move m : list) out.push_back(Move{(uint8_t)m.from(), (uint8_t)m.to(), (uint8_t)m.flags()});
     };
