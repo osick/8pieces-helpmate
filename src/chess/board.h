@@ -27,6 +27,10 @@ public:
     void make(const Move&);
     void unmake(const Move&);
     uint64_t perft(int depth);
+    // Zobrist-style hash of the position, including side to move and en
+    // passant square (surge's own incrementally-updated hash covers piece
+    // placement only -- see board.cpp for why those two are mixed in here).
+    uint64_t hash() const;
 
 private:
     struct Impl;

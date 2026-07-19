@@ -7,6 +7,7 @@
 // definitely linked in -- board.cpp itself -- rather than relying on the
 // linker pulling in libcmg.cpp's object file from the static archive.
 #include "libcmg.h"
+#include <array>
 #include <new>
 #include <sstream>
 #include <utility>
@@ -217,6 +218,40 @@ PosState Board::state() const {
     bool chk = in_check();
     if (any) return chk ? PosState::Check : PosState::Open;
     return chk ? PosState::Checkmate : PosState::Stalemate;
+}
+
+namespace {
+// splitmix64, used only to derive fixed pseudo-random constants below.
+constexpr uint64_t splitmix64(uint64_t& state) {
+    uint64_t z = (state += 0x9E3779B97F4A7C15ULL);
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+    return z ^ (z >> 31);
+}
+constexpr uint64_t kSideToMoveKey = [] {
+    uint64_t s = 0x853c49e6748fea9bULL;
+    return splitmix64(s);
+}();
+constexpr std::array<uint64_t, 64> kEpKeys = [] {
+    std::array<uint64_t, 64> out{};
+    uint64_t s = 0x2545F4914F6CDD1DULL;
+    for (auto& k : out) k = splitmix64(s);
+    return out;
+}();
+}  // namespace
+
+// Surge's Position::hash is incrementally updated by put_piece/remove_piece
+// only (see libsurge.h), so it covers piece placement alone -- side to move
+// and the en passant square are NOT folded in. Two positions that differ
+// only in whose turn it is, or only in EP availability, would otherwise
+// collide under this key. Mix both in here so callers (e.g. the oracle's
+// memoization) get a hash that distinguishes them.
+uint64_t Board::hash() const {
+    uint64_t h = impl_->pos.get_hash();
+    if (impl_->pos.turn() == BLACK) h ^= kSideToMoveKey;
+    int ep = ep_square();
+    if (ep >= 0) h ^= kEpKeys[ep];
+    return h;
 }
 
 uint64_t Board::perft(int depth) {

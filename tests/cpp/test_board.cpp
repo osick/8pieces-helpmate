@@ -78,6 +78,17 @@ TEST_CASE("copy preserves ep square") {
     CHECK(copy_assign.ep_square() == b->ep_square());
     CHECK(copy_assign.fen() == b->fen());
 }
+TEST_CASE("hash changes after make, restored after unmake") {
+    auto b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1");
+    uint64_t before = b->hash();
+    auto moves = b->legal_moves();
+    REQUIRE(!moves.empty());
+    Move m = moves.front();
+    b->make(m);
+    CHECK(b->hash() != before);
+    b->unmake(m);
+    CHECK(b->hash() == before);
+}
 TEST_CASE("copy preserves captured-piece history for unmake") {
     auto b = Board::from_fen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1");
     std::string before = b->fen();
