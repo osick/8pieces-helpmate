@@ -39,3 +39,25 @@ include(Catch)
 catch_discover_tests(helpmate_tests TEST_SPEC "~[slow]")
 # Slow tests (full KPvkp closure generation) are excluded from `make test` by default.
 # Run them manually with: ./build/helpmate_tests "[slow]"
+
+add_executable(helpmate src/cli/main.cpp)
+target_link_libraries(helpmate PRIVATE helpmate_core)
+
+set(CLI_TT ${CMAKE_BINARY_DIR}/cli_tables)
+add_test(NAME cli_gen COMMAND helpmate gen KQvk --tables ${CLI_TT})
+add_test(NAME cli_probe COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables ${CLI_TT})
+add_test(NAME cli_line COMMAND helpmate line "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables ${CLI_TT})
+add_test(NAME cli_stats COMMAND helpmate stats KQvk --tables ${CLI_TT})
+add_test(NAME cli_mine COMMAND helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables ${CLI_TT})
+add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})
+add_test(NAME cli_badfen COMMAND helpmate probe "garbage" --tables ${CLI_TT})
+# count=4 (not 1): four optimal replies tie at dtm=2 here -- see Task 8's
+# corrected golden (test_probe.cpp), reconfirmed by running the built CLI.
+set_tests_properties(cli_probe PROPERTIES PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_gen)
+# legal_moves() ordering deterministically yields Kh6 Qh2# as the first optimal
+# line for `line` (no --all); reconfirmed by running the built CLI.
+set_tests_properties(cli_line  PROPERTIES PASS_REGULAR_EXPRESSION "Kh6 Qh2#" DEPENDS cli_gen)
+set_tests_properties(cli_stats PROPERTIES PASS_REGULAR_EXPRESSION "max_dtm" DEPENDS cli_gen)
+set_tests_properties(cli_mine  PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DEPENDS cli_gen)
+set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
+set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
