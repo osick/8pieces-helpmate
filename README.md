@@ -311,8 +311,8 @@ grade its own homework:
 ## Coverage
 
 Measured with `make coverage` (gcovr, GCC `--coverage` instrumentation, fast suite
-only, on `helpmate_core`'s sources under `src/`): **91.7% line coverage** (742/809
-lines), 97.2% function coverage, 62.3% branch coverage. The full per-file HTML report
+only, on `helpmate_core`'s sources under `src/`): **91.6% line coverage** (741/809
+lines), 97.2% function coverage, 61.8% branch coverage. The full per-file HTML report
 is at `build-cov/coverage/index.html` after running `make coverage`.
 
 The biggest measured gaps: `src/format/table_file.cpp` (85%) and `src/chess/board.cpp`
@@ -335,19 +335,21 @@ warnings on exactly the hot, multithreaded-generator-loop lines in `board.cpp`
 (silenced with `--gcov-ignore-parse-errors=all` to let gcovr complete), which is
 consistent with some genuinely-executed lines in the template-heavy, multithreaded
 `eval.h`/`parallel.h` code losing their counters to the same tool limitation rather
-than never having run. Net effect: the reported 91.7%/97.2%/62.3% numbers are honest
+than never having run. Net effect: the reported 91.6%/97.2%/61.8% numbers are honest
 and unmodified gcovr output, comfortably above the 80% line-coverage bar either way,
 but the two lowest-scoring files specifically should be read with that caveat rather
 than as "half the logic is untested."
 
-A coverage run also hit a known, separately-tracked issue: a pre-existing heap
-corruption bug in the root-slice generation scan (manifesting as a SIGSEGV in one
-run and a `map::at` exception in another, on different `test_probe.cpp` cases each
-time — same signature independently diagnosed by gdb for a user-reported 5-piece
-`KNvkqr` crash) surfaced intermittently in this coverage build. The affected tests
-pass reliably and repeatedly in the normal (`-O2`) build and standalone in the
-coverage build; the fix is tracked as a separate follow-up task and intentionally not
-addressed here.
+Earlier coverage runs also hit a known, separately-tracked issue: a pre-existing
+heap corruption bug in the root-slice generation scan (manifesting as a SIGSEGV in
+one run and a `map::at` exception in another, on different `test_probe.cpp` cases
+each time — same signature independently diagnosed for a user-reported 5-piece
+`KNvkqr` crash, also mentioned under [Limits](#limits) below). It is intermittent:
+the final validated `make coverage` run (whose numbers are quoted above) completed
+with all 64 fast-suite tests passing cleanly, but two earlier attempts each hit this
+bug on a different test. The affected tests pass reliably and repeatedly in the
+normal (`-O2`) build; the fix is tracked as a separate follow-up task and
+intentionally not addressed here.
 
 ## Limits
 
@@ -356,14 +358,18 @@ addressed here.
   rights is accepted); the 50-move rule is ignored (irrelevant to a cooperative
   shortest-path value — a helpmate solution is always shorter than 50 moves in
   practice); en passant is exact.
-- **Practical scaling**: 3-4 piece classes generate in well under a second; 5-piece
-  classes take minutes to a couple of hours depending on material (still 1 byte/cell,
-  4 planes, no compression); 6-piece classes are feasible but heavy — roughly 14-28 GB
-  of table storage/RAM and multi-day generation runs at the current 1-byte/cell,
-  uncompressed, non-deduplicated encoding. 7-8 piece classes are out of scope for this
-  version; the storage format's versioned encoding field and the slice-DAG generation
-  order are deliberately designed so a future out-of-core/compressed encoding can be
-  added without invalidating already-generated tables.
+- **Practical scaling**: 3-4 piece classes generate in under a couple of seconds
+  (measured ~0.6s for `KQvk`); 5-piece classes take minutes to a couple of hours
+  depending on material (still 1 byte/cell, 4 planes, no compression); 6-piece
+  classes are feasible but heavy — roughly 14-28 GB of table storage/RAM and
+  multi-day generation runs at the current 1-byte/cell, uncompressed,
+  non-deduplicated encoding. 7-8 piece classes are out of scope for this version;
+  the storage format's versioned encoding field and the slice-DAG generation order
+  are deliberately designed so a future out-of-core/compressed encoding can be added
+  without invalidating already-generated tables. **5-piece generation currently has
+  a known, intermittent crash bug** (heap corruption in the root-slice generation
+  scan; tracked separately and being fixed — see the caveat in
+  [Coverage](#coverage) above for what's been observed so far).
 - **Slow tests**: the full-closure and multithreaded-determinism tests tagged `[slow]`
   (tens of minutes each) are excluded from `make test` and from `pip install`'s default
   test run; run them explicitly (`./build/helpmate_tests "[slow]"`,

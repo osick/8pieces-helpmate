@@ -1,5 +1,10 @@
 BUILD ?= build
 COVBUILD ?= build-cov
+# gcov binary matching the GCC version the coverage build is compiled with (the
+# distro's default `gcov` is typically an older system-GCC version and hard-errors
+# with "Version mismatch gcc/gcov" against a GCC-13 build); override with
+# `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
+GCOV ?= gcov-13
 .PHONY: configure build test coverage clean
 configure:
 	cmake -S . -B $(BUILD)
@@ -19,9 +24,11 @@ coverage:
 	  -DFETCHCONTENT_SOURCE_DIR_CHESSMG=$(CURDIR)/$(BUILD)/_deps/chessmg-src \
 	  -DFETCHCONTENT_SOURCE_DIR_CATCH2=$(CURDIR)/$(BUILD)/_deps/catch2-src \
 	  -DFETCHCONTENT_SOURCE_DIR_JSON=$(CURDIR)/$(BUILD)/_deps/json-src
-	cmake --build $(COVBUILD) -j
+	cmake --build $(COVBUILD) -j2
 	ctest --test-dir $(COVBUILD) --output-on-failure
+	mkdir -p $(COVBUILD)/coverage
 	gcovr --root . --filter 'src/' --exclude '.*_deps.*' \
+	  --gcov-executable $(GCOV) --gcov-ignore-parse-errors=all \
 	  --html-details $(COVBUILD)/coverage/index.html \
 	  --print-summary $(COVBUILD) | tee $(COVBUILD)/coverage-summary.txt
 clean:
