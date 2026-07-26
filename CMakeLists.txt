@@ -7,6 +7,15 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 find_package(Threads REQUIRED)
 
+# Declared early (before any add_library) so PIC applies to chessmg_core and
+# helpmate_core too: pybind11_add_module below links helpmate_core into a
+# shared object, which requires every static lib in its link chain to be
+# position-independent.
+option(HELPMATE_PYTHON "build python module" OFF)
+if(HELPMATE_PYTHON)
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
 include(FetchContent)
 FetchContent_Declare(chessmg
   GIT_REPOSITORY https://github.com/osick/ChessMG.git
@@ -42,6 +51,13 @@ catch_discover_tests(helpmate_tests TEST_SPEC "~[slow]")
 
 add_executable(helpmate src/cli/main.cpp)
 target_link_libraries(helpmate PRIVATE helpmate_core)
+
+if(HELPMATE_PYTHON)
+  find_package(pybind11 CONFIG REQUIRED)
+  pybind11_add_module(_helpmate src/bindings/pymodule.cpp)
+  target_link_libraries(_helpmate PRIVATE helpmate_core)
+  install(TARGETS _helpmate DESTINATION helpmate)
+endif()
 
 set(CLI_TT ${CMAKE_BINARY_DIR}/cli_tables)
 add_test(NAME cli_gen COMMAND helpmate gen KQvk --tables ${CLI_TT})
