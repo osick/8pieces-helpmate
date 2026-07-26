@@ -1,6 +1,8 @@
 #include "generator/generator.h"
 #include "generator/eval.h"
+#include "generator/parallel.h"
 #include "chess/board.h"
+#include <atomic>
 #include <filesystem>
 #include <fstream>
 #include <map>
@@ -13,41 +15,54 @@ SliceGen::SliceGen(const Material& m, const GenOptions& opt)
 }
 
 void SliceGen::init_pass() {
-    std::vector<PlacedPiece> pp; Board b;
-    for (uint64_t c = 0; c < ps_; ++c) {
-        if (!idx_.decode(c, pp)) { dtm_[0][c] = dtm_[1][c] = DTM_INVALID; continue; }
-        auto e = idx_.encode(pp);
-        if (!e || *e != c)       { dtm_[0][c] = dtm_[1][c] = DTM_INVALID; continue; }  // non-canonical duplicate
-        for (int s = 0; s < 2; ++s) {
-            b.reset(pp, (Color)s);
-            if (b.opponent_in_check()) { dtm_[s][c] = DTM_INVALID; continue; }
-            if (s == 1 && b.state() == PosState::Checkmate) dtm_[1][c] = 0;
+    // Each cell c is examined and written independently of every other cell
+    // (opponent_in_check()/state() depend only on pp/s decoded from c itself),
+    // so a disjoint [begin,end) range per worker is race-free; each worker
+    // gets its own Board/pp (Board is stateful, not shareable across threads).
+    parallel_for(ps_, opt_.threads, [this](uint64_t begin, uint64_t end) {
+        std::vector<PlacedPiece> pp; Board b;
+        for (uint64_t c = begin; c < end; ++c) {
+            if (!idx_.decode(c, pp)) { dtm_[0][c] = dtm_[1][c] = DTM_INVALID; continue; }
+            auto e = idx_.encode(pp);
+            if (!e || *e != c)       { dtm_[0][c] = dtm_[1][c] = DTM_INVALID; continue; }  // non-canonical duplicate
+            for (int s = 0; s < 2; ++s) {
+                b.reset(pp, (Color)s);
+                if (b.opponent_in_check()) { dtm_[s][c] = DTM_INVALID; continue; }
+                if (s == 1 && b.state() == PosState::Checkmate) dtm_[1][c] = 0;
+            }
         }
-    }
+    });
 }
 
 void SliceGen::count_sweep() {
     // Pass d reads only counts of cells with dtm d-1, which the previous
     // iteration finalized; sub-slice tables were fully counted before this
     // slice (topological build order); eval_board merges EP branches with
-    // the same min/sum rule.
-    for (uint64_t c = 0; c < ps_; ++c) if (dtm_[1][c] == 0) cnt_[1][c] = 1;
-    std::vector<PlacedPiece> pp; Board b;
+    // the same min/sum rule. Within one d, cell c only ever writes cnt_[s][c]
+    // and reads already-finalized lower-depth cells/sub-tables, so cells are
+    // independent of each other and safe to split across worker threads;
+    // the d loop itself stays sequential since depth d depends on depth d-1.
+    parallel_for(ps_, opt_.threads, [this](uint64_t begin, uint64_t end) {
+        for (uint64_t c = begin; c < end; ++c) if (dtm_[1][c] == 0) cnt_[1][c] = 1;
+    });
     for (int d = 1; d <= max_dtm_; ++d) {
         int s = (d % 2) ? 0 : 1;
-        for (uint64_t c = 0; c < ps_; ++c) {
-            if (dtm_[s][c] != d) continue;
-            idx_.decode(c, pp);
-            b.reset(pp, (Color)s);
-            unsigned total = 0;
-            for (const Move& m : b.legal_moves()) {
-                b.make(m);
-                ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
-                b.unmake(m);
-                if (v.dtm == d - 1) total = std::min(255u, total + (unsigned)v.count);
+        parallel_for(ps_, opt_.threads, [this, s, d](uint64_t begin, uint64_t end) {
+            std::vector<PlacedPiece> pp; Board b;
+            for (uint64_t c = begin; c < end; ++c) {
+                if (dtm_[s][c] != d) continue;
+                idx_.decode(c, pp);
+                b.reset(pp, (Color)s);
+                unsigned total = 0;
+                for (const Move& m : b.legal_moves()) {
+                    b.make(m);
+                    ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
+                    b.unmake(m);
+                    if (v.dtm == d - 1) total = std::min(255u, total + (unsigned)v.count);
+                }
+                cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
             }
-            cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
-        }
+        });
     }
 }
 
@@ -68,22 +83,35 @@ ValuePair SliceGen::lookup_epless(Board& b) {
 }
 
 bool SliceGen::scan_pass(int d) {
+    // Safety argument for running this pass's cell loop across worker threads:
+    // pass d writes only the value d, and only into currently-UNSET cells of
+    // ONE plane (dtm_[s], s = mover's side); it reads (a) the opposite-parity
+    // plane, which this pass never writes -- a cell's successors after one
+    // ply always have the other side to move -- (b) finished sub-tables
+    // (read-only after load_for(), before any pass runs), and (c) same-plane
+    // values only to check DTM_UNSET (never written by another cell). So two
+    // workers touching different cells c1 != c2 never read-during-write or
+    // write-during-write each other's data. Each worker owns a disjoint cell
+    // range (and its own Board/pp, since Board is stateful); the only shared
+    // mutable state is `any`, updated through a std::atomic<bool>.
     Color mover = (d % 2) ? Color::White : Color::Black;
     int s = (int)mover;
-    bool any = false;
-    std::vector<PlacedPiece> pp; Board b;
-    for (uint64_t c = 0; c < ps_; ++c) {
-        if (dtm_[s][c] != DTM_UNSET) continue;
-        idx_.decode(c, pp);                            // UNSET cells always decode
-        b.reset(pp, mover);
-        for (const Move& m : b.legal_moves()) {
-            b.make(m);
-            ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
-            b.unmake(m);
-            if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; any = true; break; }
+    std::atomic<bool> any{false};
+    parallel_for(ps_, opt_.threads, [this, s, mover, d, &any](uint64_t begin, uint64_t end) {
+        std::vector<PlacedPiece> pp; Board b;
+        for (uint64_t c = begin; c < end; ++c) {
+            if (dtm_[s][c] != DTM_UNSET) continue;
+            idx_.decode(c, pp);                            // UNSET cells always decode
+            b.reset(pp, mover);
+            for (const Move& m : b.legal_moves()) {
+                b.make(m);
+                ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
+                b.unmake(m);
+                if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; any = true; break; }
+            }
         }
-    }
-    return any;
+    });
+    return any.load();
 }
 
 void SliceGen::run_all_passes() {
