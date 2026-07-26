@@ -40,6 +40,12 @@ target_include_directories(helpmate_core PUBLIC src)
 target_link_libraries(helpmate_core PUBLIC chessmg_core nlohmann_json::nlohmann_json Threads::Threads)
 target_compile_options(helpmate_core PRIVATE -O2 -Wall -Wextra)
 
+option(HELPMATE_COVERAGE "coverage instrumentation" OFF)
+if(HELPMATE_COVERAGE)
+  target_compile_options(helpmate_core PRIVATE --coverage -O0 -g)
+  target_link_options(helpmate_core PUBLIC --coverage)
+endif()
+
 enable_testing()
 add_executable(helpmate_tests tests/cpp/test_sanity.cpp tests/cpp/test_board.cpp tests/cpp/test_san.cpp tests/cpp/test_material.cpp tests/cpp/test_kk.cpp tests/cpp/test_slice_index.cpp tests/cpp/test_table_file.cpp tests/cpp/test_oracle.cpp tests/cpp/test_generator_init.cpp tests/cpp/test_generator_kqvk.cpp tests/cpp/test_generator_pawns.cpp tests/cpp/test_counts.cpp tests/cpp/test_stats.cpp tests/cpp/test_threads.cpp tests/cpp/test_probe.cpp)
 target_link_libraries(helpmate_tests PRIVATE helpmate_core Catch2::Catch2WithMain)
