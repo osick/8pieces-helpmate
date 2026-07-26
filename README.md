@@ -345,10 +345,12 @@ heap corruption bug in the root-slice generation scan (manifesting as a SIGSEGV 
 one run and a `map::at` exception in another, on different `test_probe.cpp` cases
 each time — same signature independently diagnosed for a user-reported 5-piece
 `KNvkqr` crash, also mentioned under [Limits](#limits) below). It is intermittent:
-the final validated `make coverage` run (whose numbers are quoted above) completed
-with all 64 fast-suite tests passing cleanly, but two earlier attempts each hit this
-bug on a different test. The affected tests pass reliably and repeatedly in the
-normal (`-O2`) build; the fix is tracked as a separate follow-up task and
+across four full `make coverage` attempts, two hit this bug (on a different
+`test_probe.cpp` test each time) and two completed with all 64 fast-suite tests
+passing cleanly end to end — including the run that produced the 91.6%/97.2%/61.8%
+numbers quoted above (one unbroken `cmake` configure → build → `ctest` → `gcovr`
+log, no separate/unlogged steps). The affected tests pass reliably and repeatedly in
+the normal (`-O2`) build; the fix is tracked as a separate follow-up task and
 intentionally not addressed here.
 
 ## Limits
