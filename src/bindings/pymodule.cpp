@@ -3,6 +3,7 @@
 #include "probe/tablebase.h"
 #include "generator/generator.h"
 #include "indexing/material.h"
+#include "chess/board.h"
 namespace py = pybind11;
 using namespace hm;
 static Material mat_or_throw(const std::string& s) {
@@ -33,4 +34,16 @@ PYBIND11_MODULE(_helpmate, mod) {
         }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100)
         .def("_stats_json", [](const Tablebase& t, const std::string& mat) {
             return t.stats_json(mat_or_throw(mat)); });
+    mod.def("_perft", [](const std::string& fen, int depth) {
+        auto b = Board::from_fen(fen);
+        if (!b) throw std::invalid_argument("bad fen");
+        return b->perft(depth);
+    });
+    mod.def("_legal_moves", [](const std::string& fen) {
+        auto b = Board::from_fen(fen);
+        if (!b) throw std::invalid_argument("bad fen");
+        std::vector<std::string> out;
+        for (auto& m : b->legal_moves()) out.push_back(m.uci());
+        return out;
+    });
 }
