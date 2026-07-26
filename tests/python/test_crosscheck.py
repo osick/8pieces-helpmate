@@ -74,12 +74,24 @@ def test_exhaustive_kqvk(tmp_path):
     # confirmed legal+mating in python-chess itself). epd() drops those two
     # fields (no castling rights or en passant square ever arise in KQvk, so
     # it remains a collision-free position key).
+    # count[pos] mirrors the engine's own optimal-line accumulation
+    # (src/generator/eval.h: count = sum of count[succ] over every successor
+    # that achieves the best/minimal dtm, saturating at 255 == COUNT_SAT --
+    # src/chess/types.h) but computed here purely in python-chess, summing
+    # over ALL successors at dtm[succ] == d - 1 rather than stopping at the
+    # first one (that's what turns this from a plain reachability BFS into a
+    # count of distinct optimal cooperative lines).
+    COUNT_SAT = 255
     dtm = {}
+    count = {}
     fens = list(positions())
     boards = {f: chess.Board(f) for f in fens}
     key = lambda b: b.epd()
     for f, b in boards.items():
-        if b.turn == chess.BLACK and b.is_checkmate(): dtm[key(b)] = 0
+        if b.turn == chess.BLACK and b.is_checkmate():
+            k = key(b)
+            dtm[k] = 0
+            count[k] = 1
     d = 0
     changed = True
     while changed:
@@ -88,11 +100,32 @@ def test_exhaustive_kqvk(tmp_path):
         for f, b in boards.items():
             k = key(b)
             if k in dtm or b.turn != mover: continue
+            total = 0
             for m in b.legal_moves:
                 b.push(m); succ = key(b); b.pop()
-                # captures leave KQvk -> Kvk or KvK-with-Q-captured: all unsolvable, skip
+                # A successor leaving the KQvk slice (Black captures the
+                # queen -> Kvk) is never in `dtm`/`count`, so the lookup
+                # below just misses and that move is silently excluded from
+                # the tally -- correct here because Kvk is unconditionally
+                # unsolvable. This "cross-slice successors are safe to skip"
+                # argument is KQvk-specific (relies on the reduced material
+                # being unconditionally unsolvable) and does not generalize
+                # to materials whose reduced slices can themselves be mated.
                 if succ in dtm and dtm[succ] == d - 1:
-                    dtm[k] = d; changed = True; break
+                    total += count[succ]
+            if total > 0:
+                dtm[k] = d
+                count[k] = min(total, COUNT_SAT)
+                changed = True
     for f in fens:
         p = tb.probe(f)
-        assert (p[0] if p else None) == dtm.get(key(boards[f])), f
+        k = key(boards[f])
+        if p is None:
+            assert dtm.get(k) is None, f
+            continue
+        assert p[0] == dtm.get(k), f
+        # our engine's stored count saturates at COUNT_SAT (src/chess/types.h);
+        # `count` above is capped identically, so this is a plain equality --
+        # including in the (unreached for KQvk, but handled correctly) case
+        # where both sides hit the same 255 cap.
+        assert p[1] == count.get(k), f
