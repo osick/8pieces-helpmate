@@ -51,6 +51,16 @@ add_test(NAME cli_stats COMMAND helpmate stats KQvk --tables ${CLI_TT})
 add_test(NAME cli_mine COMMAND helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables ${CLI_TT})
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})
 add_test(NAME cli_badfen COMMAND helpmate probe "garbage" --tables ${CLI_TT})
+# review fix round: malformed and out-of-range numeric flags must not crash
+# (std::stoi throwing std::invalid_argument/std::out_of_range uncaught ->
+# SIGABRT); both must exit 3 with a clear message instead.
+add_test(NAME cli_badint_malformed COMMAND helpmate mine KQvk --dtm abc --tables ${CLI_TT})
+add_test(NAME cli_badint_range COMMAND helpmate gen KQvk --threads 99999999999999999999 --tables ${CLI_TT})
+# review fix round: `line --all` on an already-mated (dtm=0) position must
+# give the same "no line to print" message as the non---all branch, not a
+# silent blank line (tb.lines() returns one *empty* line here, so a naive
+# ls.empty() check misses it).
+add_test(NAME cli_line_already_mate COMMAND helpmate line "8/8/8/8/8/8/8/kQK5 b - - 0 1" --tables ${CLI_TT} --all)
 # count=4 (not 1): four optimal replies tie at dtm=2 here -- see Task 8's
 # corrected golden (test_probe.cpp), reconfirmed by running the built CLI.
 set_tests_properties(cli_probe PROPERTIES PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_gen)
@@ -61,3 +71,6 @@ set_tests_properties(cli_stats PROPERTIES PASS_REGULAR_EXPRESSION "max_dtm" DEPE
 set_tests_properties(cli_mine  PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DEPENDS cli_gen)
 set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
 set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
+set_tests_properties(cli_badint_malformed PROPERTIES PASS_REGULAR_EXPRESSION "error.*--dtm")
+set_tests_properties(cli_badint_range PROPERTIES PASS_REGULAR_EXPRESSION "error.*--threads")
+set_tests_properties(cli_line_already_mate PROPERTIES PASS_REGULAR_EXPRESSION "already mate" DEPENDS cli_gen)

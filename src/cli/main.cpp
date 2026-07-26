@@ -2,6 +2,7 @@
 #include "generator/generator.h"
 #include "indexing/material.h"
 #include "probe/tablebase.h"
+#include <climits>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -74,6 +75,22 @@ void print_line(const std::vector<std::string>& moves) {
     std::cout << "\n";
 }
 
+// Parses `value` as an integer; never throws -- malformed input ("abc") and
+// out-of-range input (overflowing int) both just return false, so the caller
+// can print one clear, actionable message instead of an uncaught
+// std::invalid_argument/std::out_of_range crashing the process.
+bool parse_int(const std::string& value, int& out) {
+    try {
+        size_t used = 0;
+        long v = std::stol(value, &used);
+        if (used != value.size() || v < INT_MIN || v > INT_MAX) return false;
+        out = (int)v;
+        return true;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
 int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int threads) {
     if (pos.empty()) { std::cerr << "error: gen needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
     auto m = Material::parse(pos[0]);
@@ -105,7 +122,11 @@ int cmd_line(const std::vector<std::string>& pos, const std::string& tables, boo
     Tablebase tb(tables);
     if (all) {
         auto ls = tb.lines(pos[0], maxn);
-        if (ls.empty()) { std::cout << "unsolvable (or already mate: no line to print)\n"; return 0; }
+        // ls == {} means unsolvable; ls == {{}} (one *empty* line) means the
+        // position is already checkmate (dtm==0) -- both print nothing
+        // useful move-wise, so give the same message the non---all branch
+        // gives instead of silently printing a blank line.
+        if (ls.empty() || ls[0].empty()) { std::cout << "unsolvable (or already mate: no line to print)\n"; return 0; }
         for (auto& l : ls) print_line(l);
     } else {
         auto l = tb.line(pos[0]);
@@ -132,8 +153,10 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
     Tablebase tb(tables);
     int printed = 0;
     tb.mine(*m, dtm, count, [&](const std::string& fen) {
+        if (printed >= maxn) return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
         std::cout << fen << "\n";
-        return ++printed < maxn;
+        ++printed;
+        return printed < maxn;
     });
     return 0;
 }
@@ -150,15 +173,39 @@ int main(int argc, char** argv) {
     int threads = 1, dtm = -1, count = -1, maxn = 10;
     bool all = false;
     std::vector<std::string> pos;  // positional args
-    for (size_t i = 1; i < args.size(); ++i) {
-        if      (args[i] == "--tables"  && i + 1 < args.size()) tables  = args[++i];
-        else if (args[i] == "--threads" && i + 1 < args.size()) threads = std::stoi(args[++i]);
-        else if (args[i] == "--dtm"     && i + 1 < args.size()) dtm     = std::stoi(args[++i]);
-        else if (args[i] == "--count"   && i + 1 < args.size()) count   = std::stoi(args[++i]);
-        else if (args[i] == "--max"     && i + 1 < args.size()) maxn    = std::stoi(args[++i]);
-        else if (args[i] == "--all") all = true;
-        else pos.push_back(args[i]);
+    // Flags below all take a value; if one appears with nothing after it,
+    // that's a usage error, not a stray positional argument (e.g. `probe FEN
+    // --tables` with no directory should not silently treat "--tables" as
+    // the FEN's replacement).
+    auto needs_value = [](const std::string& a) {
+        return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" || a == "--max";
+    };
+    // Consumes the value following flag `a` (already known to exist) into
+    // `target`; on malformed/out-of-range input prints one clear message +
+    // usage and signals the caller to exit 3, instead of ever calling
+    // std::stoi directly where an exception would escape uncaught.
+    bool bad_int = false;
+    auto set_int = [&](const std::string& a, size_t& i, int& target) {
+        if (!parse_int(args[++i], target)) {
+            std::cerr << "error: " << a << " expects an integer, got \"" << args[i] << "\"\n\n";
+            usage();
+            bad_int = true;
+        }
+    };
+    for (size_t i = 1; i < args.size() && !bad_int; ++i) {
+        const std::string& a = args[i];
+        if (needs_value(a) && i + 1 >= args.size()) {
+            std::cerr << "error: " << a << " requires a value\n\n"; usage(); return 3;
+        }
+        if      (a == "--tables")  tables = args[++i];
+        else if (a == "--threads") set_int(a, i, threads);
+        else if (a == "--dtm")     set_int(a, i, dtm);
+        else if (a == "--count")   set_int(a, i, count);
+        else if (a == "--max")     set_int(a, i, maxn);
+        else if (a == "--all") all = true;
+        else pos.push_back(a);
     }
+    if (bad_int) return 3;
     try {
         if (cmd == "gen")   return cmd_gen(pos, tables, threads);
         if (cmd == "probe") return cmd_probe(pos, tables);
