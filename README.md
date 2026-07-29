@@ -90,6 +90,77 @@ from `make test` by default. Run them explicitly with:
 
 The CLI binary lands at `./build/helpmate`.
 
+### Step-by-step build (if `make test` gives you trouble)
+
+The three most common failure modes, in the order people hit them:
+
+1. **`cmake: command not found` or CMake too old** — you need CMake ≥ 3.24. If you
+   installed a newer CMake per-user (e.g. `pip install cmake` puts it in
+   `~/.local/bin`), make sure it's on `PATH` first:
+
+   ```bash
+   export PATH="$HOME/.local/bin:$PATH"
+   cmake --version   # must report >= 3.24
+   ```
+
+2. **Compiler errors mentioning C++20 / `-std=c++20`, or a baffling
+   `Could NOT find Threads`** — your default `g++` is too old. Set `CXX`/`CC`
+   explicitly:
+
+   ```bash
+   export CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13
+   ```
+
+   **Important:** CMake caches the compiler on the *first* configure and ignores
+   these variables afterwards. If you already ran `cmake` once without them
+   (typical symptom: the cache says `CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++`
+   and every configure fails with `Could NOT find Threads`, because the old
+   compiler can't build the C++20 test program), delete the build tree and
+   configure again:
+
+   ```bash
+   rm -rf build
+   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+   ```
+
+3. **An SSH passphrase prompt (or hang) during the first configure** — the first
+   configure clones the three dependencies from GitHub over HTTPS. If your global
+   gitconfig rewrites `https://github.com/` to SSH (`url.…insteadOf`), that clone
+   turns into an SSH fetch and asks for your key passphrase. Either enter it once
+   (the fetch is cached in `build/_deps/` and never repeated), or bypass your global
+   gitconfig for the one configure step:
+
+   ```bash
+   GIT_CONFIG_GLOBAL=/dev/null cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+   ```
+
+With those settled, the full sequence is:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"           # if your cmake lives there
+export CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13  # if your default gcc < 13
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release # configure (fetches deps once)
+cmake --build build -j"$(nproc)"               # build
+ctest --test-dir build --output-on-failure     # fast test suite (optional)
+```
+
+### Install
+
+```bash
+cmake --install build --prefix "$HOME/.local"  # installs ~/.local/bin/helpmate
+helpmate --help                                # works if ~/.local/bin is on PATH
+```
+
+Use `--prefix /usr/local` (with `sudo`) for a system-wide install, or simply copy
+the single self-contained binary wherever you like:
+
+```bash
+install -Dm755 build/helpmate ~/.local/bin/helpmate
+```
+
+The Python package is installed separately with `pip install .` — see
+[docs/BUILD.md](docs/BUILD.md).
+
 ### Coverage
 
 ```bash

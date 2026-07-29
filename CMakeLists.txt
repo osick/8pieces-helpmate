@@ -57,6 +57,7 @@ catch_discover_tests(helpmate_tests TEST_SPEC "~[slow]")
 
 add_executable(helpmate src/cli/main.cpp)
 target_link_libraries(helpmate PRIVATE helpmate_core)
+install(TARGETS helpmate RUNTIME DESTINATION bin)
 
 if(HELPMATE_PYTHON)
   find_package(pybind11 CONFIG REQUIRED)
