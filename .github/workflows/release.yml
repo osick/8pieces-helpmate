@@ -1,0 +1,55 @@
+# Release: on push of a v* tag, build Release, run the fast test suite, package
+# a Linux x86-64 tarball (CLI binary + README + LICENSE), and create a GitHub
+# Release with auto-generated notes and the tarball attached.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build, test, package, publish
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      # Same fast suite as CI ([slow] excluded by the build's "~[slow]" spec);
+      # sequential on purpose (known test_probe.cpp temp-dir race under ctest -j).
+      - name: Run fast test suite
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke-check the packaged binary
+        run: |
+          TT="$(mktemp -d)"
+          ./build/helpmate gen KQvk --tables "$TT"
+          ./build/helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables "$TT" \
+            | grep -F "dtm=2" | grep -F "count=4"
+
+      - name: Package tarball
+        run: |
+          PKG="helpmate-${GITHUB_REF_NAME}-linux-x86_64"
+          mkdir "$PKG"
+          cp build/helpmate README.md LICENSE "$PKG/"
+          tar czf "$PKG.tar.gz" "$PKG"
+          sha256sum "$PKG.tar.gz" | tee "$PKG.tar.gz.sha256"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            helpmate-*-linux-x86_64.tar.gz
+            helpmate-*-linux-x86_64.tar.gz.sha256

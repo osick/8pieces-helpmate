@@ -45,6 +45,15 @@ material combination is generated, every query against it — probing a position
 listing its optimal lines, or scanning for compositions with a given dtm and solution
 count — is an O(1) table lookup, not a fresh search.
 
+## Documentation
+
+- [docs/BUILD.md](docs/BUILD.md) — full build guide: prerequisites, dependency
+  fetching (including the offline/pre-seeded `_deps` workflow), every Makefile
+  target, coverage, the Python package build, and troubleshooting.
+- [docs/USAGE.md](docs/USAGE.md) — full usage guide: table generation, probing,
+  optimal lines, the complete `stats.json` field reference, mining, exit codes,
+  DTM/h#n semantics, resource guidance per piece count, and the Python API.
+
 ## Quick start
 
 ### Build
