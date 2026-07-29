@@ -1,0 +1,18 @@
+[build-system]
+requires = ["scikit-build-core>=0.9", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "helpmate"
+version = "0.1.0"
+description = "Helpmate tablebases: cooperative mate distances and solution counts"
+requires-python = ">=3.9"
+license = {file = "LICENSE"}
+
+[project.optional-dependencies]
+dev = ["pytest", "chess>=1.10"]
+
+[tool.scikit-build]
+cmake.version = ">=3.24"
+wheel.packages = ["python/helpmate"]
+cmake.args = ["-DHELPMATE_PYTHON=ON"]

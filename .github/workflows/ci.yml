@@ -1,0 +1,110 @@
+# CI: build + fast tests for the C++ core, an end-to-end CLI smoke, the Python
+# bindings, and an informational coverage summary.
+#
+# ubuntu-24.04 ships GCC 13 (the compiler this project is developed against)
+# and a CMake well above the required 3.24. FetchContent cloning over HTTPS is
+# fine on the runners (no local gitconfig URL rewrites here); build/_deps is
+# cached keyed on CMakeLists.txt so the three pinned dependencies (ChessMG,
+# Catch2, nlohmann/json) are only cloned when the pins change.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  cpp:
+    name: C++ build, fast tests, CLI smoke
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build -j
+
+      # Catch2 cases tagged [slow] (full closures, tens of minutes) are already
+      # excluded by catch_discover_tests' "~[slow]" spec — this is the same fast
+      # suite `make test` runs. Deliberately sequential (no `ctest -j`): a known
+      # shared-temp-dir race in test_probe.cpp only appears under parallel ctest.
+      - name: Run fast test suite
+        run: ctest --test-dir build --output-on-failure
+
+      # Tiny end-to-end check with the real binary: generate the KQvk closure
+      # into a temp dir, then probe the golden position from the README
+      # (expected: dtm=2 (h#1) count=4).
+      - name: End-to-end smoke (gen + probe)
+        run: |
+          TT="$(mktemp -d)"
+          ./build/helpmate gen KQvk --tables "$TT"
+          out="$(./build/helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables "$TT")"
+          echo "probe output: $out"
+          echo "$out" | grep -F "dtm=2" | grep -F "count=4"
+
+  python:
+    name: Python bindings
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # scikit-build-core runs its own CMake configure (with -DHELPMATE_PYTHON=ON)
+      # inside the pip build; FetchContent fetches the pinned deps over HTTPS.
+      - name: Install package with dev extras
+        run: python -m pip install .[dev]
+
+      # Slow tests (exhaustive KQvk cross-check, ~10 min) need --run-slow and
+      # are skipped by default via tests/python/conftest.py.
+      - name: Run Python tests
+        run: python -m pytest tests/python -v
+
+  # Informational only: prints the gcovr line/function/branch summary in the
+  # job log. No upload to any coverage service (no secrets configured).
+  coverage:
+    name: Coverage summary (informational)
+    runs-on: ubuntu-24.04
+    continue-on-error: true
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache FetchContent dependencies
+        uses: actions/cache@v4
+        with:
+          path: build/_deps
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install gcovr
+        run: python -m pip install gcovr
+
+      # `make coverage` reuses the dependency sources under build/_deps via
+      # FETCHCONTENT_FULLY_DISCONNECTED, so the normal build must run first.
+      - name: Build (populates build/_deps for the coverage tree)
+        run: make build
+
+      - name: Coverage build, fast suite, gcovr summary
+        run: make coverage GCOV=gcov-13
