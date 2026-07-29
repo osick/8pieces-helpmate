@@ -1,0 +1,23 @@
+# Capabilities
+    - web dashboard
+        - pattern search (#solution, moves, position, pattern, moves,themes,...)
+        - export ...
+        - ggf. code von https://github.com/niklasf/syzygy-tables.info übernehmen (
+    - api
+        - data storage
+        - for cli and web
+        - only for read
+        - (write data via cli)
+    - cli
+        - windows, mac, wsl
+        - serach wie web( via api)
+        - against api
+        - write cli to data storage
+        - generator
+        - reports...
+    - humongous table bases (7 pieces, 8 pieces)
+    - fairy
+        - other stipulations
+        - other conditions
+        - other pieces
+        - (popeye as move generator?)
