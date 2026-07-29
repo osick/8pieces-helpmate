@@ -9,6 +9,18 @@
 
 namespace hm {
 
+std::string describe_position(const std::vector<PlacedPiece>& pp, Color stm) {
+    try { return Board::from_pieces(pp, stm).fen(); } catch (...) { return "<unavailable>"; }
+}
+
+namespace {
+// Names the cell a failed lookup came from. Built only on the throwing path.
+std::string cell_context(const Material& mat, uint64_t cell, int stm, int depth) {
+    return "slice " + mat.name() + ", cell " + std::to_string(cell) +
+           ", stm " + (stm ? "black" : "white") + ", scan depth " + std::to_string(depth);
+}
+}  // namespace
+
 SliceGen::SliceGen(const Material& m, const GenOptions& opt)
     : mat_(m), opt_(opt), idx_(m), ps_(idx_.size()) {
     for (int s = 0; s < 2; ++s) { dtm_[s].assign(ps_, DTM_UNSET); cnt_[s].assign(ps_, 0); }
@@ -51,14 +63,19 @@ void SliceGen::count_sweep() {
             std::vector<PlacedPiece> pp; Board b;
             for (uint64_t c = begin; c < end; ++c) {
                 if (dtm_[s][c] != d) continue;
-                idx_.decode(c, pp);
+                if (!idx_.decode(c, pp))
+                    throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": solved cell does not decode");
                 b.reset(pp, (Color)s);
                 unsigned total = 0;
-                for (const Move& m : b.legal_moves()) {
-                    b.make(m);
-                    ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
-                    b.unmake(m);
-                    if (v.dtm == d - 1) total = std::min(255u, total + (unsigned)v.count);
+                try {
+                    for (const Move& m : b.legal_moves()) {
+                        b.make(m);
+                        ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
+                        b.unmake(m);
+                        if (v.dtm == d - 1) total = std::min(255u, total + (unsigned)v.count);
+                    }
+                } catch (const GeneratorLookupError& e) {
+                    throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
                 }
                 cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
             }
@@ -77,6 +94,17 @@ ValuePair SliceGen::lookup_epless(Board& b) {
     if (m == mat_) {
         auto e = idx_.encode(pp);
         int s = (int)b.stm();
+        // encode() is disengaged for positions this slice cannot hold (kings adjacent/equal).
+        // Dereferencing it unchecked read uninitialised stack, and since vec[i] is
+        // *(data() + i) with wrapping arithmetic, a garbage index lands anywhere in the
+        // address space -- a silently wrong value at best, a wild access at worst.
+        if (!e)
+            throw GeneratorLookupError("position not encodable in own slice " + m.name() +
+                                       "; position " + describe_position(pp, b.stm()));
+        if (*e >= ps_)
+            throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for slice " +
+                                       m.name() + " (plane size " + std::to_string(ps_) +
+                                       "); position " + describe_position(pp, b.stm()));
         return { dtm_[s][*e], cnt_[s][*e] };
     }
     return subs_.lookup(m, pp, b.stm());
@@ -101,13 +129,20 @@ bool SliceGen::scan_pass(int d) {
         std::vector<PlacedPiece> pp; Board b;
         for (uint64_t c = begin; c < end; ++c) {
             if (dtm_[s][c] != DTM_UNSET) continue;
-            idx_.decode(c, pp);                            // UNSET cells always decode
+            if (!idx_.decode(c, pp))                       // UNSET cells always decode
+                throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": UNSET cell does not decode");
             b.reset(pp, mover);
-            for (const Move& m : b.legal_moves()) {
-                b.make(m);
-                ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
-                b.unmake(m);
-                if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; any = true; break; }
+            // Catch here rather than tracking the current cell in a variable: zero-cost EH puts
+            // nothing on the happy path, so the hot loop keeps the instruction sequence it had.
+            try {
+                for (const Move& m : b.legal_moves()) {
+                    b.make(m);
+                    ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
+                    b.unmake(m);
+                    if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; any = true; break; }
+                }
+            } catch (const GeneratorLookupError& e) {
+                throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
             }
         }
     });

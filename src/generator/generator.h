@@ -14,6 +14,17 @@
 
 namespace hm {
 
+// A generator lookup hit a position its tables cannot answer. Every throw site attaches the
+// material, the FEN of the offending position and (once it has unwound to the cell loop) the
+// slice/cell/depth it came from. Before this existed the same conditions surfaced either as a
+// bare std::out_of_range("map::at") with no context, or -- worse -- as `*e` on a disengaged
+// optional, i.e. UB: a garbage index into a 121 MB plane, which only shows up much later as a
+// SIGSEGV somewhere unrelated (typically inside malloc).
+struct GeneratorLookupError : std::runtime_error { using std::runtime_error::runtime_error; };
+
+// FEN of a decoded piece list, for error messages ("<unavailable>" if it cannot be rendered).
+std::string describe_position(const std::vector<PlacedPiece>& pp, Color stm);
+
 struct GenOptions { std::string tables_dir = "tables"; int threads = 1; };
 
 // Builds the whole closure (missing slices only), root last. Returns paths of written files.
@@ -31,9 +42,24 @@ struct SubTables {
             t_.emplace(s.name(), std::pair(std::move(*r), SliceIndex(s)));
         }
     }
+    // Each step is checked rather than assumed: only direct successors of the slice being
+    // generated are loaded, and encode() is disengaged for positions no slice can hold (e.g.
+    // adjacent kings), so an unexpected post-move position must fail loudly and locally.
     ValuePair lookup(const Material& m, const std::vector<PlacedPiece>& pp, Color stm) const {
-        auto& [rd, si] = t_.at(m.name());
-        auto e = si.encode(pp);                        // legal position => always encodable
+        auto it = t_.find(m.name());
+        if (it == t_.end())
+            throw GeneratorLookupError("no sub-table loaded for material " + m.name() +
+                                       " (only direct successors are loaded); position " +
+                                       describe_position(pp, stm));
+        auto& [rd, si] = it->second;
+        auto e = si.encode(pp);
+        if (!e)
+            throw GeneratorLookupError("position not encodable in sub-table " + m.name() +
+                                       "; position " + describe_position(pp, stm));
+        if (*e >= rd.plane_size())
+            throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for sub-table " +
+                                       m.name() + " (plane size " + std::to_string(rd.plane_size()) +
+                                       "); position " + describe_position(pp, stm));
         return rd.get(stm, *e);
     }
 };

@@ -121,6 +121,12 @@ std::optional<TableReader> TableReader::open(const std::string& path) {
 }
 
 ValuePair TableReader::get(Color stm, uint64_t cell) const {
+    // Last line of defence: `cell` reaches here from a caller's index computation, and an
+    // out-of-range value would otherwise read at base_ + <arbitrary offset> -- straight off
+    // the end of the mapping, or (since the arithmetic wraps) anywhere at all.
+    if (cell >= ps_)
+        throw std::out_of_range("TableReader::get: cell " + std::to_string(cell) +
+                                " out of range (plane size " + std::to_string(ps_) + ")");
     const uint8_t* pay = base_ + sizeof(TableHeader) + json_len_;
     uint64_t o = (stm == Color::Black ? ps_ : 0) + cell;
     return { pay[o], pay[2 * ps_ + o] };
