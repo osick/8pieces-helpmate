@@ -76,6 +76,8 @@ void SliceGen::count_sweep() {
                     }
                 } catch (const GeneratorLookupError& e) {
                     throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
+                } catch (const std::out_of_range& e) {    // TableReader::get bounds guard
+                    throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
                 }
                 cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
             }
@@ -100,11 +102,11 @@ ValuePair SliceGen::lookup_epless(Board& b) {
         // address space -- a silently wrong value at best, a wild access at worst.
         if (!e)
             throw GeneratorLookupError("position not encodable in own slice " + m.name() +
-                                       "; position " + describe_position(pp, b.stm()));
+                                       "; position after move " + describe_position(pp, b.stm()));
         if (*e >= ps_)
             throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for slice " +
                                        m.name() + " (plane size " + std::to_string(ps_) +
-                                       "); position " + describe_position(pp, b.stm()));
+                                       "); position after move " + describe_position(pp, b.stm()));
         return { dtm_[s][*e], cnt_[s][*e] };
     }
     return subs_.lookup(m, pp, b.stm());
@@ -133,7 +135,8 @@ bool SliceGen::scan_pass(int d) {
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": UNSET cell does not decode");
             b.reset(pp, mover);
             // Catch here rather than tracking the current cell in a variable: zero-cost EH puts
-            // nothing on the happy path, so the hot loop keeps the instruction sequence it had.
+            // nothing on the happy path. (The unchanged-instruction-sequence argument applies to
+            // this scan_pass loop only; count_sweep's identical wrapper makes no such claim.)
             try {
                 for (const Move& m : b.legal_moves()) {
                     b.make(m);
@@ -142,6 +145,8 @@ bool SliceGen::scan_pass(int d) {
                     if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; any = true; break; }
                 }
             } catch (const GeneratorLookupError& e) {
+                throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
+            } catch (const std::out_of_range& e) {         // TableReader::get bounds guard
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
             }
         }
@@ -199,14 +204,14 @@ nlohmann::json SliceGen::stats_json() const {
         int s = (max_dtm_ % 2) ? 0 : 1;                 // parity: odd depths are wtm, even are btm
         for (uint64_t c = 0; c < ps_ && deepest.size() < 5; ++c) {
             if (dtm_[s][c] != (uint8_t)max_dtm_) continue;
-            idx_.decode(c, pp);
+            if (!idx_.decode(c, pp)) continue;
             deepest.push_back(Board::from_pieces(pp, (Color)s).fen());
         }
         for (int d = max_dtm_; d >= 0 && deepest_unique.empty(); --d) {
             int ss = (d % 2) ? 0 : 1;
             for (uint64_t c = 0; c < ps_ && deepest_unique.size() < 5; ++c) {
                 if (dtm_[ss][c] != (uint8_t)d || cnt_[ss][c] != 1) continue;
-                idx_.decode(c, pp);
+                if (!idx_.decode(c, pp)) continue;
                 deepest_unique.push_back(Board::from_pieces(pp, (Color)ss).fen());
             }
         }

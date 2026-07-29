@@ -37,9 +37,20 @@ struct SubTables {
     void load_for(const Material& m, const std::string& dir) {
         for (auto& s : m.successors()) {
             if (t_.count(s.name())) continue;
-            auto r = TableReader::open(dir + "/" + s.name() + ".hm");
+            std::string path = dir + "/" + s.name() + ".hm";
+            auto r = TableReader::open(path);
             if (!r) throw std::runtime_error("missing sub-table " + s.name());
-            t_.emplace(s.name(), std::pair(std::move(*r), SliceIndex(s)));
+            // Identity check: the file must actually be the table its name promises,
+            // or every later lookup would silently index the wrong planes.
+            SliceIndex si(s);
+            if (r->material_name() != s.name())
+                throw std::runtime_error("sub-table " + path + " is for material '" +
+                                         r->material_name() + "', expected '" + s.name() + "'");
+            if (r->plane_size() != si.size())
+                throw std::runtime_error("sub-table " + path + " has plane size " +
+                                         std::to_string(r->plane_size()) + ", expected " +
+                                         std::to_string(si.size()) + " for " + s.name());
+            t_.emplace(s.name(), std::pair(std::move(*r), std::move(si)));
         }
     }
     // Each step is checked rather than assumed: only direct successors of the slice being
@@ -49,17 +60,17 @@ struct SubTables {
         auto it = t_.find(m.name());
         if (it == t_.end())
             throw GeneratorLookupError("no sub-table loaded for material " + m.name() +
-                                       " (only direct successors are loaded); position " +
+                                       " (only direct successors are loaded); position after move " +
                                        describe_position(pp, stm));
         auto& [rd, si] = it->second;
         auto e = si.encode(pp);
         if (!e)
             throw GeneratorLookupError("position not encodable in sub-table " + m.name() +
-                                       "; position " + describe_position(pp, stm));
+                                       "; position after move " + describe_position(pp, stm));
         if (*e >= rd.plane_size())
             throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for sub-table " +
                                        m.name() + " (plane size " + std::to_string(rd.plane_size()) +
-                                       "); position " + describe_position(pp, stm));
+                                       "); position after move " + describe_position(pp, stm));
         return rd.get(stm, *e);
     }
 };
