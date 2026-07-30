@@ -67,12 +67,14 @@ class RemoteSource:
         self.cache_dir = Path(cache_dir)
         self._manifest: dict | None = None
         self._states: dict[str, str] = {}
+        self._verified: set[str] = set()
         self._lock = threading.Lock()
 
     def manifest(self) -> dict:
-        if self._manifest is None:
-            self._manifest = self.hub.fetch_manifest()
-        return self._manifest
+        with self._lock:
+            if self._manifest is None:
+                self._manifest = self.hub.fetch_manifest()
+            return self._manifest
 
     def catalog(self) -> list[SliceInfo]:
         out = []
@@ -84,16 +86,42 @@ class RemoteSource:
                                  entry["size"], None, None, "remote"))
         return sorted(out, key=lambda s: s.material)
 
+    def _cleanup_cache_files(self, material: str) -> None:
+        (self.cache_dir / f"{material}.hm").unlink(missing_ok=True)
+        (self.cache_dir / f"{material}.stats.json").unlink(missing_ok=True)
+
     def fetch_state(self, material: str) -> str:
         with self._lock:
             st = self._states.get(material)
         if st in ("fetching", "failed"):
             return st
-        if (self.cache_dir / f"{material}.hm").exists():
+        hm_path = self.cache_dir / f"{material}.hm"
+        if not hm_path.exists():
+            return "absent"
+        with self._lock:
+            already_verified = material in self._verified
+        if already_verified:
             return "cached"
+        # Cheap O(1) integrity check: compare on-disk size against the
+        # manifest (full sha256 verification only ever happens at
+        # download time — files can be tens of GB).
+        try:
+            entry = self.manifest()["files"][f"{material}.hm"]
+            expected_size = entry["size"]
+        except Exception:
+            # Manifest unavailable/unparseable: fall back to existence-only
+            # behavior, and do NOT cache this as verified.
+            return "cached"
+        if hm_path.stat().st_size == expected_size:
+            with self._lock:
+                self._verified.add(material)
+            return "cached"
+        self._cleanup_cache_files(material)
         return "absent"
 
     def start_fetch(self, material: str) -> None:
+        if self.fetch_state(material) in ("fetching", "cached"):
+            return
         with self._lock:
             if self._states.get(material) == "fetching":
                 return
@@ -113,7 +141,7 @@ class RemoteSource:
             with self._lock:
                 self._states[material] = "done"
         except Exception:
-            (self.cache_dir / f"{material}.hm").unlink(missing_ok=True)
+            self._cleanup_cache_files(material)
             with self._lock:
                 self._states[material] = "failed"
 

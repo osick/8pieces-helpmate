@@ -60,6 +60,64 @@ def test_corrupt_download_fails(tmp_path):
     wait_state(rs, "KRvk", "failed")
     assert not (cache / "KRvk.hm").exists()
 
+def test_start_fetch_short_circuits_when_cached(tmp_path):
+    src, cache = tmp_path / "hub", tmp_path / "cache"; src.mkdir(); cache.mkdir()
+    seed(src)
+    rs = RemoteSource(FakeHub(src), cache)
+    rs.start_fetch("KRvk")
+    wait_state(rs, "KRvk", "cached")
+    original = (cache / "KRvk.hm").read_bytes()
+
+    class LyingHub(FakeHub):
+        def download(self, filename, dest_dir):
+            p = super().download(filename, dest_dir)
+            if filename.endswith(".hm"):
+                p.write_bytes(b"\x02" * 32)   # would corrupt if re-fetched
+            return p
+
+    rs.hub = LyingHub(src)
+    rs.start_fetch("KRvk")
+    time.sleep(0.2)  # give a rogue re-fetch a chance to run
+    assert rs.fetch_state("KRvk") == "cached"
+    assert (cache / "KRvk.hm").read_bytes() == original
+
+def test_fetch_cleans_up_both_files_on_stats_failure(tmp_path):
+    src, cache = tmp_path / "hub", tmp_path / "cache"; src.mkdir(); cache.mkdir()
+    seed(src)
+
+    class StatsFailHub(FakeHub):
+        def download(self, filename, dest_dir):
+            if filename.endswith(".stats.json"):
+                # simulate a download that writes a truncated file before
+                # raising mid-transfer, so the orphan actually exists on disk
+                (Path(dest_dir) / filename).write_text('{"trunc')
+                raise IOError("boom mid-download")
+            return super().download(filename, dest_dir)
+
+    rs = RemoteSource(StatsFailHub(src), cache)
+    rs.start_fetch("KRvk")
+    wait_state(rs, "KRvk", "failed")
+    assert not (cache / "KRvk.hm").exists()
+    assert not (cache / "KRvk.stats.json").exists()
+
+def test_fetch_state_rejects_wrong_size_cached_file(tmp_path):
+    src, cache = tmp_path / "hub", tmp_path / "cache"; src.mkdir(); cache.mkdir()
+    seed(src)
+    (cache / "KRvk.hm").write_bytes(b"\x01" * 10)          # truncated: manifest says 32
+    (cache / "KRvk.stats.json").write_text("{}")
+    rs = RemoteSource(FakeHub(src), cache)
+    assert rs.fetch_state("KRvk") == "absent"
+    assert not (cache / "KRvk.hm").exists()
+    assert not (cache / "KRvk.stats.json").exists()
+
+def test_fetch_state_accepts_correct_size_cached_file(tmp_path):
+    src, cache = tmp_path / "hub", tmp_path / "cache"; src.mkdir(); cache.mkdir()
+    seed(src)
+    (cache / "KRvk.hm").write_bytes(b"\x01" * 32)          # correct size, pre-existing
+    rs = RemoteSource(FakeHub(src), cache)
+    assert rs.fetch_state("KRvk") == "cached"
+    assert (cache / "KRvk.hm").exists()
+
 def test_chain_status_transitions(tmp_path):
     src, cache, loc = tmp_path / "hub", tmp_path / "cache", tmp_path / "loc"
     for d in (src, cache, loc): d.mkdir()
