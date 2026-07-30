@@ -65,6 +65,22 @@ std::optional<std::string> ram_guard_error(const std::string& slice,
            " GiB is available (MemAvailable, /proc/meminfo); re-run with --force-ram to override";
 }
 
+bool slice_has_any_mate(const Material& m) {
+    SliceIndex idx(m);
+    std::vector<PlacedPiece> pp;
+    Board b;
+    uint64_t n = idx.size();
+    for (uint64_t c = 0; c < n; ++c) {
+        if (!idx.decode(c, pp)) continue;
+        auto e = idx.encode(pp);
+        if (!e || *e != c) continue;                    // non-canonical duplicate
+        b.reset(pp, Color::Black);                       // mates are black-to-move
+        if (b.opponent_in_check()) continue;             // illegal for this stm
+        if (b.state() == PosState::Checkmate) return true;
+    }
+    return false;
+}
+
 SliceGen::SliceGen(const Material& m, const GenOptions& opt)
     : mat_(m), opt_(opt), idx_(m), ps_(idx_.size()) {
     for (int s = 0; s < 2; ++s) { dtm_[s].assign(ps_, DTM_UNSET); cnt_[s].assign(ps_, 0); }
