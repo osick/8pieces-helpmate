@@ -585,12 +585,13 @@ If the download fails (network error, sha256 mismatch), the state becomes
            "hint": "check server logs; retry triggers a new download"}}
 ```
 
-**Caveat, verified against the running server:** despite the `hint` text,
-a `failed` material currently stays `failed` for the life of the process —
-no request re-triggers `start_fetch` once a material has failed once, so
-recovering from a bad download today means restarting the server (which
-resets all in-memory fetch state) rather than simply retrying the request.
-Treat the hint as aspirational until that's fixed.
+The `hint` is truthful: the very request that *observes* the `failed` state
+(the one returning this `502`) re-triggers `start_fetch` before responding,
+so by the time the client retries, the download is already under way again.
+Concretely: request N discovers the failure and answers `502`; request N+1
+already sees `fetching` and answers `202`; once the retried download
+finishes, subsequent requests resolve `200` as normal. No server restart
+is needed to recover from a bad download.
 
 A material present in neither local dirs nor the remote manifest is a plain
 `404 unknown_material`, same as the fully-offline case.

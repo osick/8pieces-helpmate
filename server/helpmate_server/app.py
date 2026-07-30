@@ -52,6 +52,11 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return None, JSONResponse(status_code=202, content={
                 "status": "fetching", "material": material})
         if kind == "failed":
+            # Make the hint below truthful: actually re-trigger the download
+            # now, so this response reports the last (failed) attempt
+            # honestly while the *next* request already sees "fetching".
+            if chain.remote is not None:
+                chain.remote.start_fetch(material)
             return None, JSONResponse(status_code=502, content=error_json(
                 "fetch_failed", f"download of '{material}' failed",
                 hint="check server logs; retry triggers a new download"))
