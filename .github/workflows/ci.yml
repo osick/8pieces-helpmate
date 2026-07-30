@@ -68,13 +68,15 @@ jobs:
 
       # scikit-build-core runs its own CMake configure (with -DHELPMATE_PYTHON=ON)
       # inside the pip build; FetchContent fetches the pinned deps over HTTPS.
-      - name: Install package with dev extras
-        run: python -m pip install .[dev]
+      # The [server] extra (fastapi/uvicorn/huggingface_hub) is needed to run
+      # tests/server alongside the existing Python binding tests.
+      - name: Install package with dev and server extras
+        run: python -m pip install .[dev,server]
 
       # Slow tests (exhaustive KQvk cross-check, ~10 min) need --run-slow and
       # are skipped by default via tests/python/conftest.py.
       - name: Run Python tests
-        run: python -m pytest tests/python -v
+        run: python -m pytest tests/python tests/server -v
 
   # Informational only: prints the gcovr line/function/branch summary in the
   # job log. No upload to any coverage service (no secrets configured).

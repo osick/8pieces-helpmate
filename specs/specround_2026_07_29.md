@@ -16,6 +16,8 @@
         - generator
         - reports...
     - humongous table bases (7 pieces, 8 pieces)
+        - distributed generation and serving
+        - partial generation
     - fairy
         - other stipulations
         - other conditions
