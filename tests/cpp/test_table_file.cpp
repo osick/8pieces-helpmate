@@ -4,6 +4,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <unistd.h>
 using namespace hm;
 TEST_CASE("header is 64 bytes") { CHECK(sizeof(TableHeader) == 64); }
 TEST_CASE("write/read round trip") {
@@ -55,4 +56,58 @@ TEST_CASE("reader rejects a truncated file") {
     auto sz = std::filesystem::file_size(path);
     std::filesystem::resize_file(path, sz - 3);
     CHECK(!TableReader::open(path));
+}
+TEST_CASE("marker tables expand to DTM_UNSOLVABLE without a payload") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() /
+                   ("hm_marker_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string path = (dir / "KBvkq.hm").string();
+    Material m = *Material::parse("KBvkq");
+    const uint64_t ps = 1234;
+
+    TableWriter::write_unsolvable(path, m, ps, R"({"material":"KBvkq"})");
+
+    // A marker is tiny: header + JSON, no planes.
+    CHECK(fs::file_size(path) < 512);
+
+    auto r = TableReader::open(path);
+    REQUIRE(r.has_value());
+    CHECK(r->all_unsolvable());
+    CHECK(r->plane_size() == ps);
+    CHECK(r->material_name() == "KBvkq");
+    CHECK(r->max_dtm() == DTM_UNSOLVABLE);
+    for (uint64_t c : {uint64_t(0), ps / 2, ps - 1}) {
+        auto v = r->get(Color::White, c);
+        CHECK(v.dtm == DTM_UNSOLVABLE);
+        CHECK(v.count == 0);
+        CHECK(r->get(Color::Black, c).dtm == DTM_UNSOLVABLE);
+    }
+    CHECK_THROWS_AS(r->get(Color::White, ps), std::out_of_range);
+    CHECK_THROWS_AS(r->get(Color::White, ~uint64_t(0)), std::out_of_range);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("ordinary tables stay format version 1 and keep reading") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() /
+                   ("hm_v1_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string path = (dir / "Kvk.hm").string();
+    std::vector<uint8_t> dw(4, 7), db(4, 8), cw(4, 1), cb(4, 2);
+    TableWriter::write(path, *Material::parse("Kvk"), 4, 7, "{}",
+                       dw.data(), db.data(), cw.data(), cb.data());
+
+    std::ifstream in(path, std::ios::binary);
+    TableHeader hdr{};
+    in.read(reinterpret_cast<char*>(&hdr), sizeof(hdr));
+    CHECK(hdr.version == 1);
+    CHECK((hdr.flags & 0x01) == 0);
+
+    auto r = TableReader::open(path);
+    REQUIRE(r.has_value());
+    CHECK_FALSE(r->all_unsolvable());
+    CHECK(r->get(Color::White, 0).dtm == 7);
+    CHECK(r->get(Color::Black, 3).dtm == 8);
+    fs::remove_all(dir);
 }

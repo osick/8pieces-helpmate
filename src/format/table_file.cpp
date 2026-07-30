@@ -13,6 +13,8 @@
 
 namespace hm {
 
+constexpr uint8_t kFlagAllUnsolvable = 0x01;
+
 void TableWriter::write(const std::string& path, const Material& mat, uint64_t plane_size, uint8_t max_dtm,
                          const std::string& meta_json,
                          const uint8_t* dtm_w, const uint8_t* dtm_b,
@@ -41,6 +43,37 @@ void TableWriter::write(const std::string& path, const Material& mat, uint64_t p
         out.write(reinterpret_cast<const char*>(cnt_w), static_cast<std::streamsize>(plane_size));
         out.write(reinterpret_cast<const char*>(cnt_b), static_cast<std::streamsize>(plane_size));
         if (!out) throw std::runtime_error("TableWriter::write: write failed for " + tmp_path);
+    } catch (...) {
+        std::error_code ec;
+        std::filesystem::remove(tmp_path, ec);  // best-effort cleanup; ignore removal errors
+        throw;
+    }
+    std::filesystem::rename(tmp_path, path);
+}
+
+void TableWriter::write_unsolvable(const std::string& path, const Material& mat,
+                                   uint64_t plane_size, const std::string& meta_json) {
+    TableHeader hdr{};
+    std::memcpy(hdr.magic, "HM8P", 4);
+    hdr.version = 2;                       // marker tables only
+    hdr.encoding = 1;
+    hdr.symmetry = mat.has_pawns() ? 0 : 1;
+    std::memset(hdr.material, 0, sizeof(hdr.material));
+    std::string name = mat.name();
+    std::memcpy(hdr.material, name.data(), std::min(name.size(), sizeof(hdr.material)));
+    hdr.plane_size = plane_size;
+    hdr.max_dtm = DTM_UNSOLVABLE;
+    hdr.flags = kFlagAllUnsolvable;
+    std::memset(hdr.reserved, 0, sizeof(hdr.reserved));
+    hdr.json_len = static_cast<uint32_t>(meta_json.size());
+
+    std::string tmp_path = path + ".tmp";
+    try {
+        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!out) throw std::runtime_error("TableWriter::write_unsolvable: cannot open " + tmp_path);
+        out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+        out.write(meta_json.data(), static_cast<std::streamsize>(meta_json.size()));
+        if (!out) throw std::runtime_error("TableWriter::write_unsolvable: write failed for " + tmp_path);
     } catch (...) {
         std::error_code ec;
         std::filesystem::remove(tmp_path, ec);  // best-effort cleanup; ignore removal errors
@@ -95,8 +128,9 @@ std::optional<TableReader> TableReader::open(const std::string& path) {
 
     // Validate without overflowable arithmetic: json_len and plane_size come from an
     // untrusted mmap'd header, and `4 * plane_size` can wrap mod 2^64 for crafted files.
+    bool marker = (hdr->flags & kFlagAllUnsolvable) != 0;
     bool ok = std::memcmp(hdr->magic, "HM8P", 4) == 0 &&
-              hdr->version == 1 &&
+              (hdr->version == 1 || (hdr->version == 2 && marker)) &&
               hdr->encoding == 1;
     if (ok) {
         uint64_t after_header = filesize - sizeof(TableHeader);  // filesize >= sizeof(TableHeader) already checked
@@ -104,7 +138,8 @@ std::optional<TableReader> TableReader::open(const std::string& path) {
             ok = false;
         } else {
             uint64_t remaining = after_header - hdr->json_len;
-            ok = (remaining % 4 == 0) && (hdr->plane_size == remaining / 4);
+            ok = marker ? (remaining == 0)
+                        : ((remaining % 4 == 0) && (hdr->plane_size == remaining / 4));
         }
     }
     if (!ok) {
@@ -127,6 +162,7 @@ ValuePair TableReader::get(Color stm, uint64_t cell) const {
     if (cell >= ps_)
         throw std::out_of_range("TableReader::get: cell " + std::to_string(cell) +
                                 " out of range (plane size " + std::to_string(ps_) + ")");
+    if (all_unsolvable()) return { DTM_UNSOLVABLE, 0 };
     const uint8_t* pay = base_ + sizeof(TableHeader) + json_len_;
     uint64_t o = (stm == Color::Black ? ps_ : 0) + cell;
     return { pay[o], pay[2 * ps_ + o] };
@@ -147,6 +183,10 @@ std::string TableReader::material_name() const {
 
 std::string TableReader::meta_json() const {
     return std::string(reinterpret_cast<const char*>(base_ + sizeof(TableHeader)), json_len_);
+}
+
+bool TableReader::all_unsolvable() const {
+    return (reinterpret_cast<const TableHeader*>(base_)->flags & kFlagAllUnsolvable) != 0;
 }
 
 }  // namespace hm
