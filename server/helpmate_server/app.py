@@ -39,6 +39,24 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             "unknown_material", f"no table for material '{material}'",
             hint=f"generate it with: helpmate gen {material} --tables <dir>"))
 
+    def _resolve_or_response(material: str):
+        kind, val = chain.status(material)
+        if kind in ("local", "cached"):
+            return val, None
+        if kind == "remote":
+            chain.remote.start_fetch(material)
+            return None, JSONResponse(status_code=202, content={
+                "status": "fetching", "material": material,
+                "size_bytes": val.size_bytes})
+        if kind == "fetching":
+            return None, JSONResponse(status_code=202, content={
+                "status": "fetching", "material": material})
+        if kind == "failed":
+            return None, JSONResponse(status_code=502, content=error_json(
+                "fetch_failed", f"download of '{material}' failed",
+                hint="check server logs; retry triggers a new download"))
+        return None, unknown(material)
+
     @app.get("/v1/health")
     def health():
         cat = chain.catalog()
@@ -52,9 +70,9 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
 
     @app.get("/v1/materials/{name}/stats")
     def stats(name: str):
-        d = chain.resolve(name)
-        if d is None:
-            return unknown(name)
+        d, resp = _resolve_or_response(name)
+        if resp is not None:
+            return resp
         return _tb(chain, d).stats(name)
 
     def _dir_for_fen(fen: str):
@@ -78,10 +96,12 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         material = None
         try:
             material = _dir_for_fen(fen)
-            d = chain.resolve(material) or chain.resolve(
-                material.split("v")[1].upper() + "v" + material.split("v")[0].lower())
+            flipped = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
+            d = chain.resolve(material) or chain.resolve(flipped)
             if d is None:
-                return unknown(material)
+                d, resp = _resolve_or_response(material)
+                if resp is not None:
+                    return resp
             res = _tb(chain, d).probe(fen)
         except helpmate.MissingTableError:
             return unknown(material or fen)
@@ -99,9 +119,9 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         material = None
         try:
             material = _dir_for_fen(fen)
-            d = chain.resolve(material)
-            if d is None:
-                return unknown(material)
+            d, resp = _resolve_or_response(material)
+            if resp is not None:
+                return resp
             tb = _tb(chain, d)
             lines = tb.lines(fen) if all else [tb.line(fen)]
         except helpmate.MissingTableError:
@@ -116,9 +136,9 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
 
     @app.get("/v1/mine")
     def mine(material: str, dtm: int, count: int = -1, max: int = 100):
-        d = chain.resolve(material)
-        if d is None:
-            return unknown(material)
+        d, resp = _resolve_or_response(material)
+        if resp is not None:
+            return resp
         clamped = min(max, mine_cap)
         if mine_timeout <= 0:
             # A non-positive budget means "don't wait at all" — for a fast
