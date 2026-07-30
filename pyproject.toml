@@ -10,9 +10,14 @@ requires-python = ">=3.9"
 license = {file = "LICENSE"}
 
 [project.optional-dependencies]
-dev = ["pytest", "chess>=1.10"]
+dev = ["pytest", "chess>=1.10", "httpx"]
+server = ["fastapi>=0.110", "uvicorn>=0.29", "huggingface_hub>=0.23"]
+
+[project.scripts]
+helpmate-server = "helpmate_server.main:main"
+helpmate-tables = "helpmate_server.tables_cli:main"
 
 [tool.scikit-build]
 cmake.version = ">=3.24"
-wheel.packages = ["python/helpmate"]
-cmake.args = ["-DHELPMATE_PYTHON=ON"]
+wheel.packages = ["python/helpmate", "server/helpmate_server"]
+cmake.define.HELPMATE_PYTHON = "ON"
