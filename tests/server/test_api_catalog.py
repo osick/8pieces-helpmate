@@ -23,7 +23,14 @@ def test_stats_ok_and_404(client):
 
 def test_no_write_methods(client):
     for method in ("post", "put", "delete"):
-        assert getattr(client, method)("/v1/materials").status_code == 405
+        r = getattr(client, method)("/v1/materials")
+        assert r.status_code == 405
+        assert r.json()["error"]["code"] == "method_not_allowed"
+
+def test_unmatched_path_envelope(client):
+    r = client.get("/v1/nonexistent")
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "not_found"
 
 def test_corrupt_table_500_envelope(tmp_path):
     from fastapi.testclient import TestClient

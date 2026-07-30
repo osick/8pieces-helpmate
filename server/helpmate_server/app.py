@@ -3,6 +3,7 @@ import helpmate
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .storage import ChainSource
 
@@ -23,6 +24,15 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         # context in their message by design — surface it (spec: 500 + diagnostic).
         return JSONResponse(status_code=500,
                             content=error_json("internal", str(exc)))
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request, exc: StarletteHTTPException):
+        # Framework-generated responses (unmatched routes, disallowed methods)
+        # must also carry the contract envelope, not Starlette's {"detail": ...}.
+        code = {405: "method_not_allowed", 404: "not_found"}.get(
+            exc.status_code, "http_error")
+        return JSONResponse(status_code=exc.status_code,
+                            content=error_json(code, str(exc.detail)))
 
     def unknown(material: str) -> JSONResponse:
         return JSONResponse(status_code=404, content=error_json(
