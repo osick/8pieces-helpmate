@@ -111,4 +111,27 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                                 content=error_json("invalid_fen", str(e)))
         return {"lines": lines}
 
+    from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
+    pool = ThreadPoolExecutor(max_workers=2)
+
+    @app.get("/v1/mine")
+    def mine(material: str, dtm: int, count: int = -1, max: int = 100):
+        d = chain.resolve(material)
+        if d is None:
+            return unknown(material)
+        clamped = min(max, mine_cap)
+        if mine_timeout <= 0:
+            # A non-positive budget means "don't wait at all" — for a fast
+            # in-process call, a real ThreadPoolExecutor+timeout(0) race can
+            # resolve either way depending on OS scheduling, so short-circuit
+            # deterministically instead of racing.
+            return {"fens": [], "truncated": True, "note": "timeout"}
+        fut = pool.submit(_tb(chain, d).mine, material, dtm, count, clamped + 1)
+        try:
+            fens = fut.result(timeout=mine_timeout)
+        except FutTimeout:
+            return {"fens": [], "truncated": True, "note": "timeout"}
+        truncated = len(fens) > clamped
+        return {"fens": fens[:clamped], "truncated": truncated}
+
     return app
