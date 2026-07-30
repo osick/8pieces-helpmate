@@ -32,6 +32,7 @@ struct GenOptions {
     bool verbose = false;    // per-slice lifecycle lines on stderr (implies progress)
     bool progress = false;   // per-pass progress lines on stderr
     bool force_ram = false;  // skip the pre-allocation RAM guard
+    bool prune = true;       // skip slices that provably contain no helpmate
 };
 
 // ---- RAM guard --------------------------------------------------------------
@@ -53,6 +54,11 @@ std::optional<std::string> ram_guard_error(const std::string& slice,
 
 // Builds the whole closure (missing slices only), root last. Returns paths of written files.
 std::vector<std::string> generate(const Material& root, const GenOptions& = {});
+
+// True iff any position in this slice is checkmate (black to move, mated).
+// Allocates no value planes: it is the cheap half of init_pass, used to decide
+// whether a slice can be pruned before committing to its RAM.
+bool slice_has_any_mate(const Material& m);
 
 // Finished successor-slice tables, loaded on demand for cross-slice lookups
 // (after a capture / promotion changes the material of a position).

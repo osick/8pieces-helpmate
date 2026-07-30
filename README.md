@@ -256,6 +256,11 @@ $ helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables tt
 (three `h#1` positions with a *unique* solution — good raw material for a sound
 one-line helpmate composition)
 
+**`compact`** — rewrite already-fully-unsolvable tables (e.g. ones built before v0.6.1
+added pruning at generation time) as tiny marker files, reclaiming disk space with no
+change in queryable results; see [USAGE.md](docs/USAGE.md#compact--reclaim-disk-space-in-already-unsolvable-tables)
+for a worked example.
+
 Full usage/help text (`helpmate --help`) documents every flag and exit code
 (`0` success — including a reported "unsolvable" — `2` a required table is missing and
 which `helpmate gen` command builds it, `3` bad usage/unparseable input).

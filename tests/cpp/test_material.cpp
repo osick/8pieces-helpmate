@@ -38,3 +38,16 @@ TEST_CASE("closure of KPvk exact") {
     CHECK(order.front().name() == "Kvk");
     CHECK(order.back().name() == "KPvk");
 }
+TEST_CASE("mating_side_is_bare_king identifies materials white can never mate with") {
+    auto bare = [](const char* n) {
+        return Material::parse(n)->mating_side_is_bare_king();
+    };
+    // White is a bare king: it can never give check, so no mate can exist.
+    CHECK(bare("Kvk"));
+    CHECK(bare("Kvkq"));
+    CHECK(bare("Kvkqrp"));      // black may promote; white stays a bare king
+    // White has material: not this rule's business (solvability decided elsewhere).
+    CHECK_FALSE(bare("KQvk"));
+    CHECK_FALSE(bare("KBvkqqr"));
+    CHECK_FALSE(bare("KPvk"));  // a white pawn can promote
+}

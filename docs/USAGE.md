@@ -274,13 +274,108 @@ $ helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables tt
 one-line composition; `--dtm 2 --count 2` would list positions with exactly
 one dual, etc.)
 
+## `compact` — reclaim disk space in already-unsolvable tables
+
+```
+helpmate compact <DIR> [--dry-run]
+```
+
+Rewrites every `.hm` table in `DIR` whose cells are **all** unsolvable (or
+invalid) into a tiny marker file, reclaiming disk space without changing what
+any query can answer. Tables with at least one solvable cell are left
+completely untouched, and a table that is already a marker is skipped (not
+rewritten again). When a run rewrites nothing at all — every table was either
+solvable or already a marker — it prints `already compact`. `--dry-run`
+reports what *would* be rewritten and reclaims nothing — it never opens a
+file for writing.
+
+This exists for tables generated **before v0.6.1**, when `gen` had no pruning
+and wrote a full-size table even for slices like `Kvk` where every cell is
+unsolvable. Since v0.6.1, `gen` already prunes such slices to markers at
+generation time (see [Pruning and marker tables](#pruning-and-marker-tables)
+below) — so `compact` typically has nothing to do on tables generated after
+the upgrade; run it once against older tables to shrink them in place.
+
+Real captured output below. `demo/` holds a real, freshly generated `KQvk`
+closure (`KQvk.hm` — solvable, left alone) next to a fabricated stand-in for
+a pre-v0.6.1 `Kvk.hm`: a full-size, ordinary (version 1) table whose every
+cell is unsolvable, the shape `compact` exists to shrink.
+
+```
+$ ls -l demo/
+-rw-r--r-- 1 os users 146117 KQvk.hm
+-rw-r--r-- 1 os users  27781 KQvk.stats.json
+-rw-r--r-- 1 os users   4087 Kvk.hm
+
+$ helpmate compact demo --dry-run
+would rewrite Kvk (0 MiB)
+would reclaim 0 MiB from 1 table(s); 1 left unchanged (solvable or already compact)
+
+$ ls -l demo/          # --dry-run wrote nothing; every size unchanged
+-rw-r--r-- 1 os users 146117 KQvk.hm
+-rw-r--r-- 1 os users  27781 KQvk.stats.json
+-rw-r--r-- 1 os users   4087 Kvk.hm
+
+$ helpmate compact demo
+rewrote Kvk (0 MiB)
+reclaimed 0 MiB from 1 table(s); 1 left unchanged (solvable or already compact)
+
+$ ls -l demo/          # Kvk.hm shrank; KQvk.hm/.stats.json byte-identical
+-rw-r--r-- 1 os users 146117 KQvk.hm
+-rw-r--r-- 1 os users  27781 KQvk.stats.json
+-rw-r--r-- 1 os users    469 Kvk.hm
+-rw-r--r-- 1 os users    405 Kvk.stats.json
+
+$ helpmate compact demo    # re-run: nothing left to do
+reclaimed 0 MiB from 0 table(s); 2 left unchanged (solvable or already compact)
+already compact
+
+$ helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables demo
+dtm=2 (h#1) count=4
+```
+
+(`Kvk`'s 4087→469 bytes is a rounding-to-0-MiB demo at 2-piece scale; the same
+mechanism reclaims gigabytes on a real 5-6 piece run where a dead slice would
+otherwise have been a multi-GB full table.) The rewritten `.stats.json`
+sidecar is regenerated fresh, not copied from the original — it carries
+`"all_unsolvable": true` and the compacting binary's own
+`generator_version`, exactly like a marker `gen` produces directly.
+
+### Pruning and marker tables
+
+Since v0.6.1, `gen` skips writing a full table for any slice it can *prove*
+contains no helpmate at all, writing a **marker table** instead. A slice is
+pruned when either:
+
+- **the mating side is a bare king** — White (the side the index always
+  treats as delivering mate; see [Symmetry reduction](#symmetry-reduction))
+  has no piece besides its king. A lone king can never deliver check, so the
+  slice is unsolvable regardless of what Black holds (e.g. `Kvk`, `Kvkq`,
+  `Kvkr` are all pruned this way, unconditionally); or
+- **every successor's table reports all of its cells unsolvable, and the
+  slice has no checkmate position of its own** — every solution ends in a mate
+  either in this slice or in one reached by a capture/promotion, so if every
+  reachable successor slice is proven dead *and* scanning this slice directly
+  finds no checkmate, the slice is dead too.
+
+A **marker table** is a table file with no payload at all: just the 64-byte
+header (format `version = 2`, versus `1` for an ordinary table) plus the
+metadata JSON — the four value planes (dtm/count × White-to-move/Black-to-move)
+that make up the bulk of an ordinary table's bytes are simply not written.
+Every cell reads back as `DTM_UNSOLVABLE` when probed, exactly as it would if
+the slice had been generated in full and turned out to be entirely
+unsolvable. `TableReader` accepts both versions transparently — probing,
+`stats`, `mine`, and `compact` all work unchanged whether a table on disk is
+an ordinary version-1 table or a version-2 marker; nothing reading tables
+needs to change for this feature.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | success — including a reported `unsolvable` answer. |
 | `2` | a table needed to answer the query is missing; the message names it and the exact `helpmate gen` command that builds it. |
-| `3` | bad usage or unparseable input (unknown command, malformed FEN or material string, malformed/out-of-range numeric flag, flag missing its value). |
+| `3` | bad usage or unparseable input (unknown command, malformed FEN or material string, malformed/out-of-range numeric flag, flag missing its value; includes `compact` given no directory, or a path that is not a directory). |
 
 ## Resource guidance
 

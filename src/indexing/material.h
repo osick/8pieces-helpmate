@@ -20,6 +20,10 @@ struct Material {
     bool has_pawns() const;
     int total() const;
     int pawn_count() const;
+    // True iff the white (mating) side holds only its king. Such a side can
+    // never give check, so the material can contain no mate — and since only
+    // black owns pawns here, no promotion can change that.
+    bool mating_side_is_bare_king() const;
 
     std::vector<Material> successors() const;       // capture / promotion / promotion-capture results
     static std::vector<Material> closure_topo(const Material& root); // build order, root last

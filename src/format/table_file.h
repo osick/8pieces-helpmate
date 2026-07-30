@@ -10,13 +10,14 @@ namespace hm {
 #pragma pack(push, 1)
 struct TableHeader {
     char magic[4];            // "HM8P"
-    uint32_t version;         // 1
+    uint32_t version;         // 1 = ordinary table, 2 = all-unsolvable marker (see flags)
     uint8_t encoding;         // 1 = raw byte planes
     uint8_t symmetry;         // 0 = with pawns (2 transforms), 1 = pawnless (8)
     char material[26];        // canonical name, NUL padded
     uint64_t plane_size;
     uint8_t max_dtm;          // DTM_UNSOLVABLE if no cell solvable
-    uint8_t reserved[15];
+    uint8_t flags;            // bit 0: all-unsolvable marker (no payload follows)
+    uint8_t reserved[14];
     uint32_t json_len;        // metadata JSON directly after header
 };
 #pragma pack(pop)
@@ -28,6 +29,11 @@ struct TableWriter {          // writes "<path>.tmp" then atomic-renames to path
                       const std::string& meta_json,
                       const uint8_t* dtm_w, const uint8_t* dtm_b,
                       const uint8_t* cnt_w, const uint8_t* cnt_b);
+
+    // Marker table: header + JSON, no planes. Every cell reads as
+    // DTM_UNSOLVABLE. Written with version 2; ordinary tables stay version 1.
+    static void write_unsolvable(const std::string& path, const Material&,
+                                 uint64_t plane_size, const std::string& meta_json);
 };
 
 class TableReader {           // mmap; movable, not copyable
@@ -44,6 +50,7 @@ public:
     uint8_t max_dtm() const;
     std::string material_name() const;
     std::string meta_json() const;
+    bool all_unsolvable() const;
 
 private:
     TableReader() = default;

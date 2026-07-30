@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.6.1] - 2026-07-30
+
+### Added
+
+- **Prune provably-unsolvable slices at generation time**: `gen` now skips
+  writing a full table for a slice it can prove contains no helpmate at all —
+  either the mating side (White, by the index convention) is a bare king
+  (`Material::mating_side_is_bare_king()`, e.g. `Kvk`, `Kvkq`, `Kvkr`), or
+  every successor slice reached by a capture/promotion is itself already
+  proven dead and the slice has no checkmate position of its own
+  (`slice_has_any_mate()`). Enabled by default (`GenOptions::prune`, default
+  `true`); an oracle test pins the project's known-unsolvable classes.
+- **Marker tables (format version 2)**: a pruned slice is written as a tiny
+  marker — header + JSON metadata only, no value planes at all — instead of
+  a full-size table of all-`DTM_UNSOLVABLE` cells. Every cell of a marker
+  reads back as unsolvable when probed, identically to a fully-generated
+  all-unsolvable table. `TableReader` accepts both version 1 (ordinary
+  tables) and version 2 (markers) transparently; no reader needs to change.
+- **`helpmate compact <DIR> [--dry-run]`**: rewrites existing all-unsolvable
+  `.hm` tables (e.g. ones generated before this release) into version-2
+  markers in place, atomically, reclaiming disk space with no change in
+  queryable results. Tables with any solvable cell, and tables that are
+  already markers, are left untouched; `--dry-run` is a true no-op that only
+  reports what would be rewritten. See [USAGE.md](docs/USAGE.md#compact--reclaim-disk-space-in-already-unsolvable-tables)
+  for a worked example.
+
+### Fixed
+
+- **`helpmate-tables push` hashed every file twice**: the local
+  `manifest.json` build and the remote-manifest merge each independently
+  called `build_manifest`, so every push sha256-hashed the whole `--tables`
+  directory twice. Now hashed once and reused for both the local manifest
+  write and the merge — real time saved at 6-piece table sizes, no change in
+  the manifest's content.
+
 ## [0.6.0] - 2026-07-30
 
 ### Added

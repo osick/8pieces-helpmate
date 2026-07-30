@@ -1,7 +1,7 @@
 from __future__ import annotations
 import argparse, json, sys, tempfile
 from pathlib import Path
-from .manifest import build_manifest, write_manifest, verify_file
+from .manifest import build_manifest, verify_file
 
 def _default_hub(repo_id: str):
     from .storage import HFHub
@@ -51,8 +51,10 @@ def main(argv: list[str] | None = None, hub_factory=_default_hub) -> int:
                 gen_version = json.loads(sc.read_text()).get("generator_version",
                                                               "unknown")
                 break
-            manifest_path = write_manifest(tables, generator_version=gen_version)
-            local_files = build_manifest(tables, gen_version)["files"]
+            local_manifest = build_manifest(tables, gen_version)
+            (tables / "manifest.json").write_text(
+                json.dumps(local_manifest, indent=2, sort_keys=True))
+            local_files = local_manifest["files"]
             names = a.material or sorted({f.name[: -len(".hm")]
                                           for f in tables.glob("*.hm")})
 

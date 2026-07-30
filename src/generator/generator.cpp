@@ -65,6 +65,22 @@ std::optional<std::string> ram_guard_error(const std::string& slice,
            " GiB is available (MemAvailable, /proc/meminfo); re-run with --force-ram to override";
 }
 
+bool slice_has_any_mate(const Material& m) {
+    SliceIndex idx(m);
+    std::vector<PlacedPiece> pp;
+    Board b;
+    uint64_t n = idx.size();
+    for (uint64_t c = 0; c < n; ++c) {
+        if (!idx.decode(c, pp)) continue;
+        auto e = idx.encode(pp);
+        if (!e || *e != c) continue;                    // non-canonical duplicate
+        b.reset(pp, Color::Black);                       // mates are black-to-move
+        if (b.opponent_in_check()) continue;             // illegal for this stm
+        if (b.state() == PosState::Checkmate) return true;
+    }
+    return false;
+}
+
 SliceGen::SliceGen(const Material& m, const GenOptions& opt)
     : mat_(m), opt_(opt), idx_(m), ps_(idx_.size()) {
     for (int s = 0; s < 2; ++s) { dtm_[s].assign(ps_, DTM_UNSET); cnt_[s].assign(ps_, 0); }
@@ -352,6 +368,60 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
         if (std::filesystem::exists(path)) {
             if (opt.verbose) std::cerr << "cached " << m.name() << " (already on disk)\n";
             continue;
+        }
+        if (opt.prune) {
+            // A slice has no solvable position iff it contains no mate and every
+            // successor is itself entirely unsolvable (every solution ends in a
+            // mate, in this slice or in one reachable by a capture/promotion).
+            bool successors_dead = true;
+            for (auto& s : m.successors()) {
+                std::string spath = opt.tables_dir + "/" + s.name() + ".hm";
+                auto r = TableReader::open(spath);
+                if (!r) { successors_dead = false; break; }
+                // Identity check: the file must actually be the table its name promises,
+                // or a misnamed/misplaced/stale table would silently feed a wrong prune
+                // verdict -- the one correctness-critical decision in the whole prune path.
+                SliceIndex si(s);
+                if (r->material_name() != s.name())
+                    throw std::runtime_error("sub-table " + spath + " is for material '" +
+                                             r->material_name() + "', expected '" + s.name() + "'");
+                if (r->plane_size() != si.size())
+                    throw std::runtime_error("sub-table " + spath + " has plane size " +
+                                             std::to_string(r->plane_size()) + ", expected " +
+                                             std::to_string(si.size()) + " for " + s.name());
+                if (!r->all_unsolvable()) { successors_dead = false; break; }
+            }
+            bool unsolvable = m.mating_side_is_bare_king() ||
+                              (successors_dead && !slice_has_any_mate(m));
+            if (unsolvable) {
+                uint64_t ps = SliceIndex(m).size();
+                // Same shape as SliceGen::stats_json(): a marker table's reader
+                // returns DTM_UNSOLVABLE for every cell (invalid cells included),
+                // so reporting all cells as unsolvable and none as invalid is
+                // exactly what a consumer reading this table observes.
+                nlohmann::json j;
+                j["material"] = m.name();
+                j["plane_size"] = ps;
+                j["max_dtm"] = (int)DTM_UNSOLVABLE;
+                j["cells"] = {{"invalid", {{"wtm", 0}, {"btm", 0}}},
+                              {"unsolvable", {{"wtm", ps}, {"btm", ps}}}};
+                j["dtm_histogram"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
+                j["uniqueness"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
+                j["deepest"] = nlohmann::json::array();
+                j["deepest_unique"] = nlohmann::json::array();
+                j["generator_version"] = HELPMATE_VERSION;
+                j["all_unsolvable"] = true;
+                std::string meta = j.dump(2);
+                std::filesystem::create_directories(opt.tables_dir);
+                TableWriter::write_unsolvable(path, m, ps, meta);
+                std::ofstream(opt.tables_dir + "/" + m.name() + ".stats.json",
+                              std::ios::trunc) << meta;
+                if (opt.verbose)
+                    std::cerr << "pruned " << m.name()
+                              << " (provably no helpmate; marker table written)\n";
+                written.push_back(path);
+                continue;
+            }
         }
         uint64_t cells = SliceIndex(m).size();
         // Re-check right before this slice's planes are allocated: available

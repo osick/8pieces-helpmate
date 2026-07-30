@@ -46,13 +46,23 @@ def test_failed_fetch_retries_on_next_request(kqvk_dir, tmp_path):
         (hub_dir / f.name).write_bytes(f.read_bytes())
 
     class ToggleHub(FakeHub):
-        """Fails every download while .fail is True; succeeds otherwise."""
+        """Fails every download while .fail is True; succeeds otherwise.
+
+        A successful download waits on `gate` so the retry cannot finish
+        before the test has observed it: against a local fake hub the copy
+        takes microseconds, so without the gate the next request often
+        already sees 200 (fetch done) instead of 202 (fetch running).
+        Both are correct behaviour, but only the gated version tests the
+        state transition deterministically.
+        """
         def __init__(self, src_dir):
             super().__init__(src_dir)
             self.fail = True
+            self.gate = threading.Event()
         def download(self, filename, dest_dir):
             if self.fail:
                 raise IOError("boom")
+            assert self.gate.wait(10)
             return super().download(filename, dest_dir)
 
     hub = ToggleHub(hub_dir)
@@ -79,6 +89,7 @@ def test_failed_fetch_retries_on_next_request(kqvk_dir, tmp_path):
     r = c.get("/v1/materials/KQvk/stats")
     assert r.status_code == 202 and r.json()["status"] == "fetching"
 
+    hub.gate.set()          # let the retry that the 502 triggered complete
     t0 = time.time()
     while r.status_code == 202:
         assert time.time() - t0 < 10
