@@ -1,7 +1,7 @@
 from __future__ import annotations
-import argparse, sys
+import argparse, json, sys, tempfile
 from pathlib import Path
-from .manifest import write_manifest, verify_file
+from .manifest import build_manifest, write_manifest, verify_file
 
 def _default_hub(repo_id: str):
     from .storage import HFHub
@@ -35,32 +35,56 @@ def main(argv: list[str] | None = None, hub_factory=_default_hub) -> int:
     if a.cmd == "push":
         gen_version = "unknown"
         for sc in sorted(tables.glob("*.stats.json")):
-            import json as _json
-            gen_version = _json.loads(sc.read_text()).get("generator_version",
+            gen_version = json.loads(sc.read_text()).get("generator_version",
                                                           "unknown")
             break
         manifest_path = write_manifest(tables, generator_version=gen_version)
+        local_files = build_manifest(tables, gen_version)["files"]
         names = a.material or sorted({f.name[: -len(".hm")]
                                       for f in tables.glob("*.hm")})
+        uploaded_names: list[str] = []
         for mat in names:
             for f in (tables / f"{mat}.hm", tables / f"{mat}.stats.json"):
                 if f.exists():
                     hub.upload(f, a.repo)
+                    uploaded_names.append(f.name)
                     print(f"pushed {f.name}")
-        hub.upload(manifest_path, a.repo)
+
+        try:
+            remote_manifest = hub.fetch_manifest()
+            remote_files = dict(remote_manifest.get("files", {}))
+        except Exception:
+            remote_files = {}
+        for name in uploaded_names:
+            remote_files[name] = local_files[name]
+        upload_manifest = {"schema": 1, "generator_version": gen_version,
+                            "files": remote_files}
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            upload_manifest_path = Path(tmpdir) / "manifest.json"
+            upload_manifest_path.write_text(json.dumps(upload_manifest,
+                                                        indent=2, sort_keys=True))
+            hub.upload(upload_manifest_path, a.repo)
         print("pushed manifest.json")
         return 0
 
     # pull
-    manifest = hub.fetch_manifest()
-    for mat in a.material:
-        for name in (f"{mat}.hm", f"{mat}.stats.json"):
-            if name not in manifest["files"]:
-                continue
-            f = hub.download(name, tables)
-            if not verify_file(f, manifest):
-                f.unlink(missing_ok=True)
-                print(f"error: sha256 mismatch for {name}", file=sys.stderr)
-                return 1
-            print(f"pulled {name}")
+    try:
+        manifest = hub.fetch_manifest()
+        materials = a.material or sorted({name[: -len(".hm")]
+                                          for name in manifest.get("files", {})
+                                          if name.endswith(".hm")})
+        for mat in materials:
+            for name in (f"{mat}.hm", f"{mat}.stats.json"):
+                if name not in manifest.get("files", {}):
+                    continue
+                f = hub.download(name, tables)
+                if not verify_file(f, manifest):
+                    f.unlink(missing_ok=True)
+                    print(f"error: sha256 mismatch for {name}", file=sys.stderr)
+                    return 1
+                print(f"pulled {name}")
+    except Exception as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
     return 0
