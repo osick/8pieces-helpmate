@@ -57,4 +57,55 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return unknown(name)
         return _tb(chain, d).stats(name)
 
+    def _dir_for_fen(fen: str):
+        # The FEN's board field determines the material, which names the table.
+        board = fen.split()[0]
+        white = "".join(sorted((c for c in board if c.isalpha() and c.isupper()),
+                               key="KQRBNP".index))
+        black = "".join(sorted((c.upper() for c in board if c.isalpha() and c.islower()),
+                               key="KQRBNP".index))
+        return white + "v" + black.lower()
+
+    def h_notation(dtm: int) -> str:
+        # dtm plies; black-to-move depths are even (h#n = 2n plies).
+        return f"h#{dtm // 2}" if dtm % 2 == 0 else f"h#{dtm // 2}.5"
+
+    @app.get("/v1/probe")
+    def probe(fen: str):
+        material = None
+        try:
+            material = _dir_for_fen(fen)
+            d = chain.resolve(material) or chain.resolve(
+                material.split("v")[1].upper() + "v" + material.split("v")[0].lower())
+            if d is None:
+                return unknown(material)
+            res = _tb(chain, d).probe(fen)
+        except helpmate.MissingTableError:
+            return unknown(material or fen)
+        except ValueError as e:
+            return JSONResponse(status_code=400,
+                                content=error_json("invalid_fen", str(e)))
+        if res is None:
+            return {"solvable": False}
+        dtm, count, flipped = res
+        return {"dtm": dtm, "count": count, "flipped": flipped,
+                "notation": h_notation(dtm)}
+
+    @app.get("/v1/line")
+    def line(fen: str, all: bool = False):
+        material = None
+        try:
+            material = _dir_for_fen(fen)
+            d = chain.resolve(material)
+            if d is None:
+                return unknown(material)
+            tb = _tb(chain, d)
+            lines = tb.lines(fen) if all else [tb.line(fen)]
+        except helpmate.MissingTableError:
+            return unknown(material or fen)
+        except ValueError as e:
+            return JSONResponse(status_code=400,
+                                content=error_json("invalid_fen", str(e)))
+        return {"lines": lines}
+
     return app
