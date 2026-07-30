@@ -210,7 +210,17 @@ int cmd_compact(const std::vector<std::string>& args) {
         if (any_solvable) { ++skipped; continue; }
         uint64_t size = std::filesystem::file_size(e.path());
         std::string name = r->material_name();
+        std::string stem = e.path().stem().string();
         uint64_t ps = r->plane_size();
+        // Identity check: the sidecar and the rewrite must be keyed off the file's own
+        // name, not the header's self-reported material -- otherwise a name/header
+        // mismatch would rewrite the right .hm but clobber a DIFFERENT material's
+        // .stats.json (or write a marker table under the wrong identity).
+        if (name != stem) {
+            std::cerr << "error: table " << e.path() << " is for material '" << name
+                      << "', expected '" << stem << "' from filename; refusing to touch it\n";
+            return 3;
+        }
         std::cout << (dry ? "would rewrite " : "rewrote ") << name
                   << " (" << size / (1024 * 1024) << " MiB)\n";
         reclaimed += size;
@@ -237,7 +247,7 @@ int cmd_compact(const std::vector<std::string>& args) {
             std::string meta = j.dump(2);
             r.reset();                                   // unmap before replacing
             TableWriter::write_unsolvable(e.path().string(), *mat, ps, meta);
-            std::ofstream(dir + "/" + name + ".stats.json", std::ios::trunc) << meta;
+            std::ofstream(dir + "/" + stem + ".stats.json", std::ios::trunc) << meta;
         }
         ++rewritten;
     }

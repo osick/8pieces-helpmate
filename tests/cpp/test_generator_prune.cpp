@@ -1,8 +1,10 @@
 #include "generator/generator.h"
 #include "indexing/material.h"
 #include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
 
 using namespace hm;
+using Catch::Matchers::ContainsSubstring;
 
 TEST_CASE("slice_has_any_mate finds mates only where they exist") {
     // KQvk: the queen mates the bare king cooperatively — mates exist.
@@ -122,6 +124,35 @@ TEST_CASE("generate leaves solvable slices byte-identical when pruning") {
         for (Color stm : {Color::White, Color::Black})
             REQUIRE(pruned->get(stm, c).dtm == full->get(stm, c).dtm);
     fs::remove_all(a); fs::remove_all(b);
+}
+
+TEST_CASE("generate throws when a successor's table file doesn't match its own name") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() /
+                   ("hm_prune_mismatch_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    // KQvk's only successor is Kvk (black's only capture is the queen). Fabricate
+    // the file the prune loop will open at that exact path -- dir/Kvk.hm -- but
+    // give it a header for a DIFFERENT material (Kvkq), exactly the "misnamed/
+    // misplaced file" scenario the identity check exists to catch. This is the
+    // one correctness-critical decision in the generator: a mismatch here must
+    // be surfaced loudly, not silently folded into "successors not dead".
+    auto root = *Material::parse("KQvk");
+    REQUIRE(root.successors().size() == 1);
+    REQUIRE(root.successors()[0].name() == "Kvk");
+
+    Material wrong = *Material::parse("Kvkq");
+    TableWriter::write_unsolvable((dir / "Kvk.hm").string(), wrong, SliceIndex(wrong).size(),
+                                  "{\"mismatch_fixture\":true}");
+
+    GenOptions opt; opt.tables_dir = dir.string(); opt.threads = 2;  // opt.prune defaults true
+    CHECK_THROWS_AS(generate(root, opt), std::runtime_error);
+    CHECK_THROWS_WITH(generate(root, opt),
+                      ContainsSubstring("Kvk.hm") && ContainsSubstring("Kvkq") &&
+                      ContainsSubstring("expected 'Kvk'"));
+    fs::remove_all(dir);
 }
 
 TEST_CASE("derived prune rule reproduces the known unsolvable classes", "[slow]") {

@@ -107,6 +107,19 @@ add_test(NAME cli_compact_fixture_mkdir COMMAND ${CMAKE_COMMAND} -E make_directo
 add_test(NAME cli_compact_fixture_write COMMAND mk_legacy_table ${COMPACT_TT}/Kvk.hm Kvk)
 add_test(NAME cli_compact_dry COMMAND helpmate compact ${COMPACT_TT} --dry-run)
 add_test(NAME cli_compact COMMAND helpmate compact ${COMPACT_TT})
+# Final-review fix: compact must refuse (not touch) a table whose FILE NAME and
+# header material disagree, rather than deriving the sidecar path from the
+# (untrusted) header name. Fabricate exactly that: a legitimate legacy table
+# for material Kvk, renamed to KQvk.hm so its filename no longer matches its
+# own header.
+set(COMPACT_MISMATCH_TT ${CMAKE_BINARY_DIR}/compact_mismatch_tables)
+add_test(NAME cli_compact_mismatch_fixture_mkdir COMMAND ${CMAKE_COMMAND} -E make_directory ${COMPACT_MISMATCH_TT})
+add_test(NAME cli_compact_mismatch_fixture_write COMMAND mk_legacy_table ${COMPACT_MISMATCH_TT}/Kvk.hm Kvk)
+add_test(NAME cli_compact_mismatch_fixture_rename COMMAND ${CMAKE_COMMAND} -E rename ${COMPACT_MISMATCH_TT}/Kvk.hm ${COMPACT_MISMATCH_TT}/KQvk.hm)
+add_test(NAME cli_compact_mismatch COMMAND helpmate compact ${COMPACT_MISMATCH_TT})
+add_test(NAME cli_compact_mismatch_no_sidecar COMMAND ${CMAKE_COMMAND}
+         -DABSENT_PATH=${COMPACT_MISMATCH_TT}/KQvk.stats.json
+         -P ${CMAKE_SOURCE_DIR}/tests/cpp/assert_absent.cmake)
 # count=4 (not 1): four optimal replies tie at dtm=2 here -- see Task 8's
 # corrected golden (test_probe.cpp), reconfirmed by running the built CLI.
 set_tests_properties(cli_probe PROPERTIES PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_gen)
@@ -125,3 +138,12 @@ set_tests_properties(cli_line_already_mate PROPERTIES PASS_REGULAR_EXPRESSION "a
 set_tests_properties(cli_compact_fixture_write PROPERTIES DEPENDS cli_compact_fixture_mkdir)
 set_tests_properties(cli_compact_dry PROPERTIES PASS_REGULAR_EXPRESSION "would rewrite" DEPENDS cli_compact_fixture_write)
 set_tests_properties(cli_compact PROPERTIES PASS_REGULAR_EXPRESSION "rewrote|already compact" DEPENDS cli_compact_dry)
+set_tests_properties(cli_compact_mismatch_fixture_write PROPERTIES DEPENDS cli_compact_mismatch_fixture_mkdir)
+set_tests_properties(cli_compact_mismatch_fixture_rename PROPERTIES DEPENDS cli_compact_mismatch_fixture_write)
+# helpmate compact exits 3 on a name/header mismatch (verified manually: `helpmate
+# compact <dir>; echo $?` -> 3); PASS_REGULAR_EXPRESSION below additionally pins the
+# error message (ignores exit code, hence the manual note -- same idiom as cli_badfen).
+set_tests_properties(cli_compact_mismatch PROPERTIES
+    PASS_REGULAR_EXPRESSION "error:.*is for material 'Kvk'.*expected 'KQvk'"
+    DEPENDS cli_compact_mismatch_fixture_rename)
+set_tests_properties(cli_compact_mismatch_no_sidecar PROPERTIES DEPENDS cli_compact_mismatch)

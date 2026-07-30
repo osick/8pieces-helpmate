@@ -375,8 +375,21 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
             // mate, in this slice or in one reachable by a capture/promotion).
             bool successors_dead = true;
             for (auto& s : m.successors()) {
-                auto r = TableReader::open(opt.tables_dir + "/" + s.name() + ".hm");
-                if (!r || !r->all_unsolvable()) { successors_dead = false; break; }
+                std::string spath = opt.tables_dir + "/" + s.name() + ".hm";
+                auto r = TableReader::open(spath);
+                if (!r) { successors_dead = false; break; }
+                // Identity check: the file must actually be the table its name promises,
+                // or a misnamed/misplaced/stale table would silently feed a wrong prune
+                // verdict -- the one correctness-critical decision in the whole prune path.
+                SliceIndex si(s);
+                if (r->material_name() != s.name())
+                    throw std::runtime_error("sub-table " + spath + " is for material '" +
+                                             r->material_name() + "', expected '" + s.name() + "'");
+                if (r->plane_size() != si.size())
+                    throw std::runtime_error("sub-table " + spath + " has plane size " +
+                                             std::to_string(r->plane_size()) + ", expected " +
+                                             std::to_string(si.size()) + " for " + s.name());
+                if (!r->all_unsolvable()) { successors_dead = false; break; }
             }
             bool unsolvable = m.mating_side_is_bare_king() ||
                               (successors_dead && !slice_has_any_mate(m));
