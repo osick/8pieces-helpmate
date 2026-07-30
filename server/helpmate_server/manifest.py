@@ -23,5 +23,8 @@ def write_manifest(tables_dir: Path, generator_version: str) -> Path:
     return out
 
 def verify_file(path: Path, manifest: dict) -> bool:
-    entry = manifest.get("files", {}).get(Path(path).name)
-    return bool(entry) and sha256_file(path) == entry["sha256"]
+    p = Path(path)
+    entry = manifest.get("files", {}).get(p.name)
+    if not entry or not p.is_file():
+        return False
+    return sha256_file(p) == entry["sha256"]

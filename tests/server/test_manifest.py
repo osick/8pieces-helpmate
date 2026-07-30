@@ -19,3 +19,9 @@ def test_verify_rejects_corruption_and_unknown(tmp_path):
     (tmp_path / "KQvk.hm").write_bytes(b"abX")           # corrupt one byte
     assert verify_file(tmp_path / "KQvk.hm", m) is False
     assert verify_file(tmp_path / "other.hm", m) is False  # not listed
+
+def test_verify_missing_file_returns_false(tmp_path):
+    (tmp_path / "KQvk.hm").write_bytes(b"abc")
+    m = build_manifest(tmp_path, "0.5.0")
+    (tmp_path / "KQvk.hm").unlink()  # simulate partially-downloaded/missing table
+    assert verify_file(tmp_path / "KQvk.hm", m) is False
