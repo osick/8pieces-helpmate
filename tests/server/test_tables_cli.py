@@ -9,7 +9,9 @@ class RecorderHub:
     def upload(self, path: Path, repo_id: str) -> None:
         self.uploaded.append(path.name)
         self.store[path.name] = Path(path).read_bytes()
-    def fetch_manifest(self) -> dict:
+    def fetch_manifest(self) -> dict | None:
+        if "manifest.json" not in self.store:
+            return None
         return json.loads(self.store["manifest.json"])
     def download(self, filename: str, dest_dir: Path) -> Path:
         p = Path(dest_dir) / filename
@@ -92,6 +94,29 @@ def test_pull_handles_download_error(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "error:" in captured.err
     assert "Traceback" not in captured.err
+
+class BrokenManifestHub(RecorderHub):
+    def fetch_manifest(self):
+        raise IOError("boom")
+
+def test_push_fails_loudly_on_manifest_fetch_error(tmp_path, capsys):
+    seed(tmp_path)
+    hub = BrokenManifestHub()
+    rc = tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                          "--material", "KQvk"], hub_factory=lambda repo: hub)
+    assert rc == 1
+    assert hub.uploaded == []                # nothing uploaded before the failure
+    captured = capsys.readouterr()
+    assert "error:" in captured.err
+    assert "Traceback" not in captured.err
+
+def test_pull_reports_missing_remote_manifest(tmp_path, capsys):
+    hub = RecorderHub()                       # empty store: no manifest.json yet
+    rc = tables_cli.main(["pull", "--tables", str(tmp_path), "--repo", "u/ds"],
+                         hub_factory=lambda repo: hub)
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "error: remote has no manifest" in captured.err
 
 def test_pull_defaults_to_all_materials(tmp_path):
     src, dst = tmp_path / "src", tmp_path / "dst"
