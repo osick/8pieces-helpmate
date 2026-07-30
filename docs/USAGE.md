@@ -68,7 +68,8 @@ is answered through an automatic **color flip** (see `probe` below).
 ## Getting the binary
 
 Build per [BUILD.md](BUILD.md); the CLI lands at `./build/helpmate`. Running
-`helpmate --help` prints the full usage text, every flag, and the exit codes.
+`helpmate --help` prints the full usage text, every flag, and the exit codes;
+`helpmate --version` prints the version (e.g. `helpmate 0.5.0`).
 
 Common options (all subcommands): `--tables DIR` — the table directory
 (default `tables`).
@@ -222,7 +223,7 @@ $ helpmate stats KQvk --tables tt
   "uniqueness": { "wtm": {...}, "btm": {...} },
   "deepest": [ "8/6k1/5Q2/8/8/8/8/K7 b - - 0 1", ... ],
   "deepest_unique": [ "8/8/7k/6Q1/8/8/8/K7 b - - 0 1", ... ],
-  "generator_version": "0.1.0"
+  "generator_version": "0.5.0"
 }
 ```
 

@@ -2,6 +2,7 @@
 #include "generator/generator.h"
 #include "indexing/material.h"
 #include "probe/tablebase.h"
+#include "version.h"
 #include <climits>
 #include <iostream>
 #include <string>
@@ -22,6 +23,7 @@ void usage() {
         "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
         "  helpmate stats <MATERIAL> [--tables DIR]\n"
         "  helpmate mine <MATERIAL> --dtm D [--count C] [--max N] [--tables DIR]\n"
+        "  helpmate --version\n"
         "\n"
         "MATERIAL is a canonical piece string, e.g. \"KQvk\" (White king+queen vs\n"
         "black king) or \"KBNvkq\". FEN is standard 6-field notation; castling\n"
@@ -58,6 +60,7 @@ void usage() {
         "  --max N        cap on lines/FENs printed (default: 10)\n"
         "  --dtm D        mine: required, exact distance-to-mate to match\n"
         "  --count C      mine: optional, exact optimal-reply count to match\n"
+        "  --version      print version (\"helpmate " << HELPMATE_VERSION << "\") and exit\n"
         "\n"
         "Examples:\n"
         "  helpmate gen KQvk --tables tt\n"
@@ -179,6 +182,10 @@ int main(int argc, char** argv) {
     if (args.empty()) { usage(); return 3; }
     std::string cmd = args[0];
     if (cmd == "--help" || cmd == "-h" || cmd == "help") { usage(); return 0; }
+    if (cmd == "--version" || cmd == "-V" || cmd == "version") {
+        std::cout << "helpmate " << HELPMATE_VERSION << "\n";
+        return 0;
+    }
 
     std::string tables = "tables";
     int threads = 1, dtm = -1, count = -1, maxn = 10;

@@ -2,6 +2,7 @@
 #include "generator/eval.h"
 #include "generator/parallel.h"
 #include "chess/board.h"
+#include "version.h"
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -288,7 +289,7 @@ nlohmann::json SliceGen::stats_json() const {
     j["uniqueness"] = uniqueness;
     j["deepest"] = deepest;
     j["deepest_unique"] = deepest_unique;
-    j["generator_version"] = "0.1.0";
+    j["generator_version"] = HELPMATE_VERSION;
     return j;
 }
 

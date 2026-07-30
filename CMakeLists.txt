@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(helpmate LANGUAGES CXX)
+project(helpmate VERSION 0.5.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
@@ -76,6 +76,7 @@ add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 
 # v0.5.0: --verbose lifecycle lines go to stderr (ctest matches merged output);
 # on a re-run every slice is already on disk, so "cached" must appear.
 add_test(NAME cli_gen_verbose COMMAND helpmate gen KQvk --tables ${CLI_TT} --verbose)
+add_test(NAME cli_version COMMAND helpmate --version)
 add_test(NAME cli_badfen COMMAND helpmate probe "garbage" --tables ${CLI_TT})
 # review fix round: malformed and out-of-range numeric flags must not crash
 # (std::stoi throwing std::invalid_argument/std::out_of_range uncaught ->
@@ -98,6 +99,7 @@ set_tests_properties(cli_mine  PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DE
 set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
 set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
 set_tests_properties(cli_gen_verbose PROPERTIES PASS_REGULAR_EXPRESSION "cached" DEPENDS cli_gen)
+set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION "helpmate 0\\.5\\.0")
 set_tests_properties(cli_badint_malformed PROPERTIES PASS_REGULAR_EXPRESSION "error.*--dtm")
 set_tests_properties(cli_badint_range PROPERTIES PASS_REGULAR_EXPRESSION "error.*--threads")
 set_tests_properties(cli_line_already_mate PROPERTIES PASS_REGULAR_EXPRESSION "already mate" DEPENDS cli_gen)
