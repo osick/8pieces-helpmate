@@ -2,9 +2,15 @@
 #include "generator/eval.h"
 #include "generator/parallel.h"
 #include "chess/board.h"
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <map>
 
 namespace hm {
@@ -19,7 +25,44 @@ std::string cell_context(const Material& mat, uint64_t cell, int stm, int depth)
     return "slice " + mat.name() + ", cell " + std::to_string(cell) +
            ", stm " + (stm ? "black" : "white") + ", scan depth " + std::to_string(depth);
 }
+
+std::string gib(uint64_t bytes) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.2f", (double)bytes / (1024.0 * 1024.0 * 1024.0));
+    return buf;
+}
+
+// Seconds since t0, formatted "%.1f". Progress/verbose reporting only.
+std::string secs_since(std::chrono::steady_clock::time_point t0) {
+    double s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%.1f", s);
+    return buf;
+}
 }  // namespace
+
+std::optional<uint64_t> mem_available_bytes() {
+    std::ifstream f("/proc/meminfo");
+    if (!f) return std::nullopt;
+    std::string line;
+    while (std::getline(f, line)) {
+        constexpr const char* kKey = "MemAvailable:";
+        if (line.rfind(kKey, 0) != 0) continue;
+        char* end = nullptr;
+        unsigned long long kb = std::strtoull(line.c_str() + std::strlen(kKey), &end, 10);
+        if (end == line.c_str() + std::strlen(kKey)) return std::nullopt;  // no number followed
+        return (uint64_t)kb * 1024;
+    }
+    return std::nullopt;
+}
+
+std::optional<std::string> ram_guard_error(const std::string& slice,
+                                           uint64_t required_bytes, uint64_t available_bytes) {
+    if (required_bytes <= available_bytes) return std::nullopt;
+    return "not enough memory to generate slice " + slice + ": its four value planes need ~" +
+           gib(required_bytes) + " GiB but only " + gib(available_bytes) +
+           " GiB is available (MemAvailable, /proc/meminfo); re-run with --force-ram to override";
+}
 
 SliceGen::SliceGen(const Material& m, const GenOptions& opt)
     : mat_(m), opt_(opt), idx_(m), ps_(idx_.size()) {
@@ -27,6 +70,7 @@ SliceGen::SliceGen(const Material& m, const GenOptions& opt)
 }
 
 void SliceGen::init_pass() {
+    auto t0 = std::chrono::steady_clock::now();
     // Each cell c is examined and written independently of every other cell
     // (opponent_in_check()/state() depend only on pp/s decoded from c itself),
     // so a disjoint [begin,end) range per worker is race-free; each worker
@@ -44,6 +88,8 @@ void SliceGen::init_pass() {
             }
         }
     });
+    if (opt_.progress)
+        std::cerr << "  " << mat_.name() << ": init pass done (" << secs_since(t0) << " s)\n";
 }
 
 void SliceGen::count_sweep() {
@@ -58,6 +104,7 @@ void SliceGen::count_sweep() {
         for (uint64_t c = begin; c < end; ++c) if (dtm_[1][c] == 0) cnt_[1][c] = 1;
     });
     for (int d = 1; d <= max_dtm_; ++d) {
+        auto t0 = std::chrono::steady_clock::now();
         int s = (d % 2) ? 0 : 1;
         parallel_for(ps_, opt_.threads, [this, s, d](uint64_t begin, uint64_t end) {
             std::vector<PlacedPiece> pp; Board b;
@@ -82,6 +129,11 @@ void SliceGen::count_sweep() {
                 cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
             }
         });
+        // Reported from the coordinating thread at a pass boundary only --
+        // the worker loop above is untouched by any progress bookkeeping.
+        if (opt_.progress)
+            std::cerr << "  " << mat_.name() << ": count sweep d=" << d << "/" << max_dtm_
+                      << " done (" << secs_since(t0) << " s)\n";
     }
 }
 
@@ -123,12 +175,16 @@ bool SliceGen::scan_pass(int d) {
     // workers touching different cells c1 != c2 never read-during-write or
     // write-during-write each other's data. Each worker owns a disjoint cell
     // range (and its own Board/pp, since Board is stateful); the only shared
-    // mutable state is `any`, updated through a std::atomic<bool>.
+    // mutable state is `resolved`, a counter each worker adds its private
+    // per-chunk tally to exactly once, after its cell loop -- so the hot loop
+    // itself carries no locks, IO, or shared atomic traffic.
+    auto t0 = std::chrono::steady_clock::now();
     Color mover = (d % 2) ? Color::White : Color::Black;
     int s = (int)mover;
-    std::atomic<bool> any{false};
-    parallel_for(ps_, opt_.threads, [this, s, mover, d, &any](uint64_t begin, uint64_t end) {
+    std::atomic<uint64_t> resolved{0};
+    parallel_for(ps_, opt_.threads, [this, s, mover, d, &resolved](uint64_t begin, uint64_t end) {
         std::vector<PlacedPiece> pp; Board b;
+        uint64_t local = 0;
         for (uint64_t c = begin; c < end; ++c) {
             if (dtm_[s][c] != DTM_UNSET) continue;
             if (!idx_.decode(c, pp))                       // UNSET cells always decode
@@ -142,7 +198,7 @@ bool SliceGen::scan_pass(int d) {
                     b.make(m);
                     ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
                     b.unmake(m);
-                    if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; any = true; break; }
+                    if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; ++local; break; }
                 }
             } catch (const GeneratorLookupError& e) {
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
@@ -150,8 +206,14 @@ bool SliceGen::scan_pass(int d) {
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
             }
         }
+        if (local) resolved.fetch_add(local, std::memory_order_relaxed);
     });
-    return any.load();
+    uint64_t n = resolved.load();
+    // Reported from the coordinating thread at the pass boundary only.
+    if (opt_.progress)
+        std::cerr << "  " << mat_.name() << ": pass d=" << d << " resolved " << n
+                  << " cells (" << secs_since(t0) << " s)\n";
+    return n > 0;
 }
 
 void SliceGen::run_all_passes() {
@@ -245,15 +307,72 @@ void SliceGen::finalize_and_write() {
     out << meta;
 }
 
-std::vector<std::string> generate(const Material& root, const GenOptions& opt) {
+std::vector<std::string> generate(const Material& root, const GenOptions& opt_in) {
+    GenOptions opt = opt_in;
+    if (opt.verbose) opt.progress = true;             // --verbose implies --progress
+
+    auto closure = Material::closure_topo(root);
+
+    // Pre-flight: index sizes are pure mixed-radix math, so the whole closure
+    // can be costed before a single byte is allocated. An impossible run
+    // (typically the root slice of a 7-8 piece material) must fail *now*, not
+    // after days of sub-slice generation.
+    struct Todo { const Material* m; uint64_t cells; };
+    std::vector<Todo> missing;
+    for (auto& m : closure)
+        if (!std::filesystem::exists(opt.tables_dir + "/" + m.name() + ".hm"))
+            missing.push_back({&m, SliceIndex(m).size()});
+    if (opt.verbose) {
+        std::cerr << "gen " << root.name() << ": closure has " << closure.size() << " slice(s):";
+        for (auto& m : closure) std::cerr << " " << m.name();
+        std::cerr << "\n";
+    }
+    auto avail = mem_available_bytes();
+    if (!missing.empty()) {
+        auto largest = std::max_element(missing.begin(), missing.end(),
+            [](const Todo& a, const Todo& b) { return a.cells < b.cells; });
+        if (opt.verbose) {
+            std::cerr << "gen " << root.name() << ": " << missing.size()
+                      << " slice(s) to build; largest " << largest->m->name() << " ("
+                      << largest->cells << " cells, ~" << gib(plane_ram_bytes(largest->cells))
+                      << " GiB RAM";
+            if (avail) std::cerr << "; " << gib(*avail) << " GiB available";
+            std::cerr << ")\n";
+        }
+        if (!opt.force_ram && avail)
+            if (auto err = ram_guard_error(largest->m->name(),
+                                           plane_ram_bytes(largest->cells), *avail))
+                throw std::runtime_error(*err);
+    }
+
     std::vector<std::string> written;
-    for (auto& m : Material::closure_topo(root)) {
+    for (auto& m : closure) {
         std::string path = opt.tables_dir + "/" + m.name() + ".hm";
-        if (std::filesystem::exists(path)) continue;
+        if (std::filesystem::exists(path)) {
+            if (opt.verbose) std::cerr << "cached " << m.name() << " (already on disk)\n";
+            continue;
+        }
+        uint64_t cells = SliceIndex(m).size();
+        // Re-check right before this slice's planes are allocated: available
+        // memory shrinks as other processes (or the page cache holding the
+        // tables just written) consume it, and the pre-flight only costed the
+        // largest slice.
+        if (!opt.force_ram)
+            if (auto now_avail = mem_available_bytes())
+                if (auto err = ram_guard_error(m.name(), plane_ram_bytes(cells), *now_avail))
+                    throw std::runtime_error(*err);
+        if (opt.verbose)
+            std::cerr << "generating " << m.name() << " (" << cells << " cells)...\n";
+        auto t0 = std::chrono::steady_clock::now();
         SliceGen g(m, opt);
         g.run_all_passes();
         g.count_sweep();
         g.finalize_and_write();
+        if (opt.verbose) {
+            int md = g.max_dtm() < 0 ? (int)DTM_UNSOLVABLE : g.max_dtm();
+            std::cerr << "done " << m.name() << " (max_dtm=" << md << ", "
+                      << secs_since(t0) << " seconds)\n";
+        }
         written.push_back(path);
     }
     return written;

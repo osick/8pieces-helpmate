@@ -76,11 +76,64 @@ Common options (all subcommands): `--tables DIR` — the table directory
 ## `gen` — generate tables
 
 ```
-helpmate gen <MATERIAL> [--tables DIR] [--threads N]
+helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [--force-ram]
 ```
 
 - `--threads N`: worker threads for generation (default 1). Multithreaded
   output is byte-identical to single-threaded output (enforced by tests).
+- `--verbose`: per-slice lifecycle reporting on **stderr** (stdout stays
+  scriptable): the closure summary (which slices, how many are missing, the
+  largest missing slice with its cell count and estimated RAM vs. what is
+  available), then per slice either `cached <name> (already on disk)` or
+  `generating <name> (N cells)...` / `done <name> (max_dtm=D, T seconds)`.
+  Implies `--progress`.
+- `--progress`: per-pass progress lines on stderr while a slice is being
+  generated: the init pass, every scan pass (`pass d=K resolved M cells
+  (S s)`), and every count-sweep depth, each with its wall time. Reported only
+  at pass boundaries from the coordinating thread, so it adds no per-cell
+  overhead; useful on its own when `--verbose`'s lifecycle lines are too chatty
+  for a script but you still want a heartbeat during multi-hour 5-6 piece
+  passes.
+- `--force-ram`: override the RAM guard. By default `gen` estimates, before
+  allocating anything, the memory each missing slice needs (4 one-byte planes
+  x plane size) and compares it against `MemAvailable` from `/proc/meminfo`
+  (the whole closure is costed upfront, so a hopeless 7-8 piece run fails
+  immediately, not after days of sub-slice generation). If a slice does not
+  fit, `gen` aborts with the slice name and both sizes in GiB; `--force-ram`
+  proceeds anyway (e.g. when you trust swap to absorb it). On systems without
+  a readable `/proc/meminfo` the guard is skipped.
+
+Example (real output; all reporting lines on stderr, the two `.hm` result
+lines on stdout as before):
+
+```
+$ helpmate gen KRvk --tables tt --threads 2 --verbose
+gen KRvk: closure has 2 slice(s): Kvk KRvk
+gen KRvk: 2 slice(s) to build; largest KRvk (29568 cells, ~0.00 GiB RAM; 54.16 GiB available)
+generating Kvk (462 cells)...
+  Kvk: init pass done (0.0 s)
+  Kvk: pass d=1 resolved 0 cells (0.0 s)
+  Kvk: pass d=2 resolved 0 cells (0.0 s)
+done Kvk (max_dtm=255, 0.0 seconds)
+generating KRvk (29568 cells)...
+  KRvk: init pass done (0.0 s)
+  KRvk: pass d=1 resolved 189 cells (0.1 s)
+  ...
+  KRvk: count sweep d=14/14 done (0.0 s)
+done KRvk (max_dtm=14, 0.4 seconds)
+tt/Kvk.hm max_dtm=255
+tt/KRvk.hm max_dtm=14
+```
+
+And the guard refusing a slice that cannot fit (here a 7-piece root on a
+64 GB machine; exit code 3, nothing was allocated or generated):
+
+```
+$ helpmate gen KQRRvkqr --tables tt
+error: not enough memory to generate slice KQRRvkqr: its four value planes
+need ~1848.00 GiB but only 54.17 GiB is available (MemAvailable,
+/proc/meminfo); re-run with --force-ram to override
+```
 
 `gen` builds **every** table needed to answer queries about MATERIAL — the
 whole closure of sub-slices reachable via captures and promotions, in
@@ -285,9 +338,11 @@ tb.stats("KQvk")["max_dtm"]
 
 Reference:
 
-- `helpmate.generate(material, tables="tables", threads=1)` — generates the
-  closure exactly like the CLI's `gen`; returns the list of `.hm` paths
-  written (empty if everything already existed).
+- `helpmate.generate(material, tables="tables", threads=1, verbose=False,
+  progress=False, force_ram=False)` — generates the closure exactly like the
+  CLI's `gen` (the three keyword flags match `--verbose`, `--progress`,
+  `--force-ram`; reporting goes to the process's stderr); returns the list of
+  `.hm` paths written (empty if everything already existed).
 - `Tablebase(tables_dir)` — lazily mmap-loads and caches whatever slices
   queries touch.
 - `tb.probe(fen)` — returns a `(dtm, count, flipped)` tuple, or **`None`** for

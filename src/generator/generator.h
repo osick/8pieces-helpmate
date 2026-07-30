@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,7 +26,30 @@ struct GeneratorLookupError : std::runtime_error { using std::runtime_error::run
 // FEN of a decoded piece list, for error messages ("<unavailable>" if it cannot be rendered).
 std::string describe_position(const std::vector<PlacedPiece>& pp, Color stm);
 
-struct GenOptions { std::string tables_dir = "tables"; int threads = 1; };
+struct GenOptions {
+    std::string tables_dir = "tables";
+    int threads = 1;
+    bool verbose = false;    // per-slice lifecycle lines on stderr (implies progress)
+    bool progress = false;   // per-pass progress lines on stderr
+    bool force_ram = false;  // skip the pre-allocation RAM guard
+};
+
+// ---- RAM guard --------------------------------------------------------------
+// generate() refuses to start a slice whose four value planes (dtm/count x
+// wtm/btm, one byte per cell each) would not fit in currently-available RAM,
+// *before* allocating anything. The decision is a pure function so it is unit-
+// testable without a 30 GB box.
+
+// Bytes SliceGen allocates for a slice: 4 planes x plane_size (dtm_[2] + cnt_[2]).
+constexpr uint64_t plane_ram_bytes(uint64_t plane_size) { return 4 * plane_size; }
+
+// MemAvailable from /proc/meminfo, in bytes; nullopt if unreadable (then the
+// guard is skipped -- better to try than to refuse on an unknown platform).
+std::optional<uint64_t> mem_available_bytes();
+
+// Engaged (with a complete, actionable message) iff required > available.
+std::optional<std::string> ram_guard_error(const std::string& slice,
+                                           uint64_t required_bytes, uint64_t available_bytes);
 
 // Builds the whole closure (missing slices only), root last. Returns paths of written files.
 std::vector<std::string> generate(const Material& root, const GenOptions& = {});

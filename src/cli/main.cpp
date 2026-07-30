@@ -16,7 +16,8 @@ void usage() {
         "helpmate - build and query helpmate chess tablebases\n"
         "\n"
         "Usage:\n"
-        "  helpmate gen <MATERIAL> [--tables DIR] [--threads N]\n"
+        "  helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose]\n"
+        "               [--progress] [--force-ram]\n"
         "  helpmate probe <FEN> [--tables DIR]\n"
         "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
         "  helpmate stats <MATERIAL> [--tables DIR]\n"
@@ -45,6 +46,14 @@ void usage() {
         "Options:\n"
         "  --tables DIR   table directory (default: \"tables\")\n"
         "  --threads N    worker threads for gen (default: 1)\n"
+        "  --verbose      gen: per-slice lifecycle lines on stderr (closure\n"
+        "                 summary, generating/cached/done per slice); implies\n"
+        "                 --progress. stdout stays scriptable.\n"
+        "  --progress     gen: per-pass progress lines on stderr while a slice\n"
+        "                 is being generated (init pass, each scan pass with\n"
+        "                 cells resolved, each count-sweep depth, with timings)\n"
+        "  --force-ram    gen: skip the RAM guard (which refuses to start a\n"
+        "                 slice whose planes exceed available memory)\n"
         "  --all          line: print every optimal line, not just one\n"
         "  --max N        cap on lines/FENs printed (default: 10)\n"
         "  --dtm D        mine: required, exact distance-to-mate to match\n"
@@ -91,11 +100,13 @@ bool parse_int(const std::string& value, int& out) {
     }
 }
 
-int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int threads) {
+int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int threads,
+            bool verbose, bool progress, bool force_ram) {
     if (pos.empty()) { std::cerr << "error: gen needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
     auto m = Material::parse(pos[0]);
     if (!m) { std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n"; return 3; }
     GenOptions opt; opt.tables_dir = tables; opt.threads = threads;
+    opt.verbose = verbose; opt.progress = progress; opt.force_ram = force_ram;
     auto written = generate(*m, opt);
     if (written.empty())
         std::cout << "nothing to do: all tables for " << m->name() << " already exist in " << tables << "\n";
@@ -171,7 +182,7 @@ int main(int argc, char** argv) {
 
     std::string tables = "tables";
     int threads = 1, dtm = -1, count = -1, maxn = 10;
-    bool all = false;
+    bool all = false, verbose = false, progress = false, force_ram = false;
     std::vector<std::string> pos;  // positional args
     // Flags below all take a value; if one appears with nothing after it,
     // that's a usage error, not a stray positional argument (e.g. `probe FEN
@@ -203,11 +214,14 @@ int main(int argc, char** argv) {
         else if (a == "--count")   set_int(a, i, count);
         else if (a == "--max")     set_int(a, i, maxn);
         else if (a == "--all") all = true;
+        else if (a == "--verbose")   verbose = true;
+        else if (a == "--progress")  progress = true;
+        else if (a == "--force-ram") force_ram = true;
         else pos.push_back(a);
     }
     if (bad_int) return 3;
     try {
-        if (cmd == "gen")   return cmd_gen(pos, tables, threads);
+        if (cmd == "gen")   return cmd_gen(pos, tables, threads, verbose, progress, force_ram);
         if (cmd == "probe") return cmd_probe(pos, tables);
         if (cmd == "line")  return cmd_line(pos, tables, all, maxn);
         if (cmd == "stats") return cmd_stats(pos, tables);
