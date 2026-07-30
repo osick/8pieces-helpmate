@@ -22,6 +22,14 @@ def test_localdir_missing_sidecar_still_listed(tmp_path):
     (s,) = LocalDir(tmp_path).catalog()
     assert (s.material, s.max_dtm, s.cells) == ("KRvk", None, None)
 
+def test_localdir_resolve_rejects_traversal(tmp_path):
+    outside = tmp_path.parent / "x.hm"
+    outside.write_bytes(b"\x00" * 8)
+    try:
+        assert LocalDir(tmp_path).resolve("../x") is None
+    finally:
+        outside.unlink(missing_ok=True)
+
 def test_chain_prefers_first_local(tmp_path):
     a, b = tmp_path / "a", tmp_path / "b"; a.mkdir(); b.mkdir()
     make_slice(a, "KQvk", max_dtm=4); make_slice(b, "KQvk", max_dtm=9); make_slice(b, "KRvk")

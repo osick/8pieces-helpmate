@@ -1,11 +1,15 @@
 from __future__ import annotations
+import re
 import helpmate
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .storage import ChainSource
+
+_MATERIAL_RE = re.compile(r"^[KQRBNP]+v[kqrbnp]+$")
 
 def error_json(code: str, message: str, hint: str | None = None) -> dict:
     return {"error": {"code": code, "message": message, "hint": hint}}
@@ -34,12 +38,25 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         return JSONResponse(status_code=exc.status_code,
                             content=error_json(code, str(exc.detail)))
 
+    @app.exception_handler(RequestValidationError)
+    async def validation_error(request, exc: RequestValidationError):
+        # Missing/malformed query params (e.g. /v1/probe with no fen, or
+        # /v1/mine?dtm=notanint) raise this instead of StarletteHTTPException,
+        # so it needs its own handler to keep the envelope contract intact.
+        message = "; ".join(
+            f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in exc.errors())
+        return JSONResponse(status_code=400,
+                            content=error_json("invalid_request", message))
+
     def unknown(material: str) -> JSONResponse:
         return JSONResponse(status_code=404, content=error_json(
             "unknown_material", f"no table for material '{material}'",
             hint=f"generate it with: helpmate gen {material} --tables <dir>"))
 
     def _resolve_or_response(material: str):
+        if not _MATERIAL_RE.match(material):
+            return None, JSONResponse(status_code=400, content=error_json(
+                "invalid_material", f"invalid material '{material}'"))
         kind, val = chain.status(material)
         if kind in ("local", "cached"):
             return val, None

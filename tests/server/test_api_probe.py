@@ -1,5 +1,18 @@
 GOLD_FEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"   # dtm=2 count=4 (Task 8 golden)
 
+def test_probe_missing_fen_400_envelope(tmp_path):
+    # Missing required query param triggers FastAPI's RequestValidationError,
+    # which is NOT a StarletteHTTPException and must still get the envelope.
+    from fastapi.testclient import TestClient
+    from helpmate_server.storage import LocalDir, ChainSource
+    from helpmate_server.app import create_app
+    c = TestClient(create_app(ChainSource([LocalDir(tmp_path)])))
+    r = c.get("/v1/probe")
+    assert r.status_code == 400
+    body = r.json()
+    assert "detail" not in body
+    assert body["error"]["code"] == "invalid_request"
+
 def test_probe_empty_fen_400(tmp_path):
     from fastapi.testclient import TestClient
     from helpmate_server.storage import LocalDir, ChainSource

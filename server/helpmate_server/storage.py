@@ -19,6 +19,12 @@ class SliceInfo:
 def _piece_count(material: str) -> int:
     return sum(1 for c in material if c != "v")
 
+def _safe_material(material: str) -> bool:
+    # Defense-in-depth: the API layer already rejects malformed material
+    # names, but this guards direct callers too against path traversal via
+    # "/", "\\", or "..".
+    return "/" not in material and "\\" not in material and ".." not in material
+
 def _info_from_files(hm: Path, location: str) -> SliceInfo:
     material = hm.name[: -len(".hm")]
     max_dtm = cells = None
@@ -39,6 +45,8 @@ class LocalDir:
                       key=lambda s: s.material)
 
     def resolve(self, material: str) -> Path | None:
+        if not _safe_material(material):
+            return None
         return self.path if (self.path / f"{material}.hm").exists() else None
 
 class RemoteHub(Protocol):
@@ -87,10 +95,14 @@ class RemoteSource:
         return sorted(out, key=lambda s: s.material)
 
     def _cleanup_cache_files(self, material: str) -> None:
+        if not _safe_material(material):
+            return
         (self.cache_dir / f"{material}.hm").unlink(missing_ok=True)
         (self.cache_dir / f"{material}.stats.json").unlink(missing_ok=True)
 
     def fetch_state(self, material: str) -> str:
+        if not _safe_material(material):
+            return "absent"
         with self._lock:
             st = self._states.get(material)
         if st in ("fetching", "failed"):
