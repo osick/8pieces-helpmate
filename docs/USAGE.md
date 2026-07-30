@@ -659,3 +659,49 @@ present).
 | `0` | success. |
 | `1` | operation failed after starting (network error, remote has no manifest on `pull`, sha256 mismatch, upload error) — message on stderr, no traceback. |
 | `2` | bad usage (`--tables` not a directory, no subcommand given). |
+
+### Smoke-testing a running server
+
+`tools/api_smoke.py` exercises every `/v1` route against a live server and
+checks response shapes, the error envelope, and — when a `KQvk` table is
+served — the golden values pinned by the C++/Python/CLI test suites. It uses
+only the Python standard library, so it runs anywhere the server does,
+including against a remote deployment.
+
+```console
+$ helpmate-server --tables ~/tb --port 8642 &
+$ python3 tools/api_smoke.py --url http://127.0.0.1:8642
+helpmate API smoke test against http://127.0.0.1:8642
+
+[health]
+  ok   GET /v1/health -> 200
+  ok   health reports status/version
+       version 0.6.0, 2 local / 0 remote table(s)
+
+[catalog]
+  ok   GET /v1/materials -> 200
+  ok   catalog is non-empty
+  ok   catalog entries carry pieces/size/location
+       KQvk, Kvk
+       exercising material: KQvk
+...
+[errors]
+  ok   invalid FEN -> 400 envelope
+  ok   missing parameter -> 400 envelope
+  ok   path traversal in material -> 400 envelope
+  ok   unknown material -> 404 envelope with a gen hint
+  ok   unknown route -> 404 envelope
+
+20 passed, 0 failed
+```
+
+Options:
+
+| Flag | Meaning |
+|---|---|
+| `--url URL` | base URL of the running server (default `http://127.0.0.1:8642`). |
+| `--material NAME` | material to exercise `probe`/`line`/`mine` against. Defaults to `KQvk` when it is served (enabling the golden-value checks), otherwise the first catalogued material — for which the script mines a position and verifies that `probe` and `line` agree with it. |
+| `--fetch-timeout N` | when a route answers `202 fetching` (the material lives only on the remote), keep polling for up to `N` seconds instead of skipping the check. Downloads can be large; `0` (the default) does not wait. |
+
+Exit status: `0` all checks passed, `1` at least one failed (each is listed
+again at the end), `2` the server was unreachable.
