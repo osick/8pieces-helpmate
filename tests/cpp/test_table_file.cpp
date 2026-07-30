@@ -1,9 +1,11 @@
 #include <catch2/catch_test_macros.hpp>
 #include "format/table_file.h"
 #include "indexing/material.h"
+#include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <unistd.h>
 using namespace hm;
 TEST_CASE("header is 64 bytes") { CHECK(sizeof(TableHeader) == 64); }
@@ -109,5 +111,53 @@ TEST_CASE("ordinary tables stay format version 1 and keep reading") {
     CHECK_FALSE(r->all_unsolvable());
     CHECK(r->get(Color::White, 0).dtm == 7);
     CHECK(r->get(Color::Black, 3).dtm == 8);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("malformed marker headers are rejected") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() /
+                   ("hm_marker_bad_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string valid_path = (dir / "KBvkq.hm").string();
+    Material m = *Material::parse("KBvkq");
+    const uint64_t ps = 1234;
+
+    TableWriter::write_unsolvable(valid_path, m, ps, R"({"material":"KBvkq"})");
+
+    std::vector<uint8_t> bytes;
+    {
+        std::ifstream in(valid_path, std::ios::binary);
+        bytes.assign(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+    }
+    REQUIRE(bytes.size() >= sizeof(TableHeader));
+
+    // (a) version == 2 but the marker flag is CLEAR -> must be rejected.
+    {
+        std::vector<uint8_t> corrupt = bytes;
+        corrupt[offsetof(TableHeader, flags)] = 0;
+        std::string path = (dir / "flag_clear.hm").string();
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(corrupt.data()),
+                  static_cast<std::streamsize>(corrupt.size()));
+        out.close();
+        CHECK(!TableReader::open(path));
+    }
+
+    // (b) version == 2, marker flag SET, but a non-empty trailing payload -> must be rejected.
+    {
+        std::vector<uint8_t> corrupt = bytes;
+        corrupt.push_back(0);
+        corrupt.push_back(0);
+        corrupt.push_back(0);
+        corrupt.push_back(0);
+        std::string path = (dir / "extra_payload.hm").string();
+        std::ofstream out(path, std::ios::binary | std::ios::trunc);
+        out.write(reinterpret_cast<const char*>(corrupt.data()),
+                  static_cast<std::streamsize>(corrupt.size()));
+        out.close();
+        CHECK(!TableReader::open(path));
+    }
+
     fs::remove_all(dir);
 }
