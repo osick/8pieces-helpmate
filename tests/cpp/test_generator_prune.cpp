@@ -123,3 +123,36 @@ TEST_CASE("generate leaves solvable slices byte-identical when pruning") {
             REQUIRE(pruned->get(stm, c).dtm == full->get(stm, c).dtm);
     fs::remove_all(a); fs::remove_all(b);
 }
+
+TEST_CASE("derived prune rule reproduces the known unsolvable classes", "[slow]") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() /
+                   ("hm_oracle_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    GenOptions opt; opt.tables_dir = dir.string(); opt.threads = 4;
+
+    // Generating these roots covers their whole closures, i.e. every material
+    // named below.
+    for (const char* root : {"KBvkqr", "KNvkq", "KNvkr", "KBvkb", "KNvkb"})
+        generate(*Material::parse(root), opt);
+
+    auto is_unsolvable = [&](const char* n) {
+        auto r = TableReader::open((dir / (std::string(n) + ".hm")).string());
+        REQUIRE(r.has_value());
+        return r->max_dtm() == DTM_UNSOLVABLE;
+    };
+
+    // Kvk*: bare king. KBvk[qr]*: bishop vs queens/rooks. KNvk[q]*: knight vs queens.
+    for (const char* n : {"Kvk", "Kvkq", "Kvkr", "Kvkqr",
+                          "KBvk", "KBvkq", "KBvkr", "KBvkqr",
+                          "KNvk", "KNvkq"}) {
+        INFO("expected unsolvable: " << n);
+        CHECK(is_unsolvable(n));
+    }
+    // Counter-oracle: neighbouring materials that DO have helpmates.
+    for (const char* n : {"KNvkr", "KBvkb", "KNvkb"}) {
+        INFO("expected solvable: " << n);
+        CHECK_FALSE(is_unsolvable(n));
+    }
+    fs::remove_all(dir);
+}
