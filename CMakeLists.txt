@@ -59,6 +59,13 @@ add_executable(helpmate src/cli/main.cpp)
 target_link_libraries(helpmate PRIVATE helpmate_core)
 install(TARGETS helpmate RUNTIME DESTINATION bin)
 
+# Test-support only (not installed): writes a legacy-format all-unsolvable
+# table so `helpmate compact`'s ctest coverage has a real rewrite target --
+# see tests/cpp/mk_legacy_table.cpp for why `helpmate gen` can no longer
+# produce this fixture itself.
+add_executable(mk_legacy_table tests/cpp/mk_legacy_table.cpp)
+target_link_libraries(mk_legacy_table PRIVATE helpmate_core)
+
 if(HELPMATE_PYTHON)
   find_package(pybind11 CONFIG REQUIRED)
   pybind11_add_module(_helpmate src/bindings/pymodule.cpp)
@@ -88,6 +95,18 @@ add_test(NAME cli_badint_range COMMAND helpmate gen KQvk --threads 9999999999999
 # silent blank line (tb.lines() returns one *empty* line here, so a naive
 # ls.empty() check misses it).
 add_test(NAME cli_line_already_mate COMMAND helpmate line "8/8/8/8/8/8/8/kQK5 b - - 0 1" --tables ${CLI_TT} --all)
+# v0.6.1: `compact` rewrites all-unsolvable tables already on disk as tiny
+# markers. `helpmate gen` itself now prunes every provably-unsolvable slice
+# to a marker at generation time (see generator.cpp's opt.prune path), so
+# gen's own output never gives compact anything left to do -- compact exists
+# for tables written by OLDER binaries, before that pruning feature existed.
+# mk_legacy_table fabricates exactly that: an ordinary (version 1) table,
+# fully populated, whose every cell happens to read DTM_UNSOLVABLE.
+set(COMPACT_TT ${CMAKE_BINARY_DIR}/compact_tables)
+add_test(NAME cli_compact_fixture_mkdir COMMAND ${CMAKE_COMMAND} -E make_directory ${COMPACT_TT})
+add_test(NAME cli_compact_fixture_write COMMAND mk_legacy_table ${COMPACT_TT}/Kvk.hm Kvk)
+add_test(NAME cli_compact_dry COMMAND helpmate compact ${COMPACT_TT} --dry-run)
+add_test(NAME cli_compact COMMAND helpmate compact ${COMPACT_TT})
 # count=4 (not 1): four optimal replies tie at dtm=2 here -- see Task 8's
 # corrected golden (test_probe.cpp), reconfirmed by running the built CLI.
 set_tests_properties(cli_probe PROPERTIES PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_gen)
@@ -103,3 +122,6 @@ set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION "helpmate 0\
 set_tests_properties(cli_badint_malformed PROPERTIES PASS_REGULAR_EXPRESSION "error.*--dtm")
 set_tests_properties(cli_badint_range PROPERTIES PASS_REGULAR_EXPRESSION "error.*--threads")
 set_tests_properties(cli_line_already_mate PROPERTIES PASS_REGULAR_EXPRESSION "already mate" DEPENDS cli_gen)
+set_tests_properties(cli_compact_fixture_write PROPERTIES DEPENDS cli_compact_fixture_mkdir)
+set_tests_properties(cli_compact_dry PROPERTIES PASS_REGULAR_EXPRESSION "would rewrite" DEPENDS cli_compact_fixture_write)
+set_tests_properties(cli_compact PROPERTIES PASS_REGULAR_EXPRESSION "rewrote|already compact" DEPENDS cli_compact_dry)
