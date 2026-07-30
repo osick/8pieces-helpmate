@@ -54,6 +54,15 @@ count — is an O(1) table lookup, not a fresh search.
   optimal lines, the complete `stats.json` field reference, mining, exit codes,
   DTM/h#n semantics, resource guidance per piece count, and the Python API.
 
+## API server
+
+`pip install ".[server]"` adds `helpmate-server` (a read-only HTTP API —
+health/catalog/stats/probe/line/mine, with on-demand fetching from a Hugging
+Face dataset for tables not stored locally) and `helpmate-tables`
+(push/pull tables to that dataset). See the
+["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
+route, real curl examples, and the manifest format.
+
 ## Quick start
 
 ### Build

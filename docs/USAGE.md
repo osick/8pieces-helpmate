@@ -364,3 +364,297 @@ material strings raise `ValueError`.
 
 Python tests live in `tests/python/` (`pytest tests/python`; add `--run-slow`
 for the exhaustive python-chess cross-validation of the full KQvk closure).
+
+## API server
+
+A small read-only HTTP API (FastAPI + uvicorn) for serving generated tables:
+health/catalog/stats, `probe`/`line`/`mine` as JSON, and transparent
+on-demand fetching of tables that only live in a remote Hugging Face
+dataset. Plus a companion CLI, `helpmate-tables`, for pushing tables to and
+pulling them from that dataset.
+
+### Install
+
+```bash
+pip install ".[server]"
+```
+
+This installs `fastapi`, `uvicorn`, and `huggingface_hub` on top of the base
+package, and registers two console scripts: `helpmate-server` and
+`helpmate-tables`.
+
+### Start the server
+
+```bash
+helpmate-server --tables ~/myhelpmate/tables --hf-repo USER/DS \
+  --cache ~/.cache/helpmate-tables --port 8642
+```
+
+- `--tables DIR` (repeatable): one or more local directories searched, in
+  order, for `.hm`/`.stats.json` files. Omit entirely to serve only from the
+  remote.
+- `--hf-repo USER/DATASET` + `--cache DIR`: an optional Hugging Face dataset
+  repo consulted when a material isn't found in any `--tables` dir; downloads
+  land in `--cache` (`--hf-repo` requires `--cache`, and vice versa isn't
+  enforced but is pointless).
+- `--host` / `--port`: default `127.0.0.1:8642`.
+- `--mine-cap` (default `1000`) / `--mine-timeout` (default `30.0` seconds):
+  see [`/v1/mine`](#get-v1mine) below.
+
+All examples below were captured from a real, locally running server
+(`helpmate-server --tables <scratch>` with `<scratch>` generated via
+`helpmate.generate("KQvk", tables="<scratch>", threads=2)`, i.e. the `KQvk`
+closure: `KQvk` + `Kvk`), on `127.0.0.1:8642`.
+
+### Error envelope
+
+Every non-2xx, non-202 response (including framework-generated 404/405s and
+uncaught exceptions) has the same shape:
+
+```json
+{"error": {"code": "unknown_material", "message": "...", "hint": "..."}}
+```
+
+`hint` is `null` when there is nothing actionable to add.
+
+### `GET /v1/health`
+
+```
+$ curl -s http://127.0.0.1:8642/v1/health
+{"status":"ok","version":"0.6.0.dev0","tables_local":2,"tables_remote":0}
+```
+
+### `GET /v1/materials`
+
+Lists every material the chain of local dirs + remote manifest knows about
+(one entry per resolved `.hm`/catalog file; `location` is `local`, `cached`,
+or `remote`).
+
+```
+$ curl -s http://127.0.0.1:8642/v1/materials
+{"materials":[{"material":"KQvk","pieces":3,"size_bytes":146117,"max_dtm":14,"cells":29568,"location":"local"},{"material":"Kvk","pieces":2,"size_bytes":2288,"max_dtm":255,"cells":462,"location":"local"}]}
+```
+
+`max_dtm`/`cells` are `null` for a `remote` entry (not yet downloaded, so the
+stats sidecar hasn't been read).
+
+### `GET /v1/materials/{name}/stats`
+
+The full `stats.json` for one material class (same content as `helpmate
+stats`; see the [field reference](#statsjson-field-reference) above).
+
+```
+$ curl -s http://127.0.0.1:8642/v1/materials/KQvk/stats
+{"material":"KQvk","plane_size":29568,"max_dtm":14,"cells":{"invalid":{"wtm":11487,"btm":1512},"unsolvable":{"wtm":0,"btm":414}},"dtm_histogram":{...},"uniqueness":{...},"deepest":[...],"generator_version":"0.5.0"}
+```
+
+Unknown material → 404 with the standard envelope:
+
+```
+$ curl -s http://127.0.0.1:8642/v1/materials/KNvkqr/stats
+{"error":{"code":"unknown_material","message":"no table for material 'KNvkqr'","hint":"generate it with: helpmate gen KNvkqr --tables <dir>"}}
+```
+
+### `GET /v1/probe`
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
+{"dtm":2,"count":4,"flipped":false,"notation":"h#1"}
+```
+
+A legal but unsolvable position reports `{"solvable": false}` (no `dtm`
+field):
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/8/8/8/4k3/8/4K3 w - - 0 1"
+{"solvable":false}
+```
+
+A malformed FEN is a 400, not a 404:
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=garbage"
+{"error":{"code":"invalid_fen","message":"substring not found","hint":null}}
+```
+
+Like the CLI, `probe` transparently falls back to the color-flipped material
+when only that slice is generated, and reports it via `"flipped": true`.
+
+### `GET /v1/line`
+
+`?all=true` returns every optimal line instead of just the first.
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/line --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
+{"lines":[["Kh6","Qh2#"]]}
+
+$ curl -sG http://127.0.0.1:8642/v1/line --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --data-urlencode "all=true"
+{"lines":[["Kh6","Qh2#"],["Kh6","Qh1#"],["Kh6","Qg6#"],["Kh8","Qg7#"]]}
+```
+
+### `GET /v1/mine`
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "count=1" --data-urlencode "max=3"
+{"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1","8/8/8/8/8/2Q5/8/k1K5 b - - 0 1","8/8/8/8/4Q3/8/8/k1K5 b - - 0 1"],"truncated":true}
+```
+
+`truncated` is `true` whenever more matches exist than were returned (as
+here: `KQvk` has more than 3 positions at `dtm=2, count=1`, so `max=3` cuts
+it off) — either because the caller's own `?max=` was reached, or because
+the server-side `--mine-cap` was reached first (whichever is smaller wins;
+the request's `max` is clamped to `min(max, mine-cap)`). Example with a
+server started as `helpmate-server --tables <scratch> --mine-cap 3` and the
+client asking for
+`max=50` (more than 3 matches exist at this dtm, so the 3-row server cap
+bites, not the client's 50):
+
+```
+$ curl -sG http://127.0.0.1:8644/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "max=50"
+{"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1","8/8/8/8/8/2Q5/8/k1K5 b - - 0 1","8/8/8/8/1Q6/8/8/k1K5 b - - 0 1"],"truncated":true}
+```
+
+If the scan doesn't finish within `--mine-timeout` seconds (default 30; a
+server-only setting, not a query parameter), the endpoint returns an empty,
+truncated result rather than blocking indefinitely, with a `note` field
+explaining why (server started as `helpmate-server --tables <scratch>
+--mine-timeout 0`, forcing an immediate timeout):
+
+```
+$ curl -sG http://127.0.0.1:8645/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2"
+{"fens":[],"truncated":true,"note":"timeout"}
+```
+
+When a scan genuinely exhausts the whole material with fewer matches than
+`max`/`mine-cap`, `truncated` is `false` (e.g. `Kvk` is unsolvable
+everywhere, so `dtm=2` matches nothing):
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=Kvk" --data-urlencode "dtm=2"
+{"fens":[],"truncated":false}
+```
+
+### The 202-fetching contract
+
+Any endpoint that needs a material (`stats`, `probe`, `line`, `mine`) checks
+the local `--tables` dirs first, then the `--hf-repo` remote if configured.
+If the material is only in the remote manifest and not yet cached locally,
+the **first** request that touches it kicks off a background download and
+immediately returns `202 Accepted`. (The examples below use port 8643 — a
+second real server, started with `KQvk` only in a fake remote-hub manifest
+and no local `--tables` copy, to exercise this path; `--hf-repo` in practice
+points at a real Hugging Face dataset instead of a fake hub.)
+
+```
+$ curl -si http://127.0.0.1:8643/v1/materials/KQvk/stats
+HTTP/1.1 202 Accepted
+content-type: application/json
+
+{"status":"fetching","material":"KQvk","size_bytes":146117}
+```
+
+Any request that arrives **while** the download is still in flight (whether
+it's the same client polling or a different one) also gets `202`, this time
+without `size_bytes` (already known to be fetching, no need to look it up
+again):
+
+```
+$ curl -si http://127.0.0.1:8643/v1/materials/KQvk/stats
+HTTP/1.1 202 Accepted
+content-type: application/json
+
+{"status":"fetching","material":"KQvk"}
+```
+
+Once the download finishes (verified against the manifest's sha256; see
+below), subsequent requests resolve normally with `200`:
+
+```
+$ curl -si http://127.0.0.1:8643/v1/materials/KQvk/stats
+HTTP/1.1 200 OK
+content-type: application/json
+
+{"material":"KQvk","plane_size":29568,...}
+```
+
+If the download fails (network error, sha256 mismatch), the state becomes
+`failed` and requests get a `502` with `fetch_failed`:
+
+```json
+{"error": {"code": "fetch_failed", "message": "download of 'KQvk' failed",
+           "hint": "check server logs; retry triggers a new download"}}
+```
+
+**Caveat, verified against the running server:** despite the `hint` text,
+a `failed` material currently stays `failed` for the life of the process —
+no request re-triggers `start_fetch` once a material has failed once, so
+recovering from a bad download today means restarting the server (which
+resets all in-memory fetch state) rather than simply retrying the request.
+Treat the hint as aspirational until that's fixed.
+
+A material present in neither local dirs nor the remote manifest is a plain
+`404 unknown_material`, same as the fully-offline case.
+
+### `helpmate-tables` — push/pull to a Hugging Face dataset
+
+```bash
+pip install ".[server]"   # same extra as the API server
+```
+
+```
+helpmate-tables push --tables DIR --repo USER/DATASET [--material NAME ...]
+helpmate-tables pull --tables DIR --repo USER/DATASET [--material NAME ...]
+```
+
+- `--tables DIR`: local directory to push from / pull into.
+- `--repo USER/DATASET`: a Hugging Face **dataset** repo id.
+- `--material NAME` (repeatable): restrict the operation to specific
+  materials (matches both the `.hm` and `.stats.json` files for that name).
+  **Omit it to operate on every material** — `push` with no `--material`
+  uploads every `.hm`/`.stats.json` pair found under `--tables`; `pull` with
+  no `--material` downloads every material listed in the remote manifest.
+
+**`push`** first (re)writes a local `manifest.json` in `--tables` covering
+*every* file currently in that directory (not just the ones being pushed),
+then fetches the *existing remote* manifest (if any) and **merges**: files
+for the pushed materials are added/updated with their fresh sha256/size,
+while every other entry already on the remote manifest is carried forward
+unchanged. This means a scoped `push --material X` never forgets materials
+a previous, different push already uploaded — the remote manifest only ever
+grows or updates, never shrinks, from a scoped push. If the remote has no
+manifest yet (first push to a fresh dataset repo), the merge starts from an
+empty file set.
+
+**`pull`** fetches the remote manifest, downloads the requested (or, by
+default, *all*) `.hm`/`.stats.json` files into `--tables`, and verifies each
+downloaded file's sha256 against the manifest entry before accepting it;
+a mismatch deletes the partial file and fails the whole pull.
+
+### Manifest format (`manifest.json`)
+
+```json
+{
+  "schema": 1,
+  "generator_version": "0.5.0",
+  "files": {
+    "KQvk.hm": {"sha256": "<hex>", "size": 146117},
+    "KQvk.stats.json": {"sha256": "<hex>", "size": 27781}
+  }
+}
+```
+
+`generator_version` is read from the first `*.stats.json` found in
+`--tables` (`"unknown"` if none exist yet). `files` maps every `.hm`/
+`.stats.json` filename present under `--tables` at push time to its sha256
+and byte size — these are the only two file patterns the manifest ever
+records. When `pull` has no `--material`, it derives "all materials" from
+every `.hm` entry in `files` (its `.stats.json` sibling is pulled too, if
+present).
+
+### Exit codes (`helpmate-tables`)
+
+| Code | Meaning |
+|---|---|
+| `0` | success. |
+| `1` | operation failed after starting (network error, remote has no manifest on `pull`, sha256 mismatch, upload error) — message on stderr, no traceback. |
+| `2` | bad usage (`--tables` not a directory, no subcommand given). |
