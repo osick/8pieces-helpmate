@@ -6,6 +6,6 @@ namespace hm {
 // (--version) and in every table's stats sidecar (generator_version).
 // Keep in sync with pyproject.toml and CMakeLists.txt project(VERSION ...)
 // on release bumps.
-inline constexpr const char* HELPMATE_VERSION = "0.5.0";
+inline constexpr const char* HELPMATE_VERSION = "0.6.1";
 
 }  // namespace hm
