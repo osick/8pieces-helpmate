@@ -42,7 +42,7 @@ bumps may change behavior).
   `--material` is omitted, and sha256-verifies each downloaded file before
   accepting it. Exit codes: `0` success, `1` failure after starting
   (network/verification error), `2` bad usage.
-- **`tests/server`**: 46 tests covering storage (local/remote/chain), the
+- **`tests/server`**: 47 tests covering storage (local/remote/chain), the
   manifest builder/writer/verifier, every API route (catalog, probe, mine,
   202-fetching), the CLI, and package metadata; wired into CI alongside
   `tests/python`.
@@ -51,6 +51,10 @@ bumps may change behavior).
 
 Hardening rounds found and closed during development, before any release:
 
+- A failed remote download no longer leaves the material stuck at
+  `502 fetch_failed` until server restart: the request that observes the
+  failure re-triggers the download, so the client's retry sees `202` and
+  then `200` — matching the hint text's promise.
 - `verify_file` now correctly returns `False` (not a crash) for a file the
   manifest lists but that is missing on disk.
 - The remote fetch state machine was hardened against re-fetching an
