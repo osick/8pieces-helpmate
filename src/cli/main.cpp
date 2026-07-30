@@ -6,7 +6,9 @@
 #include <algorithm>
 #include <climits>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -187,11 +189,11 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
 // helpmate compact <DIR> [--dry-run]
 // Rewrites every .hm in DIR whose cells are all unsolvable as a marker table.
 int cmd_compact(const std::vector<std::string>& args) {
-    if (args.empty()) { std::cerr << "error: compact needs a tables directory\n"; return 2; }
+    if (args.empty()) { std::cerr << "error: compact needs a tables directory\n"; return 3; }
     std::string dir = args[0];
     bool dry = std::find(args.begin(), args.end(), "--dry-run") != args.end();
     if (!std::filesystem::is_directory(dir)) {
-        std::cerr << "error: not a directory: " << dir << "\n"; return 2;
+        std::cerr << "error: not a directory: " << dir << "\n"; return 3;
     }
     uint64_t reclaimed = 0; int rewritten = 0, skipped = 0;
     for (auto& e : std::filesystem::directory_iterator(dir)) {
@@ -208,7 +210,6 @@ int cmd_compact(const std::vector<std::string>& args) {
         if (any_solvable) { ++skipped; continue; }
         uint64_t size = std::filesystem::file_size(e.path());
         std::string name = r->material_name();
-        std::string meta = r->meta_json();
         uint64_t ps = r->plane_size();
         std::cout << (dry ? "would rewrite " : "rewrote ") << name
                   << " (" << size / (1024 * 1024) << " MiB)\n";
@@ -216,8 +217,27 @@ int cmd_compact(const std::vector<std::string>& args) {
         if (!dry) {
             auto mat = Material::parse(name);
             if (!mat) { std::cerr << "error: bad material in header: " << name << "\n"; return 3; }
+            // Synthesize fresh marker metadata -- same shape as the generator's
+            // opt.prune path (generator.cpp), not the original table's stale
+            // meta_json -- so tooling that inspects metadata recognises a
+            // compact-produced marker the same way it recognises a
+            // generator-produced one.
+            nlohmann::json j;
+            j["material"] = name;
+            j["plane_size"] = ps;
+            j["max_dtm"] = (int)DTM_UNSOLVABLE;
+            j["cells"] = {{"invalid", {{"wtm", 0}, {"btm", 0}}},
+                          {"unsolvable", {{"wtm", ps}, {"btm", ps}}}};
+            j["dtm_histogram"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
+            j["uniqueness"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
+            j["deepest"] = nlohmann::json::array();
+            j["deepest_unique"] = nlohmann::json::array();
+            j["generator_version"] = HELPMATE_VERSION;
+            j["all_unsolvable"] = true;
+            std::string meta = j.dump(2);
             r.reset();                                   // unmap before replacing
             TableWriter::write_unsolvable(e.path().string(), *mat, ps, meta);
+            std::ofstream(dir + "/" + name + ".stats.json", std::ios::trunc) << meta;
         }
         ++rewritten;
     }
