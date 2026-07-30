@@ -9,7 +9,7 @@
 #   * gdb (ptrace overhead),
 #   * ASan (4 runs, 15-50 min), TSan (zero race reports),
 #   * -D_GLIBCXX_ASSERTIONS (>25 min, no assertion),
-#   * any rebuild of generator.cpp with extra instrumentation, even at identical -O3 flags,
+#   * any rebuild of generator.cpp with extra instrumentation, even at identical -O2 flags,
 #   * threads<=4 on an otherwise idle machine (8.7 min clean),
 #   * threads=1 (72 min clean).
 # What DID reproduce it was scheduling pressure: many more worker threads than available
@@ -35,8 +35,17 @@ ITERS=${2:-5}
 CPUS=${3:-0-3}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 BIN=$ROOT/build/helpmate
-# 4x the CPU count: enough preemption to reopen the window, still only `CPUS` worth of load.
-THREADS=${THREADS:-16}
+# Default THREADS = 4x the number of CPUs in $CPUS: enough preemption to reopen the
+# window, still only `CPUS` worth of load. Override with THREADS=<n> in the environment.
+ncpus=0
+IFS=',' read -ra _cpu_tokens <<< "$CPUS"
+for tok in "${_cpu_tokens[@]}"; do
+  case $tok in
+    *-*) ncpus=$((ncpus + ${tok#*-} - ${tok%-*} + 1)) ;;
+    *)   ncpus=$((ncpus + 1)) ;;
+  esac
+done
+THREADS=${THREADS:-$((4 * ncpus))}
 
 [ -x "$BIN" ] || { echo "no Release binary at $BIN -- build it first"; exit 2; }
 command -v taskset >/dev/null || { echo "taskset not available"; exit 2; }

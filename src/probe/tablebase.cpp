@@ -26,10 +26,24 @@ const Tablebase::Slice* Tablebase::load(const Material& m) const {
     std::lock_guard lk(mu_);
     auto it = cache_.find(m.name());
     if (it != cache_.end()) return it->second.get();
-    auto r = TableReader::open(dir_ + "/" + m.name() + ".hm");
-    auto& slot = cache_[m.name()];
-    if (r) slot = std::make_unique<Slice>(Slice{std::move(*r), SliceIndex(m)});
-    return slot.get();
+    std::string path = dir_ + "/" + m.name() + ".hm";
+    auto r = TableReader::open(path);
+    if (r) {
+        // Identity check (before caching anything): the file must actually be the table
+        // its name promises, or every later lookup would silently index the wrong planes.
+        SliceIndex si(m);
+        if (r->material_name() != m.name())
+            throw std::runtime_error("table " + path + " is for material '" +
+                                     r->material_name() + "', expected '" + m.name() + "'");
+        if (r->plane_size() != si.size())
+            throw std::runtime_error("table " + path + " has plane size " +
+                                     std::to_string(r->plane_size()) + ", expected " +
+                                     std::to_string(si.size()) + " for " + m.name());
+        auto& slot = cache_[m.name()];
+        slot = std::make_unique<Slice>(Slice{std::move(*r), std::move(si)});
+        return slot.get();
+    }
+    return cache_[m.name()].get();  // caches the miss
 }
 
 ValuePair Tablebase::value_of(Board& b) const {

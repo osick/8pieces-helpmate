@@ -7,6 +7,7 @@
 #include <nlohmann/json.hpp>
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -25,7 +26,30 @@ struct GeneratorLookupError : std::runtime_error { using std::runtime_error::run
 // FEN of a decoded piece list, for error messages ("<unavailable>" if it cannot be rendered).
 std::string describe_position(const std::vector<PlacedPiece>& pp, Color stm);
 
-struct GenOptions { std::string tables_dir = "tables"; int threads = 1; };
+struct GenOptions {
+    std::string tables_dir = "tables";
+    int threads = 1;
+    bool verbose = false;    // per-slice lifecycle lines on stderr (implies progress)
+    bool progress = false;   // per-pass progress lines on stderr
+    bool force_ram = false;  // skip the pre-allocation RAM guard
+};
+
+// ---- RAM guard --------------------------------------------------------------
+// generate() refuses to start a slice whose four value planes (dtm/count x
+// wtm/btm, one byte per cell each) would not fit in currently-available RAM,
+// *before* allocating anything. The decision is a pure function so it is unit-
+// testable without a 30 GB box.
+
+// Bytes SliceGen allocates for a slice: 4 planes x plane_size (dtm_[2] + cnt_[2]).
+constexpr uint64_t plane_ram_bytes(uint64_t plane_size) { return 4 * plane_size; }
+
+// MemAvailable from /proc/meminfo, in bytes; nullopt if unreadable (then the
+// guard is skipped -- better to try than to refuse on an unknown platform).
+std::optional<uint64_t> mem_available_bytes();
+
+// Engaged (with a complete, actionable message) iff required > available.
+std::optional<std::string> ram_guard_error(const std::string& slice,
+                                           uint64_t required_bytes, uint64_t available_bytes);
 
 // Builds the whole closure (missing slices only), root last. Returns paths of written files.
 std::vector<std::string> generate(const Material& root, const GenOptions& = {});
@@ -37,9 +61,20 @@ struct SubTables {
     void load_for(const Material& m, const std::string& dir) {
         for (auto& s : m.successors()) {
             if (t_.count(s.name())) continue;
-            auto r = TableReader::open(dir + "/" + s.name() + ".hm");
+            std::string path = dir + "/" + s.name() + ".hm";
+            auto r = TableReader::open(path);
             if (!r) throw std::runtime_error("missing sub-table " + s.name());
-            t_.emplace(s.name(), std::pair(std::move(*r), SliceIndex(s)));
+            // Identity check: the file must actually be the table its name promises,
+            // or every later lookup would silently index the wrong planes.
+            SliceIndex si(s);
+            if (r->material_name() != s.name())
+                throw std::runtime_error("sub-table " + path + " is for material '" +
+                                         r->material_name() + "', expected '" + s.name() + "'");
+            if (r->plane_size() != si.size())
+                throw std::runtime_error("sub-table " + path + " has plane size " +
+                                         std::to_string(r->plane_size()) + ", expected " +
+                                         std::to_string(si.size()) + " for " + s.name());
+            t_.emplace(s.name(), std::pair(std::move(*r), std::move(si)));
         }
     }
     // Each step is checked rather than assumed: only direct successors of the slice being
@@ -49,17 +84,17 @@ struct SubTables {
         auto it = t_.find(m.name());
         if (it == t_.end())
             throw GeneratorLookupError("no sub-table loaded for material " + m.name() +
-                                       " (only direct successors are loaded); position " +
+                                       " (only direct successors are loaded); position after move " +
                                        describe_position(pp, stm));
         auto& [rd, si] = it->second;
         auto e = si.encode(pp);
         if (!e)
             throw GeneratorLookupError("position not encodable in sub-table " + m.name() +
-                                       "; position " + describe_position(pp, stm));
+                                       "; position after move " + describe_position(pp, stm));
         if (*e >= rd.plane_size())
             throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for sub-table " +
                                        m.name() + " (plane size " + std::to_string(rd.plane_size()) +
-                                       "); position " + describe_position(pp, stm));
+                                       "); position after move " + describe_position(pp, stm));
         return rd.get(stm, *e);
     }
 };

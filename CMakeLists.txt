@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.24)
-project(helpmate LANGUAGES CXX)
+project(helpmate VERSION 0.5.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
@@ -47,7 +47,7 @@ if(HELPMATE_COVERAGE)
 endif()
 
 enable_testing()
-add_executable(helpmate_tests tests/cpp/test_sanity.cpp tests/cpp/test_board.cpp tests/cpp/test_san.cpp tests/cpp/test_material.cpp tests/cpp/test_kk.cpp tests/cpp/test_slice_index.cpp tests/cpp/test_table_file.cpp tests/cpp/test_oracle.cpp tests/cpp/test_generator_init.cpp tests/cpp/test_generator_kqvk.cpp tests/cpp/test_generator_pawns.cpp tests/cpp/test_counts.cpp tests/cpp/test_stats.cpp tests/cpp/test_threads.cpp tests/cpp/test_probe.cpp tests/cpp/test_generator_lookup_guards.cpp)
+add_executable(helpmate_tests tests/cpp/test_sanity.cpp tests/cpp/test_board.cpp tests/cpp/test_san.cpp tests/cpp/test_material.cpp tests/cpp/test_kk.cpp tests/cpp/test_slice_index.cpp tests/cpp/test_table_file.cpp tests/cpp/test_oracle.cpp tests/cpp/test_generator_init.cpp tests/cpp/test_generator_kqvk.cpp tests/cpp/test_generator_pawns.cpp tests/cpp/test_counts.cpp tests/cpp/test_stats.cpp tests/cpp/test_threads.cpp tests/cpp/test_probe.cpp tests/cpp/test_generator_lookup_guards.cpp tests/cpp/test_ram_guard.cpp tests/cpp/test_slice_index_6piece.cpp)
 target_link_libraries(helpmate_tests PRIVATE helpmate_core Catch2::Catch2WithMain)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
@@ -57,6 +57,7 @@ catch_discover_tests(helpmate_tests TEST_SPEC "~[slow]")
 
 add_executable(helpmate src/cli/main.cpp)
 target_link_libraries(helpmate PRIVATE helpmate_core)
+install(TARGETS helpmate RUNTIME DESTINATION bin)
 
 if(HELPMATE_PYTHON)
   find_package(pybind11 CONFIG REQUIRED)
@@ -72,6 +73,10 @@ add_test(NAME cli_line COMMAND helpmate line "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --
 add_test(NAME cli_stats COMMAND helpmate stats KQvk --tables ${CLI_TT})
 add_test(NAME cli_mine COMMAND helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables ${CLI_TT})
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})
+# v0.5.0: --verbose lifecycle lines go to stderr (ctest matches merged output);
+# on a re-run every slice is already on disk, so "cached" must appear.
+add_test(NAME cli_gen_verbose COMMAND helpmate gen KQvk --tables ${CLI_TT} --verbose)
+add_test(NAME cli_version COMMAND helpmate --version)
 add_test(NAME cli_badfen COMMAND helpmate probe "garbage" --tables ${CLI_TT})
 # review fix round: malformed and out-of-range numeric flags must not crash
 # (std::stoi throwing std::invalid_argument/std::out_of_range uncaught ->
@@ -93,6 +98,8 @@ set_tests_properties(cli_stats PROPERTIES PASS_REGULAR_EXPRESSION "max_dtm" DEPE
 set_tests_properties(cli_mine  PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DEPENDS cli_gen)
 set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
 set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
+set_tests_properties(cli_gen_verbose PROPERTIES PASS_REGULAR_EXPRESSION "cached" DEPENDS cli_gen)
+set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION "helpmate 0\\.5\\.0")
 set_tests_properties(cli_badint_malformed PROPERTIES PASS_REGULAR_EXPRESSION "error.*--dtm")
 set_tests_properties(cli_badint_range PROPERTIES PASS_REGULAR_EXPRESSION "error.*--threads")
 set_tests_properties(cli_line_already_mate PROPERTIES PASS_REGULAR_EXPRESSION "already mate" DEPENDS cli_gen)

@@ -13,10 +13,13 @@ static Material mat_or_throw(const std::string& s) {
 }
 PYBIND11_MODULE(_helpmate, mod) {
     py::register_exception<MissingTableError>(mod, "MissingTableError", PyExc_RuntimeError);
-    mod.def("generate", [](const std::string& mat, const std::string& tables, int threads) {
+    mod.def("generate", [](const std::string& mat, const std::string& tables, int threads,
+                           bool verbose, bool progress, bool force_ram) {
         GenOptions o; o.tables_dir = tables; o.threads = threads;
+        o.verbose = verbose; o.progress = progress; o.force_ram = force_ram;
         return generate(mat_or_throw(mat), o);
-    }, py::arg("material"), py::arg("tables") = "tables", py::arg("threads") = 1);
+    }, py::arg("material"), py::arg("tables") = "tables", py::arg("threads") = 1,
+       py::arg("verbose") = false, py::arg("progress") = false, py::arg("force_ram") = false);
     py::class_<Tablebase>(mod, "Tablebase")
         .def(py::init<std::string>())
         .def("probe", [](const Tablebase& t, const std::string& fen) -> py::object {
