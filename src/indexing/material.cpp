@@ -57,6 +57,12 @@ int Material::pawn_count() const {
     return white[5] + black[5];
 }
 
+bool Material::mating_side_is_bare_king() const {
+    for (size_t i = 0; i < white.size(); ++i)
+        if (i != (size_t)PieceType::King && white[i] != 0) return false;
+    return true;
+}
+
 std::vector<Material> Material::successors() const {
     std::vector<Material> out;
     auto add = [&](const Material& m) { if (std::find(out.begin(), out.end(), m) == out.end()) out.push_back(m); };
