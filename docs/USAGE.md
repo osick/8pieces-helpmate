@@ -283,10 +283,11 @@ helpmate compact <DIR> [--dry-run]
 Rewrites every `.hm` table in `DIR` whose cells are **all** unsolvable (or
 invalid) into a tiny marker file, reclaiming disk space without changing what
 any query can answer. Tables with at least one solvable cell are left
-completely untouched, and a table that is already a marker is skipped
-(reported as "already compact", not rewritten again). `--dry-run` reports
-what *would* be rewritten and reclaims nothing — it never opens a file for
-writing.
+completely untouched, and a table that is already a marker is skipped (not
+rewritten again). When a run rewrites nothing at all — every table was either
+solvable or already a marker — it prints `already compact`. `--dry-run`
+reports what *would* be rewritten and reclaims nothing — it never opens a
+file for writing.
 
 This exists for tables generated **before v0.6.1**, when `gen` had no pruning
 and wrote a full-size table even for slices like `Kvk` where every cell is
@@ -351,8 +352,8 @@ pruned when either:
   has no piece besides its king. A lone king can never deliver check, so the
   slice is unsolvable regardless of what Black holds (e.g. `Kvk`, `Kvkq`,
   `Kvkr` are all pruned this way, unconditionally); or
-- **every successor is itself already a marker, and the slice has no
-  checkmate position of its own** — every solution eventually ends in a mate
+- **every successor's table reports all of its cells unsolvable, and the
+  slice has no checkmate position of its own** — every solution ends in a mate
   either in this slice or in one reached by a capture/promotion, so if every
   reachable successor slice is proven dead *and* scanning this slice directly
   finds no checkmate, the slice is dead too.
