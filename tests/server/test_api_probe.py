@@ -1,5 +1,36 @@
 GOLD_FEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"   # dtm=2 count=4 (Task 8 golden)
 
+def test_probe_empty_fen_400(tmp_path):
+    from fastapi.testclient import TestClient
+    from helpmate_server.storage import LocalDir, ChainSource
+    from helpmate_server.app import create_app
+    c = TestClient(create_app(ChainSource([LocalDir(tmp_path)])),
+                   raise_server_exceptions=False)
+    r = c.get("/v1/probe", params={"fen": ""})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "invalid_fen"
+
+def test_probe_whitespace_fen_400(tmp_path):
+    from fastapi.testclient import TestClient
+    from helpmate_server.storage import LocalDir, ChainSource
+    from helpmate_server.app import create_app
+    c = TestClient(create_app(ChainSource([LocalDir(tmp_path)])),
+                   raise_server_exceptions=False)
+    r = c.get("/v1/probe", params={"fen": "   "})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "invalid_fen"
+
+def test_probe_flip_fallback(client):
+    # Color-flipped golden: white K, black k+q -> material Kvkq; direct
+    # material has no table, but the flip to KQvk (the fixture's table)
+    # resolves. Empirically verified via helpmate.Tablebase.probe: (2, 4, True).
+    fen = "6q1/8/8/8/8/5k2/7K/8 w - - 0 1"
+    r = client.get("/v1/probe", params={"fen": fen})
+    assert r.status_code == 200
+    b = r.json()
+    assert (b["dtm"], b["count"], b["flipped"]) == (2, 4, True)
+    assert b["notation"] == "h#1"
+
 def test_probe_golden(client):
     r = client.get("/v1/probe", params={"fen": GOLD_FEN})
     assert r.status_code == 200

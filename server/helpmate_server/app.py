@@ -59,7 +59,10 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
 
     def _dir_for_fen(fen: str):
         # The FEN's board field determines the material, which names the table.
-        board = fen.split()[0]
+        parts = fen.split()
+        if not parts:
+            raise ValueError("empty FEN")
+        board = parts[0]
         white = "".join(sorted((c for c in board if c.isalpha() and c.isupper()),
                                key="KQRBNP".index))
         black = "".join(sorted((c.upper() for c in board if c.isalpha() and c.islower()),
