@@ -382,13 +382,22 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
                               (successors_dead && !slice_has_any_mate(m));
             if (unsolvable) {
                 uint64_t ps = SliceIndex(m).size();
+                // Same shape as SliceGen::stats_json(): a marker table's reader
+                // returns DTM_UNSOLVABLE for every cell (invalid cells included),
+                // so reporting all cells as unsolvable and none as invalid is
+                // exactly what a consumer reading this table observes.
                 nlohmann::json j;
                 j["material"] = m.name();
                 j["plane_size"] = ps;
                 j["max_dtm"] = (int)DTM_UNSOLVABLE;
-                j["all_unsolvable"] = true;
-                j["cells"] = {{"invalid", nullptr}, {"unsolvable", ps}};
+                j["cells"] = {{"invalid", {{"wtm", 0}, {"btm", 0}}},
+                              {"unsolvable", {{"wtm", ps}, {"btm", ps}}}};
+                j["dtm_histogram"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
+                j["uniqueness"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
+                j["deepest"] = nlohmann::json::array();
+                j["deepest_unique"] = nlohmann::json::array();
                 j["generator_version"] = HELPMATE_VERSION;
+                j["all_unsolvable"] = true;
                 std::string meta = j.dump(2);
                 std::filesystem::create_directories(opt.tables_dir);
                 TableWriter::write_unsolvable(path, m, ps, meta);

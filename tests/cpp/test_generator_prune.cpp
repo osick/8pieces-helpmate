@@ -43,6 +43,58 @@ TEST_CASE("generate prunes provably unsolvable slices") {
     fs::remove_all(dir);
 }
 
+TEST_CASE("generate prunes KBvkq via the recursive successors-dead rule") {
+    namespace fs = std::filesystem;
+
+    // KBvkq is NOT caught by the trivial mating_side_is_bare_king() disjunct
+    // (white holds a bishop) -- proves this test exercises the recursive
+    // branch (successors_dead && !slice_has_any_mate) instead.
+    REQUIRE_FALSE(Material::parse("KBvkq")->mating_side_is_bare_king());
+    REQUIRE_FALSE(slice_has_any_mate(*Material::parse("KBvkq")));
+
+    fs::path a = fs::temp_directory_path() / ("hm_kbvkq_pruned_" + std::to_string(::getpid()));
+    fs::path b = fs::temp_directory_path() / ("hm_kbvkq_full_" + std::to_string(::getpid()));
+    fs::remove_all(a); fs::remove_all(b);
+
+    GenOptions on;  on.tables_dir = a.string();  on.threads = 2;  on.prune = true;
+    generate(*Material::parse("KBvkq"), on);
+
+    auto pruned = TableReader::open((a / "KBvkq.hm").string());
+    REQUIRE(pruned.has_value());
+    CHECK(pruned->all_unsolvable());                      // successors (KBvk, Kvkq, ...) all dead
+    CHECK(fs::file_size((a / "KBvkq.hm").string()) < 4096);
+    fs::remove_all(a);
+
+    // Full (unpruned) generation of the same slice -- real ~1.9M-cell run,
+    // expected to take single-digit seconds. Verifies the recursive verdict
+    // above matches what actual generation computes for every cell.
+    GenOptions off; off.tables_dir = b.string(); off.threads = 2; off.prune = false;
+    generate(*Material::parse("KBvkq"), off);
+
+    auto full = TableReader::open((b / "KBvkq.hm").string());
+    REQUIRE(full.has_value());
+    CHECK_FALSE(full->all_unsolvable());
+    REQUIRE(pruned->plane_size() == full->plane_size());
+    // Parity over every LEGAL cell: KBvkq has genuine DTM_INVALID cells
+    // (illegal placements / non-canonical duplicates / opponent-in-check),
+    // and a marker's get() collapses invalid *and* unsolvable into a
+    // uniform DTM_UNSOLVABLE by design (see the comment on the marker
+    // metadata in generate()). So the meaningful claim -- and the one that
+    // actually validates the recursive verdict -- is that every legal
+    // position the full generator computed has no finite-DTM solution
+    // either, i.e. pruned and full agree everywhere full isn't DTM_INVALID.
+    uint64_t legal_checked = 0;
+    for (uint64_t c = 0; c < full->plane_size(); ++c)
+        for (Color stm : {Color::White, Color::Black}) {
+            uint8_t full_dtm = full->get(stm, c).dtm;
+            if (full_dtm == DTM_INVALID) continue;
+            REQUIRE(pruned->get(stm, c).dtm == full_dtm);
+            ++legal_checked;
+        }
+    CHECK(legal_checked > 0);          // sanity: the exclusion above didn't skip everything
+    fs::remove_all(b);
+}
+
 TEST_CASE("generate leaves solvable slices byte-identical when pruning") {
     namespace fs = std::filesystem;
     fs::path a = fs::temp_directory_path() / ("hm_pr_on_" + std::to_string(::getpid()));
