@@ -369,6 +369,38 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
             if (opt.verbose) std::cerr << "cached " << m.name() << " (already on disk)\n";
             continue;
         }
+        if (opt.prune) {
+            // A slice has no solvable position iff it contains no mate and every
+            // successor is itself entirely unsolvable (every solution ends in a
+            // mate, in this slice or in one reachable by a capture/promotion).
+            bool successors_dead = true;
+            for (auto& s : m.successors()) {
+                auto r = TableReader::open(opt.tables_dir + "/" + s.name() + ".hm");
+                if (!r || !r->all_unsolvable()) { successors_dead = false; break; }
+            }
+            bool unsolvable = m.mating_side_is_bare_king() ||
+                              (successors_dead && !slice_has_any_mate(m));
+            if (unsolvable) {
+                uint64_t ps = SliceIndex(m).size();
+                nlohmann::json j;
+                j["material"] = m.name();
+                j["plane_size"] = ps;
+                j["max_dtm"] = (int)DTM_UNSOLVABLE;
+                j["all_unsolvable"] = true;
+                j["cells"] = {{"invalid", nullptr}, {"unsolvable", ps}};
+                j["generator_version"] = HELPMATE_VERSION;
+                std::string meta = j.dump(2);
+                std::filesystem::create_directories(opt.tables_dir);
+                TableWriter::write_unsolvable(path, m, ps, meta);
+                std::ofstream(opt.tables_dir + "/" + m.name() + ".stats.json",
+                              std::ios::trunc) << meta;
+                if (opt.verbose)
+                    std::cerr << "pruned " << m.name()
+                              << " (provably no helpmate; marker table written)\n";
+                written.push_back(path);
+                continue;
+            }
+        }
         uint64_t cells = SliceIndex(m).size();
         // Re-check right before this slice's planes are allocated: available
         // memory shrinks as other processes (or the page cache holding the

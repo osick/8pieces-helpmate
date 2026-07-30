@@ -16,3 +16,58 @@ TEST_CASE("slice_has_any_mate finds mates only where they exist") {
     // King+knight against king+bishop does have mates (KNvkb is solvable).
     CHECK(slice_has_any_mate(*Material::parse("KNvkb")));
 }
+
+#include "format/table_file.h"
+#include <filesystem>
+#include <fstream>
+
+TEST_CASE("generate prunes provably unsolvable slices") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() /
+                   ("hm_prune_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    GenOptions opt;
+    opt.tables_dir = dir.string();
+    opt.threads = 2;
+
+    generate(*Material::parse("Kvkq"), opt);            // whole closure: Kvk, Kvkq
+
+    for (const char* n : {"Kvk", "Kvkq"}) {
+        auto r = TableReader::open((dir / (std::string(n) + ".hm")).string());
+        REQUIRE(r.has_value());
+        INFO("slice " << n);
+        CHECK(r->all_unsolvable());                     // bare king: pruned structurally
+        CHECK(fs::file_size((dir / (std::string(n) + ".hm")).string()) < 4096);
+        CHECK(r->get(Color::White, 0).dtm == DTM_UNSOLVABLE);
+    }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("generate leaves solvable slices byte-identical when pruning") {
+    namespace fs = std::filesystem;
+    fs::path a = fs::temp_directory_path() / ("hm_pr_on_" + std::to_string(::getpid()));
+    fs::path b = fs::temp_directory_path() / ("hm_pr_off_" + std::to_string(::getpid()));
+    fs::remove_all(a); fs::remove_all(b);
+
+    GenOptions on;  on.tables_dir = a.string();  on.threads = 2;  on.prune = true;
+    GenOptions off; off.tables_dir = b.string(); off.threads = 2; off.prune = false;
+    generate(*Material::parse("KQvk"), on);
+    generate(*Material::parse("KQvk"), off);
+
+    auto bytes = [](const fs::path& p) {
+        std::ifstream in(p, std::ios::binary);
+        return std::vector<char>(std::istreambuf_iterator<char>(in), {});
+    };
+    CHECK(bytes(a / "KQvk.hm") == bytes(b / "KQvk.hm"));   // solvable: untouched
+    // Kvk is unsolvable, so only the unpruned run writes a full table.
+    auto pruned = TableReader::open((a / "Kvk.hm").string());
+    auto full   = TableReader::open((b / "Kvk.hm").string());
+    REQUIRE(pruned.has_value()); REQUIRE(full.has_value());
+    CHECK(pruned->all_unsolvable());
+    CHECK_FALSE(full->all_unsolvable());
+    REQUIRE(pruned->plane_size() == full->plane_size());
+    for (uint64_t c = 0; c < full->plane_size(); ++c)      // same values, both sides
+        for (Color stm : {Color::White, Color::Black})
+            REQUIRE(pruned->get(stm, c).dtm == full->get(stm, c).dtm);
+    fs::remove_all(a); fs::remove_all(b);
+}

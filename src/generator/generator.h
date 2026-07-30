@@ -32,6 +32,7 @@ struct GenOptions {
     bool verbose = false;    // per-slice lifecycle lines on stderr (implies progress)
     bool progress = false;   // per-pass progress lines on stderr
     bool force_ram = false;  // skip the pre-allocation RAM guard
+    bool prune = true;       // skip slices that provably contain no helpmate
 };
 
 // ---- RAM guard --------------------------------------------------------------
