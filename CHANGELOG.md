@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
-## [Unreleased]
+## [0.6.0] - 2026-07-30
 
 ### Added
 
@@ -42,7 +42,7 @@ bumps may change behavior).
   `--material` is omitted, and sha256-verifies each downloaded file before
   accepting it. Exit codes: `0` success, `1` failure after starting
   (network/verification error), `2` bad usage.
-- **`tests/server`**: 47 tests covering storage (local/remote/chain), the
+- **`tests/server`**: 51 tests covering storage (local/remote/chain), the
   manifest builder/writer/verifier, every API route (catalog, probe, mine,
   202-fetching), the CLI, and package metadata; wired into CI alongside
   `tests/python`.
