@@ -127,7 +127,11 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
 
     void* mapped = mmap(nullptr, filesize, PROT_READ, MAP_SHARED, fd, 0);
     ::close(fd);  // fd not needed after mmap
-    if (mapped == MAP_FAILED) { if (err) *err = OpenError::NotFound; return std::nullopt; }
+    // Unreadable, not NotFound: open() and fstat() already succeeded, so the file
+    // demonstrably exists. Reporting a mapping failure (ENOMEM, map-count limits,
+    // an odd filesystem) as "missing" is the very confusion this overload exists
+    // to prevent -- the caller would advise regenerating a table that is right there.
+    if (mapped == MAP_FAILED) { if (err) *err = OpenError::Unreadable; return std::nullopt; }
 
     const uint8_t* base = static_cast<const uint8_t*>(mapped);
     const TableHeader* hdr = reinterpret_cast<const TableHeader*>(base);
