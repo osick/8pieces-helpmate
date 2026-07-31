@@ -27,6 +27,9 @@ share/python-wheels/
 # web/js/lib is dashboard source (URL-state/export helpers), not a Python
 # build artifact -- exempt it from the generic lib/ rule above.
 !web/js/lib/
+# web/vendor/cm-chessboard/lib is vendored third-party JS (Svg.js, Utils.js),
+# not a Python build artifact -- exempt it from the generic lib/ rule above.
+!web/vendor/cm-chessboard/lib/
 *.egg-info/
 .installed.cfg
 *.egg
