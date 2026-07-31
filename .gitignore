@@ -23,6 +23,10 @@ sdist/
 var/
 wheels/
 share/python-wheels/
+
+# web/js/lib is dashboard source (URL-state/export helpers), not a Python
+# build artifact -- exempt it from the generic lib/ rule above.
+!web/js/lib/
 *.egg-info/
 .installed.cfg
 *.egg
