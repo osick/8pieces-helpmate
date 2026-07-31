@@ -1,11 +1,19 @@
 from __future__ import annotations
 import argparse
+import os
 from .storage import LocalDir, ChainSource, RemoteSource, HFHub
 from .app import create_app
 
 def _run(app, host: str, port: int) -> None:
     import uvicorn
     uvicorn.run(app, host=host, port=port)
+
+def _app_for_tests():
+    # Factory for `uvicorn --factory helpmate_server.main:_app_for_tests`,
+    # used by the browser test suite (tests/ui) to serve a real
+    # helpmate-server against a scratch tables dir named by the environment.
+    tables = os.environ["HELPMATE_TABLES"]
+    return create_app(ChainSource([LocalDir(tables)]))
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser("helpmate-server")

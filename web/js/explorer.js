@@ -55,7 +55,10 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     if (p && typeof p.catch === "function") p.catch(() => { /* invalid FEN, handled below via ApiError */ });
   } catch { /* invalid FEN, handled below via ApiError */ }
   document.getElementById("btn-back").disabled = history.length === 0;
-  if (push) location.hash = encodeState({ fen, panel: "explorer" });
+  // Preserve whatever panel is currently active (e.g. a deep link like
+  // #panel=materials) -- hardcoding "explorer" here would clobber it the
+  // moment the initial render pushes its own hash entry.
+  if (push) location.hash = encodeState({ fen, panel: decodeState(location.hash).panel });
 
   const summary = document.getElementById("position-summary");
   const moveList = document.getElementById("move-list");
