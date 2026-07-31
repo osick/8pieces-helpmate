@@ -428,7 +428,7 @@ helpmate".
 |---|---|
 | `0` | success — including a reported `unsolvable` answer. |
 | `2` | a table needed to answer the query is missing; the message names it and the exact `helpmate gen` command that builds it. |
-| `3` | bad usage or unparseable input (unknown command, malformed FEN or material string, malformed/out-of-range numeric flag, flag missing its value; includes `compact` given no directory, or a path that is not a directory). |
+| `3` | bad usage or unparseable input (unknown command, malformed FEN or material string, malformed/out-of-range numeric flag, flag missing its value; includes `compact` given no directory, or a path that is not a directory) — also a table written by a newer helpmate (unsupported table format version), which is a runtime error rather than bad usage but shares this exit code. |
 
 ## Resource guidance
 

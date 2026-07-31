@@ -55,6 +55,14 @@ def test_mine_with_stats_returns_pair(tables):
     assert isinstance(fens, list) and isinstance(skipped, int)
     assert skipped == 0          # KQvk has no saturated-count positions
 
+def test_mine_rejects_invalid_shape_filters(tables):
+    tb = helpmate.Tablebase(tables)
+    for kwargs in ({"starts": 0}, {"ends": 0}, {"starts": 5, "count": 2}, {"ends": 5, "count": 2}):
+        with pytest.raises(ValueError):
+            tb.mine("KQvk", dtm=2, max=5, **kwargs)
+    # -1 is the documented "unset" value and must still be accepted
+    assert isinstance(tb.mine("KQvk", dtm=2, max=5, starts=-1, ends=-1), list)
+
 def test_errors(tables):
     tb = helpmate.Tablebase(tables)
     with pytest.raises(ValueError):

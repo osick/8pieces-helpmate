@@ -11,6 +11,23 @@ static Material mat_or_throw(const std::string& s) {
     if (!m) throw std::invalid_argument("bad material string: " + s);
     return *m;
 }
+// Mirrors the validation in src/cli/main.cpp's cmd_mine. Unlike the CLI, this
+// binding has no "was the flag given" distinction: -1 is the documented wire
+// value for "unset" (the HTTP API converts None -> -1 before calling), so -1
+// must always be accepted here, even though the CLI treats a user-typed -1
+// as an error. Do not "fix" that into matching the CLI.
+static void validate_mine_shape(int count, int starts, int ends) {
+    if (starts != -1 && starts < 1)
+        throw std::invalid_argument("starts must be at least 1");
+    if (ends != -1 && ends < 1)
+        throw std::invalid_argument("ends must be at least 1");
+    if (count >= 0 && starts > count)
+        throw std::invalid_argument(
+            "starts=" + std::to_string(starts) + " cannot exceed count=" + std::to_string(count));
+    if (count >= 0 && ends > count)
+        throw std::invalid_argument(
+            "ends=" + std::to_string(ends) + " cannot exceed count=" + std::to_string(count));
+}
 PYBIND11_MODULE(_helpmate, mod) {
     py::register_exception<MissingTableError>(mod, "MissingTableError", PyExc_RuntimeError);
     mod.def("generate", [](const std::string& mat, const std::string& tables, int threads,
@@ -31,6 +48,7 @@ PYBIND11_MODULE(_helpmate, mod) {
         .def("lines", &Tablebase::lines, py::arg("fen"), py::arg("max") = 100)
         .def("mine", [](const Tablebase& t, const std::string& mat, int dtm, int count,
                         int max, int starts, int ends) {
+            validate_mine_shape(count, starts, ends);
             std::vector<std::string> out;
             t.mine(mat_or_throw(mat),
                    MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
@@ -41,6 +59,7 @@ PYBIND11_MODULE(_helpmate, mod) {
            py::arg("starts") = -1, py::arg("ends") = -1)
         .def("_mine_with_stats", [](const Tablebase& t, const std::string& mat, int dtm,
                                     int count, int max, int starts, int ends) {
+            validate_mine_shape(count, starts, ends);
             std::vector<std::string> out;
             uint64_t skipped = 0;
             t.mine(mat_or_throw(mat),
