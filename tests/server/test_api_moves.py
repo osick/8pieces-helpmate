@@ -33,3 +33,27 @@ def test_moves_invalid_fen_and_unknown_material(client):
 
 def test_moves_missing_parameter(client):
     assert client.get("/v1/moves").status_code == 400
+
+def test_unsolvable_position_still_lists_its_moves(client):
+    r = client.get("/v1/moves", params={"fen": "8/8/8/8/8/4k3/8/4K3 w - - 0 1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["solvable"] is False
+    assert len(body["moves"]) >= 2          # the list is NOT emptied for an unsolvable parent
+    for m in body["moves"]:
+        assert m["solvable"] is False and m["dtm"] is None and m["optimal"] is False
+        assert m["san"] and m["uci"] and m["fen"]
+
+def test_all_legal_moves_are_listed_not_only_optimal_ones(client):
+    r = client.get("/v1/moves", params={"fen": "8/8/8/8/8/k7/8/1K2Q3 b - - 0 1"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["dtm"] == 4
+    sans = [m["san"] for m in body["moves"]]
+    assert len(sans) == 2      # every legal move, not a filtered subset
+    optimal = [m for m in body["moves"] if m["optimal"]]
+    suboptimal = [m for m in body["moves"] if m["solvable"] and not m["optimal"]]
+    assert len(optimal) >= 1
+    assert len(suboptimal) >= 1                          # solvable but not on a shortest path
+    for m in suboptimal:
+        assert m["dtm"] is not None and m["dtm"] != body["dtm"] - 1
