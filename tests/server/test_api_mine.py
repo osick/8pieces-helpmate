@@ -75,6 +75,19 @@ def test_mine_shape_validation(client):
     r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "ends": 0})
     assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_filter"
 
+def test_mine_shape_negative_is_rejected(client):
+    # -1 must be a usage error, not silently "unset" (parity with the CLI)
+    for params in ({"material": "KQvk", "dtm": 2, "starts": -1},
+                   {"material": "KQvk", "dtm": 2, "ends": -1}):
+        r = client.get("/v1/mine", params=params)
+        assert r.status_code == 400, r.text
+        assert r.json()["error"]["code"] == "invalid_filter"
+
+def test_mine_without_shape_filters_is_unfiltered(client):
+    # omitting the parameters must still work (None path)
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5})
+    assert r.status_code == 200 and len(r.json()["fens"]) == 5
+
 def test_server_main_builds(monkeypatch, kqvk_dir):
     import helpmate_server.main as m
     captured = {}

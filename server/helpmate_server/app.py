@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+from typing import Optional
 import helpmate
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -158,9 +159,9 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
 
     @app.get("/v1/mine")
     def mine(material: str, dtm: int, count: int = -1, max: int = 100,
-             starts: int = -1, ends: int = -1):
+             starts: Optional[int] = None, ends: Optional[int] = None):
         for name, val in (("starts", starts), ("ends", ends)):
-            if val == -1:
+            if val is None:
                 continue
             if val < 1:
                 return JSONResponse(status_code=400, content=error_json(
@@ -171,6 +172,8 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                     f"{name}={val} cannot exceed count={count}",
                     hint="a position with N solutions has at most N distinct "
                          "starting or mating moves"))
+        starts = -1 if starts is None else starts
+        ends = -1 if ends is None else ends
         d, resp = _resolve_or_response(material)
         if resp is not None:
             return resp
