@@ -292,9 +292,37 @@ TEST_CASE("moves reports unsolvable children instead of hiding them") {
     auto ms = tb.moves("7k/7Q/8/8/8/8/8/K7 b - - 0 1");
     bool saw_capture = false;
     for (const auto& m : ms)
-        if (m.san.find('x') != std::string::npos) { saw_capture = true; CHECK_FALSE(m.optimal); }
+        if (m.san.find('x') != std::string::npos) {
+            saw_capture = true;
+            CHECK_FALSE(m.optimal);
+            CHECK_FALSE(m.solvable);
+            CHECK(m.dtm == -1);
+        }
     INFO("this FEN must offer at least one capture for the test to mean anything");
     CHECK(saw_capture);
+}
+
+TEST_CASE("moves reports a child with no table as unsolvable, without throwing") {
+    namespace fs = std::filesystem;
+    // A scratch copy of the generated tables with Kvk.hm REMOVED: capturing the
+    // queen now leads to material whose table is genuinely absent, which is the
+    // only way to exercise moves()'s MissingTableError guard (the KQvk closure
+    // always builds Kvk, so an unmodified tables dir cannot reach this path).
+    fs::path dir = fs::temp_directory_path() / ("hm_moves_notable_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    for (const auto& e : fs::directory_iterator(gen_dir()))
+        fs::copy_file(e.path(), dir / e.path().filename());
+    fs::remove(dir / "Kvk.hm");
+
+    Tablebase tb(dir.string());
+    auto ms = tb.moves("7k/7Q/8/8/8/8/8/K7 b - - 0 1");   // only legal move: Kxh7 -> Kvk
+    REQUIRE(ms.size() == 1);
+    CHECK(ms[0].san == "Kxh7");
+    CHECK_FALSE(ms[0].solvable);      // no table -> reported, not thrown
+    CHECK(ms[0].dtm == -1);
+    CHECK_FALSE(ms[0].optimal);
+    fs::remove_all(dir);
 }
 
 TEST_CASE("moves rejects a bad FEN like probe does") {

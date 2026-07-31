@@ -147,6 +147,9 @@ std::vector<MoveInfo> Tablebase::moves(const std::string& fen) const {
                 mi.dtm = c->dtm;
                 mi.count = c->count;
                 mi.solvable = true;
+                // parent_dtm > 0: a dtm-0 position is mate and has no legal moves, so the
+                // loop body never runs for it (this guard just avoids an accidental match
+                // against the sentinel -1 when the parent itself was unsolvable).
                 mi.optimal = parent_dtm > 0 && c->dtm == parent_dtm - 1;
             }
         } catch (const MissingTableError&) {
