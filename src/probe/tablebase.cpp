@@ -1,6 +1,7 @@
 #include "probe/tablebase.h"
 #include "chess/san.h"
 #include "generator/eval.h"
+#include <set>
 #include <utility>
 
 namespace hm {
@@ -107,6 +108,19 @@ std::vector<std::vector<std::string>> Tablebase::lines(const std::string& fen, i
 std::vector<std::string> Tablebase::line(const std::string& fen) const {
     auto ls = lines(fen, 1);
     return ls.empty() ? std::vector<std::string>{} : ls[0];
+}
+
+SolutionShape Tablebase::solution_shape(const std::string& fen) const {
+    auto p = probe(fen);
+    if (!p) return {0, 0, true};                       // unsolvable: no solutions at all
+    if (p->count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
+    std::set<std::string> firsts, lasts;
+    for (const auto& l : lines(fen, p->count)) {
+        if (l.empty()) continue;                       // dtm 0: already mate, no moves
+        firsts.insert(l.front());
+        lasts.insert(l.back());
+    }
+    return {(int)firsts.size(), (int)lasts.size(), true};
 }
 
 void Tablebase::mine(const Material& m, const MineFilter& f,

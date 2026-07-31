@@ -27,6 +27,13 @@ struct MineFilter {
     int ends   = -1;   // optional, exact: distinct final (mating) moves
 };
 
+// Shape of a position's optimal-solution set: how many distinct moves the
+// solutions start with, and how many distinct moves they mate with.
+// `exhaustive` is false when the stored optimal-line count is saturated
+// (COUNT_SAT), in which case the solutions cannot be enumerated in full and
+// starts/ends carry no meaning.
+struct SolutionShape { int starts = 0; int ends = 0; bool exhaustive = true; };
+
 // Read side of the tablebase: loads generated .hm files on demand (lazily, cached)
 // and answers position queries. All public methods are logically const (internal
 // cache access is mutex-guarded), so a single Tablebase can be shared/queried
@@ -44,6 +51,8 @@ public:
     std::vector<std::string> line(const std::string& fen) const;
     // all optimal lines, SAN, capped at `max`.
     std::vector<std::vector<std::string>> lines(const std::string& fen, int max = 100) const;
+    // Distinct first/last moves across all optimal lines from `fen`.
+    SolutionShape solution_shape(const std::string& fen) const;
     // stream FENs of canonical cells of material `m` matching `f`; stop as soon as
     // `cb` returns false.
     void mine(const Material& m, const MineFilter& f,

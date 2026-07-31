@@ -109,3 +109,25 @@ TEST_CASE("mine takes a MineFilter and behaves as before for dtm/count") {
         ++any_count; return any_count < 50; });
     CHECK(any_count >= got.size());
 }
+TEST_CASE("solution_shape counts distinct first and last moves") {
+    Tablebase tb(gen_dir());
+
+    // Golden KQvk position: 4 optimal lines -- Kh6 Qh2#, Kh6 Qh1#, Kh6 Qg6#, Kh8 Qg7#
+    // => 2 distinct first moves (Kh6, Kh8), 4 distinct mating moves.
+    auto sh = tb.solution_shape("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1");
+    CHECK(sh.exhaustive);
+    CHECK(sh.starts == 2);
+    CHECK(sh.ends == 4);
+
+    // A position already mated (dtm 0) has no moves at all.
+    auto mated = tb.solution_shape("8/8/8/8/8/8/8/kQK5 b - - 0 1");
+    CHECK(mated.exhaustive);
+    CHECK(mated.starts == 0);
+    CHECK(mated.ends == 0);
+
+    // Unsolvable position: bare kings.
+    auto uns = tb.solution_shape("8/8/8/8/8/4k3/8/4K3 w - - 0 1");
+    CHECK(uns.exhaustive);
+    CHECK(uns.starts == 0);
+    CHECK(uns.ends == 0);
+}
