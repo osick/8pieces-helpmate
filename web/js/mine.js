@@ -4,6 +4,15 @@ import { toFenList, toCsv } from "./lib/export.js";
 
 let rows = [];
 
+// Monotonic token guarding the mine submit handler's 202 retry: bails out if
+// a newer search has started since a retry was scheduled, so a stale poll
+// from a superseded search can't overwrite #mine-status/#mine-results with
+// the wrong query's results. Mirrors explorer.js's render()/materials.js's
+// showStats() guard.
+let mineSeq = 0;
+// 202 retry bound: ~60s of polling (40 * 1500ms) before giving up.
+const DOWNLOAD_RETRY_CAP = 40;
+
 function validate(q) {
   // Mirrors the server's rules so an obvious mistake never costs a round trip.
   // The server remains the authority; its 400 is displayed if we miss something.
@@ -15,6 +24,41 @@ function validate(q) {
       return `${k} cannot exceed count ${q.count}`;
   }
   return null;
+}
+
+async function runQuery(q, status, results, seq, retries = 0) {
+  let res;
+  try { res = await api.mine(q); }
+  catch (err) {
+    if (seq !== mineSeq) return;   // superseded by a newer search
+    if (err instanceof ApiError) { status.textContent = err.hint ? `${err.message} — ${err.hint}` : err.message; return; }
+    throw err;
+  }
+  if (seq !== mineSeq) return;     // superseded by a newer search
+  if (res.status === 202) {
+    if (retries >= DOWNLOAD_RETRY_CAP) {
+      status.textContent = `Still downloading ${res.body.material} — this is taking longer than expected, re-running the search will resume it.`;
+      return;
+    }
+    status.textContent = `downloading ${res.body.material}…`;
+    setTimeout(() => {
+      if (seq !== mineSeq) return; // user started a new search: stop retrying
+      runQuery(q, status, results, seq, retries + 1);
+    }, 1500);
+    return;
+  }
+  const b = res.body;
+  rows = b.fens.map((fen) => ({ fen, dtm: Number(q.dtm), count: q.count === "" ? "" : Number(q.count) }));
+  status.textContent =
+    `${b.fens.length} position(s)` +
+    (b.truncated ? " (truncated)" : "") +
+    (b.skipped_saturated ? ` · ${b.skipped_saturated} skipped (count saturated)` : "");
+  for (const fen of b.fens) {
+    const li = document.createElement("li");
+    li.textContent = fen;
+    li.addEventListener("click", () => { location.hash = encodeState({ fen, panel: "explorer" }); });
+    results.appendChild(li);
+  }
 }
 
 export function initMine() {
@@ -29,25 +73,8 @@ export function initMine() {
     const bad = validate(q);
     if (bad) { status.textContent = bad; return; }
     status.textContent = "searching…";
-    let res;
-    try { res = await api.mine(q); }
-    catch (err) {
-      if (err instanceof ApiError) { status.textContent = err.hint ? `${err.message} — ${err.hint}` : err.message; return; }
-      throw err;
-    }
-    if (res.status === 202) { status.textContent = `downloading ${res.body.material}…`; return; }
-    const b = res.body;
-    rows = b.fens.map((fen) => ({ fen, dtm: Number(q.dtm), count: q.count === "" ? "" : Number(q.count) }));
-    status.textContent =
-      `${b.fens.length} position(s)` +
-      (b.truncated ? " (truncated)" : "") +
-      (b.skipped_saturated ? ` · ${b.skipped_saturated} skipped (count saturated)` : "");
-    for (const fen of b.fens) {
-      const li = document.createElement("li");
-      li.textContent = fen;
-      li.addEventListener("click", () => { location.hash = encodeState({ fen, panel: "explorer" }); });
-      results.appendChild(li);
-    }
+    const seq = ++mineSeq;
+    await runQuery(q, status, results, seq);
   });
 
   const download = (text, name, type) => {
