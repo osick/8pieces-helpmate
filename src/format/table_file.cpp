@@ -111,26 +111,45 @@ void TableReader::reset() {
 }
 
 std::optional<TableReader> TableReader::open(const std::string& path) {
+    OpenError ignored = OpenError::None;
+    return open(path, &ignored);
+}
+
+std::optional<TableReader> TableReader::open(const std::string& path, OpenError* err) {
+    if (err) *err = OpenError::None;
     int fd = ::open(path.c_str(), O_RDONLY);
-    if (fd < 0) return std::nullopt;
+    if (fd < 0) { if (err) *err = OpenError::NotFound; return std::nullopt; }
 
     struct stat st{};
-    if (fstat(fd, &st) != 0) { ::close(fd); return std::nullopt; }
+    if (fstat(fd, &st) != 0) { ::close(fd); if (err) *err = OpenError::NotFound; return std::nullopt; }
     size_t filesize = static_cast<size_t>(st.st_size);
-    if (filesize < sizeof(TableHeader)) { ::close(fd); return std::nullopt; }
+    if (filesize < sizeof(TableHeader)) { ::close(fd); if (err) *err = OpenError::Unreadable; return std::nullopt; }
 
     void* mapped = mmap(nullptr, filesize, PROT_READ, MAP_SHARED, fd, 0);
     ::close(fd);  // fd not needed after mmap
-    if (mapped == MAP_FAILED) return std::nullopt;
+    if (mapped == MAP_FAILED) { if (err) *err = OpenError::NotFound; return std::nullopt; }
 
     const uint8_t* base = static_cast<const uint8_t*>(mapped);
     const TableHeader* hdr = reinterpret_cast<const TableHeader*>(base);
 
+    if (std::memcmp(hdr->magic, "HM8P", 4) != 0) {
+        munmap(mapped, filesize);
+        if (err) *err = OpenError::Unreadable;
+        return std::nullopt;
+    }
+
+    // The magic is ours: the file IS a helpmate table. A version this build has never
+    // heard of means it was written by a newer helpmate -- distinct from a malformed one.
+    if (hdr->version > 2) {
+        munmap(mapped, filesize);
+        if (err) *err = OpenError::UnsupportedVersion;
+        return std::nullopt;
+    }
+
     // Validate without overflowable arithmetic: json_len and plane_size come from an
     // untrusted mmap'd header, and `4 * plane_size` can wrap mod 2^64 for crafted files.
     bool marker = (hdr->flags & kFlagAllUnsolvable) != 0;
-    bool ok = std::memcmp(hdr->magic, "HM8P", 4) == 0 &&
-              (hdr->version == 1 || (hdr->version == 2 && marker)) &&
+    bool ok = (hdr->version == 1 || (hdr->version == 2 && marker)) &&
               hdr->encoding == 1;
     if (ok) {
         uint64_t after_header = filesize - sizeof(TableHeader);  // filesize >= sizeof(TableHeader) already checked
@@ -144,6 +163,7 @@ std::optional<TableReader> TableReader::open(const std::string& path) {
     }
     if (!ok) {
         munmap(mapped, filesize);
+        if (err) *err = OpenError::Unreadable;
         return std::nullopt;
     }
 

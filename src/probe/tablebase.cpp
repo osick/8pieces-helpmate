@@ -28,7 +28,11 @@ const Tablebase::Slice* Tablebase::load(const Material& m) const {
     auto it = cache_.find(m.name());
     if (it != cache_.end()) return it->second.get();
     std::string path = dir_ + "/" + m.name() + ".hm";
-    auto r = TableReader::open(path);
+    TableReader::OpenError oerr = TableReader::OpenError::None;
+    auto r = TableReader::open(path, &oerr);
+    if (!r && oerr == TableReader::OpenError::UnsupportedVersion)
+        throw std::runtime_error("table " + path + " was written by a newer helpmate"
+                                 " (unsupported table format version); upgrade this build");
     if (r) {
         // Identity check (before caching anything): the file must actually be the table
         // its name promises, or every later lookup would silently index the wrong planes.

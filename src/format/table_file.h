@@ -45,6 +45,11 @@ public:
     ~TableReader();
 
     static std::optional<TableReader> open(const std::string& path);
+
+    // Why open() returned nullopt. UnsupportedVersion means the file IS a helpmate
+    // table, but was written by a newer build than this one.
+    enum class OpenError { None, NotFound, Unreadable, UnsupportedVersion };
+    static std::optional<TableReader> open(const std::string& path, OpenError* err);
     ValuePair get(Color stm, uint64_t cell) const;
     uint64_t plane_size() const;
     uint8_t max_dtm() const;
