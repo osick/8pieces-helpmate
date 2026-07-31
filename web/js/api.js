@@ -14,7 +14,15 @@ export async function getJson(path, params = {}) {
   const url = new URL(path, window.location.origin);
   for (const [k, v] of Object.entries(params))
     if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
-  const res = await fetch(url);
+  let res;
+  try {
+    res = await fetch(url);
+  } catch {
+    // status 0 marks "no HTTP response was received at all" (server down,
+    // DNS failure, CORS block) so callers can tell it apart from a real
+    // HTTP error status and don't have to also handle a raw TypeError.
+    throw new ApiError(0, "network", "cannot reach the server", null);
+  }
   let body = null;
   try { body = await res.json(); } catch { /* empty or non-JSON body */ }
   if (res.status >= 400) {
