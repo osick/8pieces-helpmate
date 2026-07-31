@@ -31,8 +31,9 @@ PYBIND11_MODULE(_helpmate, mod) {
         .def("lines", &Tablebase::lines, py::arg("fen"), py::arg("max") = 100)
         .def("mine", [](const Tablebase& t, const std::string& mat, int dtm, int count, int max) {
             std::vector<std::string> out;
-            t.mine(mat_or_throw(mat), dtm, count, [&](const std::string& f) {
-                out.push_back(f); return (int)out.size() < max; });
+            t.mine(mat_or_throw(mat), MineFilter{.dtm = dtm, .count = count},
+                   [&](const std::string& f) {
+                       out.push_back(f); return (int)out.size() < max; });
             return out;
         }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100)
         .def("_stats_json", [](const Tablebase& t, const std::string& mat) {

@@ -61,7 +61,7 @@ TEST_CASE("line reconstruction") {
 TEST_CASE("mine finds unique-solution cells") {
     Tablebase tb(gen_dir());
     int found = 0;
-    tb.mine(*Material::parse("KQvk"), 2, 1, [&](const std::string& fen) {
+    tb.mine(*Material::parse("KQvk"), MineFilter{.dtm = 2, .count = 1}, [&](const std::string& fen) {
         auto p = tb.probe(fen);
         REQUIRE(p); CHECK(p->dtm == 2); CHECK(p->count == 1);
         return ++found < 10;
@@ -80,4 +80,32 @@ TEST_CASE("errors") {
 TEST_CASE("unsolvable probes to nullopt") {
     Tablebase tb(gen_dir());
     CHECK(!tb.probe("8/8/8/8/8/4k3/8/4K3 w - - 0 1"));   // Kvk was built as part of closures
+}
+TEST_CASE("mine takes a MineFilter and behaves as before for dtm/count") {
+    Tablebase tb(gen_dir());
+    Material kqvk = *Material::parse("KQvk");
+
+    std::vector<std::string> got;
+    tb.mine(kqvk, MineFilter{.dtm = 2, .count = 4}, [&](const std::string& f) {
+        got.push_back(f); return got.size() < 50;
+    });
+    REQUIRE_FALSE(got.empty());
+    // every returned position really has dtm 2 and count 4
+    for (const auto& f : got) {
+        auto p = tb.probe(f);
+        REQUIRE(p.has_value());
+        CHECK(p->dtm == 2);
+        CHECK(p->count == 4);
+    }
+    // the golden position from the "probe goldens" test above is among them, in its
+    // canonical form: mine() emits one canonical representative per symmetry class,
+    // while probe() (used above) accepts any of its 8 symmetric-equivalent FENs.
+    CHECK(std::find(got.begin(), got.end(),
+                    "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1") != got.end());
+
+    // count unset (-1) must not filter
+    size_t any_count = 0;
+    tb.mine(kqvk, MineFilter{.dtm = 2}, [&](const std::string&) {
+        ++any_count; return any_count < 50; });
+    CHECK(any_count >= got.size());
 }

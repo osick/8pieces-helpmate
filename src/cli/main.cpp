@@ -177,7 +177,7 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
     if (!m) { std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n"; return 3; }
     Tablebase tb(tables);
     int printed = 0;
-    tb.mine(*m, dtm, count, [&](const std::string& fen) {
+    tb.mine(*m, MineFilter{.dtm = dtm, .count = count}, [&](const std::string& fen) {
         if (printed >= maxn) return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
         std::cout << fen << "\n";
         ++printed;

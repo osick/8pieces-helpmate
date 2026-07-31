@@ -109,16 +109,16 @@ std::vector<std::string> Tablebase::line(const std::string& fen) const {
     return ls.empty() ? std::vector<std::string>{} : ls[0];
 }
 
-void Tablebase::mine(const Material& m, int dtm, int count,
+void Tablebase::mine(const Material& m, const MineFilter& f,
                       const std::function<bool(const std::string&)>& cb) const {
     const Slice* s = load(m);
     if (!s) throw MissingTableError("no table for " + m.name());
-    Color stm = (dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
+    Color stm = (f.dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
     std::vector<PlacedPiece> pp;
     for (uint64_t c = 0; c < s->index.size(); ++c) {
         ValuePair v = s->reader.get(stm, c);
-        if (v.dtm != (uint8_t)dtm) continue;
-        if (count >= 0 && v.count != (uint8_t)count) continue;
+        if (v.dtm != (uint8_t)f.dtm) continue;
+        if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
         if (!cb(Board::from_pieces(pp, stm).fen())) return;
     }
