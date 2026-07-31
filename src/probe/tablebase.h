@@ -17,6 +17,16 @@ namespace hm {
 
 struct MissingTableError : std::runtime_error { using std::runtime_error::runtime_error; };
 
+// A table file exists but was written by a newer helpmate than this build
+// understands (TableReader::OpenError::UnsupportedVersion). Kept distinct from
+// MissingTableError so Tablebase::probe can tell "absent, try the color flip"
+// apart from "present but unreadable" -- the latter still permits a flip retry,
+// but if the flip doesn't pan out either, this is the more informative error
+// to surface than a generic "no table" message.
+struct UnsupportedTableVersionError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
 // Selection criteria for Tablebase::mine. -1 means "don't filter on this".
 // Grouped in a struct so later filters (the web dashboard will want more) can
 // be added without changing every call site again.

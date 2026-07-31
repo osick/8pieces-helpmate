@@ -31,8 +31,8 @@ const Tablebase::Slice* Tablebase::load(const Material& m) const {
     TableReader::OpenError oerr = TableReader::OpenError::None;
     auto r = TableReader::open(path, &oerr);
     if (!r && oerr == TableReader::OpenError::UnsupportedVersion)
-        throw std::runtime_error("table " + path + " was written by a newer helpmate"
-                                 " (unsupported table format version); upgrade this build");
+        throw UnsupportedTableVersionError("table " + path + " was written by a newer helpmate"
+                                           " (unsupported table format version); upgrade this build");
     if (r) {
         // Identity check (before caching anything): the file must actually be the table
         // its name promises, or every later lookup would silently index the wrong planes.
@@ -69,11 +69,25 @@ std::optional<Tablebase::Probe> Tablebase::probe(const std::string& fen) const {
     Material m = Material::of(b->pieces());
     bool flipped = false;
     Board target = *b;
-    if (!load(m)) {
+    const Slice* s = nullptr;
+    // A future-format primary table must not preempt the color-flip fallback: remember
+    // the diagnostic and keep going. Only the primary attempt is wrapped -- if the flip
+    // attempt itself throws (its own table is unreadable/future-format), that propagates
+    // unmodified, and if it merely comes up empty, the remembered primary error (if any)
+    // is more informative than a generic "no table" message.
+    std::optional<UnsupportedTableVersionError> primary_err;
+    try {
+        s = load(m);
+    } catch (const UnsupportedTableVersionError& e) {
+        primary_err = e;
+    }
+    if (!s) {
         target = flip_colors(*b);
         flipped = true;
-        if (!load(Material::of(target.pieces())))
+        if (!load(Material::of(target.pieces()))) {
+            if (primary_err) throw *primary_err;
             throw MissingTableError("no table for " + m.name() + " nor its color flip");
+        }
     }
     ValuePair v = value_of(target);
     if (v.dtm > DTM_MAX) return std::nullopt;  // UNSOLVABLE (INVALID can't reach here: FEN was legal)

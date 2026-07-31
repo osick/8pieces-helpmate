@@ -376,7 +376,11 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
             bool successors_dead = true;
             for (auto& s : m.successors()) {
                 std::string spath = opt.tables_dir + "/" + s.name() + ".hm";
-                auto r = TableReader::open(spath);
+                TableReader::OpenError oerr = TableReader::OpenError::None;
+                auto r = TableReader::open(spath, &oerr);
+                if (!r && oerr == TableReader::OpenError::UnsupportedVersion)
+                    throw std::runtime_error("table " + spath + " was written by a newer helpmate"
+                                             " (unsupported table format version); upgrade this build");
                 if (!r) { successors_dead = false; break; }
                 // Identity check: the file must actually be the table its name promises,
                 // or a misnamed/misplaced/stale table would silently feed a wrong prune

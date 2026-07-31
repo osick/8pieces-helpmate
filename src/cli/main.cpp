@@ -225,7 +225,13 @@ int cmd_compact(const std::vector<std::string>& args) {
     uint64_t reclaimed = 0; int rewritten = 0, skipped = 0;
     for (auto& e : std::filesystem::directory_iterator(dir)) {
         if (e.path().extension() != ".hm") continue;
-        auto r = TableReader::open(e.path().string());
+        TableReader::OpenError oerr = TableReader::OpenError::None;
+        auto r = TableReader::open(e.path().string(), &oerr);
+        if (!r && oerr == TableReader::OpenError::UnsupportedVersion) {
+            std::cerr << "error: table " << e.path() << " was written by a newer helpmate"
+                         " (unsupported table format version); upgrade this build\n";
+            return 3;
+        }
         if (!r) { std::cerr << "error: unreadable table " << e.path() << "\n"; return 3; }
         if (r->all_unsolvable()) { ++skipped; continue; }          // already compact
         bool any_solvable = false;

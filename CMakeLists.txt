@@ -138,6 +138,15 @@ add_test(NAME cli_compact_mismatch COMMAND helpmate compact ${COMPACT_MISMATCH_T
 add_test(NAME cli_compact_mismatch_no_sidecar COMMAND ${CMAKE_COMMAND}
          -DABSENT_PATH=${COMPACT_MISMATCH_TT}/KQvk.stats.json
          -P ${CMAKE_SOURCE_DIR}/tests/cpp/assert_absent.cmake)
+# Final-review fix: compact must diagnose a table written by a newer helpmate
+# (TableReader::OpenError::UnsupportedVersion) with the same clear "newer
+# helpmate ... upgrade this build" message the rest of the tool uses, not the
+# generic "unreadable table" message that a single-argument TableReader::open
+# call would produce.
+set(COMPACT_FUTURE_TT ${CMAKE_BINARY_DIR}/compact_future_tables)
+add_test(NAME cli_compact_future_fixture_mkdir COMMAND ${CMAKE_COMMAND} -E make_directory ${COMPACT_FUTURE_TT})
+add_test(NAME cli_compact_future_fixture_write COMMAND mk_legacy_table ${COMPACT_FUTURE_TT}/Kvk.hm Kvk --future)
+add_test(NAME cli_compact_future COMMAND helpmate compact ${COMPACT_FUTURE_TT})
 # count=4 (not 1): four optimal replies tie at dtm=2 here -- see Task 8's
 # corrected golden (test_probe.cpp), reconfirmed by running the built CLI.
 set_tests_properties(cli_probe PROPERTIES PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_gen)
@@ -172,3 +181,9 @@ set_tests_properties(cli_compact_mismatch PROPERTIES
     PASS_REGULAR_EXPRESSION "error:.*is for material 'Kvk'.*expected 'KQvk'"
     DEPENDS cli_compact_mismatch_fixture_rename)
 set_tests_properties(cli_compact_mismatch_no_sidecar PROPERTIES DEPENDS cli_compact_mismatch)
+set_tests_properties(cli_compact_future_fixture_write PROPERTIES DEPENDS cli_compact_future_fixture_mkdir)
+# helpmate compact exits 3 on an unsupported table version too; PASS_REGULAR_EXPRESSION
+# ignores exit code (same idiom as cli_compact_mismatch above), so it alone pins this.
+set_tests_properties(cli_compact_future PROPERTIES
+    PASS_REGULAR_EXPRESSION "error:.*newer helpmate"
+    DEPENDS cli_compact_future_fixture_write)
