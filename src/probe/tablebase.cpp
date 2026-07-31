@@ -128,6 +128,35 @@ std::vector<std::string> Tablebase::line(const std::string& fen) const {
     return ls.empty() ? std::vector<std::string>{} : ls[0];
 }
 
+std::vector<MoveInfo> Tablebase::moves(const std::string& fen) const {
+    auto b = Board::from_fen(fen);
+    if (!b) throw std::invalid_argument("bad FEN: " + fen);
+    int parent_dtm = -1;
+    if (auto p = probe(fen)) parent_dtm = p->dtm;
+
+    std::vector<MoveInfo> out;
+    for (const Move& m : b->legal_moves()) {
+        MoveInfo mi;
+        mi.uci = m.uci();
+        mi.san = san(*b, m);          // SAN must be computed BEFORE the move is made
+        b->make(m);
+        mi.fen = b->fen();
+        b->unmake(m);
+        try {
+            if (auto c = probe(mi.fen)) {
+                mi.dtm = c->dtm;
+                mi.count = c->count;
+                mi.solvable = true;
+                mi.optimal = parent_dtm > 0 && c->dtm == parent_dtm - 1;
+            }
+        } catch (const MissingTableError&) {
+            // no table for the resulting material: leave solvable=false
+        }
+        out.push_back(std::move(mi));
+    }
+    return out;
+}
+
 SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines) {
     if (count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
     std::set<std::string> firsts, lasts;

@@ -44,6 +44,20 @@ struct MineFilter {
 // starts/ends carry no meaning.
 struct SolutionShape { int starts = 0; int ends = 0; bool exhaustive = true; };
 
+// One legal move from a queried position, with the value of the position it
+// leads to. `dtm == -1 && !solvable` covers both "unsolvable" and "no table
+// for the resulting material" -- the list is always the complete legal-move
+// list, so a caller can render every option.
+struct MoveInfo {
+    std::string uci;
+    std::string san;
+    std::string fen;
+    int  dtm      = -1;
+    int  count    = 0;
+    bool solvable = false;
+    bool optimal  = false;
+};
+
 // Shape of an already-enumerated optimal-line set. `count` is the position's
 // stored optimal-line count; when it is saturated (COUNT_SAT) the set cannot be
 // complete, so the numbers are meaningless and `exhaustive` is false. Empty
@@ -71,6 +85,8 @@ public:
     std::vector<std::vector<std::string>> lines(const std::string& fen, int max = 100) const;
     // Distinct first/last moves across all optimal lines from `fen`.
     SolutionShape solution_shape(const std::string& fen) const;
+    // Every legal move from `fen`, each with the value of the resulting position.
+    std::vector<MoveInfo> moves(const std::string& fen) const;
     // stream FENs of canonical cells of material `m` matching `f`; stop as soon as
     // `cb` returns false. When a shape filter (starts/ends) is set, candidates whose
     // solution count is saturated (unenumerable) are skipped and tallied into

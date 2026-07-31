@@ -246,3 +246,58 @@ TEST_CASE("probe rethrows UnsupportedTableVersionError when both primary and fli
     Tablebase tb(dir.string());
     CHECK_THROWS_AS(tb.probe("4k2q/8/8/8/8/8/8/4K3 w - - 0 1"), UnsupportedTableVersionError);
 }
+
+TEST_CASE("moves lists every legal move with the value it leads to") {
+    Tablebase tb(gen_dir());
+    auto ms = tb.moves("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1");
+
+    // Black king on h7, White king f6 covers g6/g7/h6... the black king's legal
+    // moves are exactly Kh6 and Kh8 (g8 is covered by nothing, but g7/g6 are).
+    std::set<std::string> sans;
+    for (const auto& m : ms) sans.insert(m.san);
+    CHECK(sans.count("Kh6") == 1);
+    CHECK(sans.count("Kh8") == 1);
+
+    // Both are optimal (they lead to dtm 1 from this dtm-2 position).
+    for (const auto& m : ms) {
+        INFO("move " << m.san);
+        if (m.san == "Kh6" || m.san == "Kh8") {
+            CHECK(m.optimal);
+            CHECK(m.solvable);
+            CHECK(m.dtm == 1);
+        } else {
+            CHECK_FALSE(m.optimal);
+        }
+        // every entry carries a usable resulting position
+        auto after = Board::from_fen(m.fen);
+        CHECK(after.has_value());
+        CHECK_FALSE(m.uci.empty());
+    }
+    // the number of optimal moves matches the distinct first moves of the
+    // optimal lines (Kh6, Kh8) -- see the golden lines in the plan header
+    int opt = 0;
+    for (const auto& m : ms) if (m.optimal) ++opt;
+    CHECK(opt == 2);
+}
+
+TEST_CASE("moves reports unsolvable children instead of hiding them") {
+    Tablebase tb(gen_dir());
+    // dtm-0 position: Black is already mated, so there are no legal moves.
+    CHECK(tb.moves("8/8/8/8/8/8/8/kQK5 b - - 0 1").empty());
+    // A position where a capture leads into Kvk (unsolvable): the move must be
+    // listed with solvable=false rather than dropped or throwing.
+    // Fixture verified with a scratch Board::legal_moves() dump: black king h8,
+    // white queen h7, white king a1, black to move -- the only legal move is
+    // Kxh7 (a genuine capture; the a1 king defends nothing relevant to h7).
+    auto ms = tb.moves("7k/7Q/8/8/8/8/8/K7 b - - 0 1");
+    bool saw_capture = false;
+    for (const auto& m : ms)
+        if (m.san.find('x') != std::string::npos) { saw_capture = true; CHECK_FALSE(m.optimal); }
+    INFO("this FEN must offer at least one capture for the test to mean anything");
+    CHECK(saw_capture);
+}
+
+TEST_CASE("moves rejects a bad FEN like probe does") {
+    Tablebase tb(gen_dir());
+    CHECK_THROWS_AS(tb.moves("garbage"), std::invalid_argument);
+}
