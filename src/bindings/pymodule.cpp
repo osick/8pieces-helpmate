@@ -29,13 +29,28 @@ PYBIND11_MODULE(_helpmate, mod) {
         })
         .def("line", &Tablebase::line)
         .def("lines", &Tablebase::lines, py::arg("fen"), py::arg("max") = 100)
-        .def("mine", [](const Tablebase& t, const std::string& mat, int dtm, int count, int max) {
+        .def("mine", [](const Tablebase& t, const std::string& mat, int dtm, int count,
+                        int max, int starts, int ends) {
             std::vector<std::string> out;
-            t.mine(mat_or_throw(mat), MineFilter{.dtm = dtm, .count = count},
+            t.mine(mat_or_throw(mat),
+                   MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
                    [&](const std::string& f) {
                        out.push_back(f); return (int)out.size() < max; });
             return out;
-        }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100)
+        }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100,
+           py::arg("starts") = -1, py::arg("ends") = -1)
+        .def("_mine_with_stats", [](const Tablebase& t, const std::string& mat, int dtm,
+                                    int count, int max, int starts, int ends) {
+            std::vector<std::string> out;
+            uint64_t skipped = 0;
+            t.mine(mat_or_throw(mat),
+                   MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
+                   [&](const std::string& f) {
+                       out.push_back(f); return (int)out.size() < max; },
+                   &skipped);
+            return std::make_pair(out, skipped);      // -> (list[str], int) in Python
+        }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100,
+           py::arg("starts") = -1, py::arg("ends") = -1)
         .def("_stats_json", [](const Tablebase& t, const std::string& mat) {
             return t.stats_json(mat_or_throw(mat)); });
     mod.def("_perft", [](const std::string& fen, int depth) {

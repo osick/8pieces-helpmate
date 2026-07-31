@@ -35,6 +35,26 @@ def test_stats_dict(tables):
     assert s["material"] == "KQvk"
     assert s["max_dtm"] >= 3
 
+def test_mine_shape_filters(tables):
+    tb = helpmate.Tablebase(tables)
+    # mine returns canonical (symmetry-reduced) FENs; this is the golden
+    # position's canonical form -- starts 2, ends 4.
+    golden = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1"
+    hit = tb.mine("KQvk", dtm=2, count=4, starts=2, ends=4, max=200)
+    assert golden in hit
+    assert golden not in tb.mine("KQvk", dtm=2, count=4, starts=3, max=200)
+    # omitting the new kwargs reproduces the old behaviour
+    assert tb.mine("KQvk", dtm=2, count=4, max=5) == tb.mine("KQvk", dtm=2, count=4, max=5)
+    for f in tb.mine("KQvk", dtm=4, starts=1, ends=1, max=20):
+        ls = tb.lines(f)
+        assert len({l[0] for l in ls}) == 1 and len({l[-1] for l in ls}) == 1
+
+def test_mine_with_stats_returns_pair(tables):
+    tb = helpmate.Tablebase(tables)
+    fens, skipped = tb.mine_with_stats("KQvk", dtm=2, count=4, starts=2, ends=4, max=5)
+    assert isinstance(fens, list) and isinstance(skipped, int)
+    assert skipped == 0          # KQvk has no saturated-count positions
+
 def test_errors(tables):
     tb = helpmate.Tablebase(tables)
     with pytest.raises(ValueError):
