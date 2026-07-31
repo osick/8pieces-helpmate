@@ -40,21 +40,41 @@ move", "two solutions converging on one mate".
 - Depends on: nothing beyond v0.6
 - The last release before the web dashboard.
 
-## v0.7 — Web dashboard + cross-platform CLI
+## v0.7 — Web dashboard
 
-**Goal:** the visible layer. Browser dashboard against the v0.6 API: browse
-materials, probe positions (board UI), mining, **pattern/theme search** (needs
-its own precomputed index — designed in this rung), export (FEN lists, PGN,
-CSV). Reference implementation to study: niklasf/syzygy-tables.info. CLI
-grows: search subcommands against the API, report generation, and native
-Windows / macOS / WSL builds (CI release matrix).
+**Goal:** the visible layer — a browser client of the v0.6 read-only API:
+position explorer with an interactive board and per-move evaluations, material
+browser with stats, mining/composition search with the v0.6.2 shape filters,
+and client-side export (FEN/PGN/CSV). Static files served by the existing
+FastAPI process; no build step; cm-chessboard vendored. One API addition:
+`GET /v1/moves`, which returns every legal move with the value it leads to.
 
-- Depends on: v0.6 API
-- Open questions: index design for themes/patterns (what is a "theme" —
-  needs its own brainstorming); dashboard hosting; board-UI library choice;
-  Windows toolchain (MSVC vs MinGW) for the C++20 core.
+- Design: **approved** — `docs/superpowers/specs/2026-07-31-web-dashboard-design.md`
+- Depends on: v0.6 API, v0.6.2 filters
+- Known limitation: no automated browser tests (Playwright unusable on this
+  box); DOM wiring is verified by a written manual checklist, everything
+  testable headlessly is isolated and tested.
 
-## v0.8–v0.9 — Seven pieces ("humongous tablebases", part 1)
+## v0.8 — Pattern / theme search
+
+**Goal:** search by theme and pattern, the capability the original notes asked
+for. Split out of v0.7 because it needs its own foundations: a definition of
+what a "theme" is, a precomputed index per material, generation tooling, and
+new query endpoints. Starts with its own brainstorming session.
+
+- Depends on: v0.7 (the UI that will present it), v0.6 storage
+- Open questions: the theme taxonomy itself (model, pin, self-block,
+  interference, promotion themes...); index format and size; whether themes
+  are computed during generation or as a separate pass.
+
+## Unscheduled — Cross-platform CLI builds
+
+Native Windows / macOS / WSL builds and a CI release matrix; formerly bundled
+into v0.7. Independent of everything else.
+
+- Open questions: Windows toolchain (MSVC vs MinGW) for the C++20 core.
+
+## v0.9 — Seven pieces ("humongous tablebases", part 1)
 
 **Goal:** the project's namesake research goal. 7-piece slices exceed RAM
 (~1.8 TB naive planes — the v0.5.0 RAM guard already computes this), so the
@@ -78,7 +98,7 @@ a closure) is designed here, delivered incrementally.
 partial/on-demand generation as the primary mode (full 8-piece closures are
 compute-years — the value is generating *chosen* slices reproducibly).
 
-- Depends on: v0.8/0.9 out-of-core + distributed foundation
+- Depends on: v0.9's out-of-core + distributed foundation
 - Open questions: hardware budget; which 8-piece materials matter to the
   composition community; public serving economics.
 
