@@ -108,6 +108,39 @@ unfiltered `mine` is unchanged.
   `mine(material, dtm, count=-1, max=100, starts=-1, ends=-1)` — additive
   keyword arguments with defaults, so existing calls are unaffected.
 
+## Performance (measured, 2026-07-31)
+
+The filters are query-side only. Measured on a generated KQvk closure:
+
+| Path | Effect |
+|---|---|
+| generation (`gen`) | zero — no generator code changes, no format change, nothing stored |
+| `probe` / `line` / `lines` | zero — untouched |
+| `mine` without the new flags | zero — 2000 hits scanned in 3 ms, unchanged path |
+| `mine` with the new flags | ~107 us per candidate that already passed `dtm`/`count` (213 ms for 2000) |
+
+The added cost is inherent — the distinct first moves cannot be known without
+enumerating the solutions — and is paid only for positions that already matched
+the cheap filters. Shape distribution over those 2000 positions, showing the
+filter discriminates usefully: (1,1) 515, (1,2) 400, (2,1) 263, (2,2) 209,
+(2,3) 155, (3,2) 53.
+
+## Format-version diagnostics (small, included)
+
+Discovered while measuring: a pre-v0.6.1 binary reading a compacted directory
+reports `no table for X`. `TableReader::open` returns `nullopt` for a file it
+cannot parse — including one whose format version it does not know — and the
+probe layer cannot distinguish that from an absent file. After v0.6.1's
+marker tables this is a live scenario for anyone with a mixed installation
+(an old server process, a stale Python extension).
+
+Fix, in this release: `open` distinguishes "not present" from "present but
+unreadable by this build". When a file exists with a valid `HM8P` magic but an
+unsupported version or flag combination, the probe/generator layers surface
+`table <path> was written in format version <N>; this build supports up to
+<M> — upgrade helpmate` instead of reporting the table as missing. Tested with
+a hand-crafted future-version header.
+
 ## Testing
 
 - **Unit** — `solution_shape` against the golden KQvk position (expect
