@@ -420,9 +420,11 @@ understands is diagnosed as such — `error: table ... was written by a newer
 helpmate (unsupported table format version); upgrade this build` (exit code
 `3`) — rather than being reported as a missing table (exit code `2`); the
 message is what tells "you need to build it" apart from "you need a newer
-helpmate". This applies wherever a table is read: `compact` reports it and
-exits 3, and `gen --prune`'s successor-table check treats it as an error
-rather than silently assuming the successor isn't proven dead. `probe` is the
+helpmate". Every command that opens a table reports it this way: the query
+commands (`probe`, `line`, `mine`, `stats`), `compact`, and both table reads
+in `gen` — the `--prune` successor check, which treats it as an error rather
+than silently assuming the successor isn't proven dead, and the sub-table load
+that cross-material lookups depend on during generation. `probe` is the
 one place it isn't necessarily fatal: a future-format table only stops the
 query if it *also* defeats the color-flip fallback above — if the position's
 own slice is the one that's unreadable but the color-flipped slice is a
