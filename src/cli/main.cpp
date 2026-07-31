@@ -26,7 +26,8 @@ void usage() {
         "  helpmate probe <FEN> [--tables DIR]\n"
         "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
         "  helpmate stats <MATERIAL> [--tables DIR]\n"
-        "  helpmate mine <MATERIAL> --dtm D [--count C] [--max N] [--tables DIR]\n"
+        "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
+        "               [--max N] [--tables DIR]\n"
         "  helpmate compact <DIR> [--dry-run]\n"
         "  helpmate --version\n"
         "\n"
@@ -70,6 +71,9 @@ void usage() {
         "  --max N        cap on lines/FENs printed (default: 10)\n"
         "  --dtm D        mine: required, exact distance-to-mate to match\n"
         "  --count C      mine: optional, exact optimal-reply count to match\n"
+        "  --starts N     mine: optional, exact number of distinct first moves across\n"
+        "                 the optimal solutions (must be >= 1, and <= --count if given)\n"
+        "  --ends N       mine: optional, exact number of distinct mating moves\n"
         "  --dry-run      compact: report what would be rewritten, write nothing\n"
         "  --version      print version (\"helpmate " << HELPMATE_VERSION << "\") and exit\n"
         "\n"
@@ -79,6 +83,7 @@ void usage() {
         "  helpmate line  \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt --all\n"
         "  helpmate stats KQvk --tables tt\n"
         "  helpmate mine KQvk --dtm 2 --count 1 --max 5 --tables tt\n"
+        "  helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --tables tt\n"
         "\n"
         "Exit codes: 0 success (an \"unsolvable\" answer is still success), 2 a\n"
         "table needed to answer the query is missing (message says which one and\n"
@@ -170,19 +175,38 @@ int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
     return 0;
 }
 
-int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count, int maxn) {
+int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count,
+             int maxn, int starts, int ends) {
     if (pos.empty()) { std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
     if (dtm < 0) { std::cerr << "error: mine requires --dtm D\n\n"; usage(); return 3; }
+    for (auto [flag, val] : {std::pair{"--starts", starts}, std::pair{"--ends", ends}}) {
+        if (val == -1) continue;                       // not given
+        if (val < 1) {
+            std::cerr << "error: " << flag << " must be at least 1\n"; return 3;
+        }
+        if (count >= 0 && val > count) {
+            std::cerr << "error: " << flag << " " << val << " cannot exceed --count " << count
+                      << " (a position with " << count << " solution(s) has at most "
+                      << count << " distinct starting/mating moves)\n";
+            return 3;
+        }
+    }
     auto m = Material::parse(pos[0]);
     if (!m) { std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n"; return 3; }
     Tablebase tb(tables);
     int printed = 0;
-    tb.mine(*m, MineFilter{.dtm = dtm, .count = count}, [&](const std::string& fen) {
-        if (printed >= maxn) return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
-        std::cout << fen << "\n";
-        ++printed;
-        return printed < maxn;
-    });
+    uint64_t skipped = 0;
+    tb.mine(*m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
+            [&](const std::string& fen) {
+                if (printed >= maxn) return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
+                std::cout << fen << "\n";
+                ++printed;
+                return printed < maxn;
+            }, &skipped);
+    if (skipped)
+        std::cerr << "note: skipped " << skipped
+                  << " position(s) whose solution count is saturated (255+): their"
+                     " solutions cannot be enumerated exhaustively\n";
     return 0;
 }
 
@@ -271,7 +295,7 @@ int main(int argc, char** argv) {
     }
 
     std::string tables = "tables";
-    int threads = 1, dtm = -1, count = -1, maxn = 10;
+    int threads = 1, dtm = -1, count = -1, maxn = 10, starts = -1, ends = -1;
     bool all = false, verbose = false, progress = false, force_ram = false;
     std::vector<std::string> pos;  // positional args
     // Flags below all take a value; if one appears with nothing after it,
@@ -279,7 +303,8 @@ int main(int argc, char** argv) {
     // --tables` with no directory should not silently treat "--tables" as
     // the FEN's replacement).
     auto needs_value = [](const std::string& a) {
-        return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" || a == "--max";
+        return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" ||
+               a == "--max" || a == "--starts" || a == "--ends";
     };
     // Consumes the value following flag `a` (already known to exist) into
     // `target`; on malformed/out-of-range input prints one clear message +
@@ -303,6 +328,8 @@ int main(int argc, char** argv) {
         else if (a == "--dtm")     set_int(a, i, dtm);
         else if (a == "--count")   set_int(a, i, count);
         else if (a == "--max")     set_int(a, i, maxn);
+        else if (a == "--starts")  set_int(a, i, starts);
+        else if (a == "--ends")    set_int(a, i, ends);
         else if (a == "--all") all = true;
         else if (a == "--verbose")   verbose = true;
         else if (a == "--progress")  progress = true;
@@ -315,7 +342,7 @@ int main(int argc, char** argv) {
         if (cmd == "probe") return cmd_probe(pos, tables);
         if (cmd == "line")  return cmd_line(pos, tables, all, maxn);
         if (cmd == "stats") return cmd_stats(pos, tables);
-        if (cmd == "mine")  return cmd_mine(pos, tables, dtm, count, maxn);
+        if (cmd == "mine")  return cmd_mine(pos, tables, dtm, count, maxn, starts, ends);
         if (cmd == "compact") return cmd_compact(pos);
         std::cerr << "error: unknown command \"" << cmd << "\"\n\n";
         usage();

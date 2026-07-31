@@ -79,6 +79,13 @@ add_test(NAME cli_probe COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" 
 add_test(NAME cli_line COMMAND helpmate line "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables ${CLI_TT})
 add_test(NAME cli_stats COMMAND helpmate stats KQvk --tables ${CLI_TT})
 add_test(NAME cli_mine COMMAND helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables ${CLI_TT})
+# v0.6.2: shape filters. mine prints CANONICAL FENs, so assert against the
+# golden position's canonical form 8/8/8/8/8/2K5/7Q/1k6 b - - 0 1 (dtm 2,
+# count 4; lines Ka1 Qb2#, Kc1 Qg1#, Kc1 Qh1#, Kc1 Qc2# -> starts 2, ends 4).
+add_test(NAME cli_mine_shape COMMAND helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --max 200 --tables ${CLI_TT})
+add_test(NAME cli_mine_shape_miss COMMAND helpmate mine KQvk --dtm 2 --count 4 --starts 3 --ends 4 --max 200 --tables ${CLI_TT})
+add_test(NAME cli_mine_shape_badrange COMMAND helpmate mine KQvk --dtm 2 --count 2 --starts 5 --tables ${CLI_TT})
+add_test(NAME cli_mine_shape_zero COMMAND helpmate mine KQvk --dtm 2 --starts 0 --tables ${CLI_TT})
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})
 # v0.5.0: --verbose lifecycle lines go to stderr (ctest matches merged output);
 # on a re-run every slice is already on disk, so "cached" must appear.
@@ -128,6 +135,10 @@ set_tests_properties(cli_probe PROPERTIES PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*
 set_tests_properties(cli_line  PROPERTIES PASS_REGULAR_EXPRESSION "Kh6 Qh2#" DEPENDS cli_gen)
 set_tests_properties(cli_stats PROPERTIES PASS_REGULAR_EXPRESSION "max_dtm" DEPENDS cli_gen)
 set_tests_properties(cli_mine  PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape PROPERTIES PASS_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_miss PROPERTIES FAIL_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_badrange PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_zero PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
 set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
 set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
 set_tests_properties(cli_gen_verbose PROPERTIES PASS_REGULAR_EXPRESSION "cached" DEPENDS cli_gen)
