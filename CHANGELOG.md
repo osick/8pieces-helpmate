@@ -6,6 +6,57 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.6.2] - 2026-07-31
+
+### Added
+
+- **`mine` shape filters, `--starts`/`--ends`**: narrow a `mine` scan to
+  positions with an exact number of distinct first moves (`--starts N`) and/or
+  distinct mating moves (`--ends N`) among their optimal solutions, on top of
+  the existing exact `--dtm`/`--count` match — enough to distinguish, say, a
+  4-solution position with 2 tries that each finish 2 ways (`starts=2,
+  ends=4`) from one with 4 completely independent lines (`starts=4, ends=4`).
+  Available on all three surfaces:
+  - CLI: `helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]`.
+    Both must be `>= 1` and, when `--count` is also given, `<= --count`;
+    violating either is a usage error (exit 3), including a literal `-1`
+    (otherwise a value the flags could take, so it can't be treated as
+    "unset"). `mine` now also tallies positions it had to skip because their
+    stored solution count is saturated (255+, unenumerable — see below) and
+    prints the count to stderr on exit.
+  - HTTP API: `GET /v1/mine` gains optional `starts`/`ends` query params
+    (same exact-match, same `>= 1`/`<= count` validation, `400
+    invalid_filter` on violation) and every response gains a
+    `skipped_saturated` integer field with the same meaning as the CLI's
+    stderr tally.
+  - Python: `Tablebase.mine` gained `starts`/`ends` parameters; a new
+    `Tablebase.mine_with_stats` returns `(fens, skipped_saturated)` for
+    callers that want the tally (the plain `mine` return shape is
+    unchanged).
+  See [USAGE.md](docs/USAGE.md#mine--scan-for-composition-candidates) and
+  [USAGE.md](docs/USAGE.md#get-v1mine) for worked examples.
+- **`Tablebase::mine` takes a `MineFilter`**: the `dtm`/`count`/`starts`/`ends`
+  scan criteria are now grouped into one `MineFilter{dtm, count, starts,
+  ends}` struct instead of separate parameters, with `starts`/`ends`
+  evaluated (via the new pure `shape_of(count, lines)` helper, also exposed
+  as `Tablebase::solution_shape(fen)`) only for candidates that already
+  passed `dtm`/`count` — no wasted work enumerating lines for positions that
+  were never going to match. `shape_of` reports `exhaustive: false` instead
+  of a `starts`/`ends` count when the stored solution count is saturated,
+  which is what lets `mine` (and the API/CLI tallies above) recognize and
+  skip those positions instead of guessing at an undercount.
+
+### Fixed
+
+- **A table written by a newer helpmate now reports "upgrade this build",
+  not "no table"**: `TableReader::open` gained an `OpenError` out-parameter
+  (`NotFound` / `Unreadable` / `UnsupportedVersion`) so callers can tell a
+  genuinely missing/corrupt table apart from one whose format `version` this
+  build doesn't understand yet. `Tablebase::load` now throws a distinct,
+  actionable error for the latter case (`table ... was written by a newer
+  helpmate (unsupported table format version); upgrade this build`) instead
+  of the same generic "missing table" diagnosis it used to give both cases.
+
 ## [0.6.1] - 2026-07-30
 
 ### Added

@@ -1,6 +1,6 @@
 def test_import_and_version():
     import helpmate_server
-    assert helpmate_server.__version__ == "0.6.1"
+    assert helpmate_server.__version__ == "0.6.2"
 
 def test_console_script_targets_exist():
     from helpmate_server.main import main as server_main
