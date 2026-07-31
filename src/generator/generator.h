@@ -68,7 +68,11 @@ struct SubTables {
         for (auto& s : m.successors()) {
             if (t_.count(s.name())) continue;
             std::string path = dir + "/" + s.name() + ".hm";
-            auto r = TableReader::open(path);
+            TableReader::OpenError oerr = TableReader::OpenError::None;
+            auto r = TableReader::open(path, &oerr);
+            if (!r && oerr == TableReader::OpenError::UnsupportedVersion)
+                throw std::runtime_error("sub-table " + path + " was written by a newer helpmate"
+                                         " (unsupported table format version); upgrade this build");
             if (!r) throw std::runtime_error("missing sub-table " + s.name());
             // Identity check: the file must actually be the table its name promises,
             // or every later lookup would silently index the wrong planes.

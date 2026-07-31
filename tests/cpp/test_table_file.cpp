@@ -161,3 +161,32 @@ TEST_CASE("malformed marker headers are rejected") {
 
     fs::remove_all(dir);
 }
+
+TEST_CASE("a future-format table reports UnsupportedVersion, not NotFound") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_future_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string path = (dir / "Kvk.hm").string();
+
+    // Write a valid marker, then bump its version byte to a value this build
+    // does not know -- exactly what an older binary sees when it meets a newer table.
+    TableWriter::write_unsolvable(path, *Material::parse("Kvk"), 462, "{}");
+    {
+        std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+        uint32_t v = 99;
+        f.seekp(offsetof(TableHeader, version));
+        f.write(reinterpret_cast<const char*>(&v), sizeof(v));
+    }
+
+    TableReader::OpenError err = TableReader::OpenError::None;
+    auto r = TableReader::open(path, &err);
+    CHECK_FALSE(r.has_value());
+    CHECK(err == TableReader::OpenError::UnsupportedVersion);
+
+    // A genuinely absent file is still NotFound.
+    TableReader::OpenError err2 = TableReader::OpenError::None;
+    CHECK_FALSE(TableReader::open((dir / "KQvk.hm").string(), &err2).has_value());
+    CHECK(err2 == TableReader::OpenError::NotFound);
+
+    fs::remove_all(dir);
+}

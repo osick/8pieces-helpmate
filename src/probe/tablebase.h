@@ -17,6 +17,41 @@ namespace hm {
 
 struct MissingTableError : std::runtime_error { using std::runtime_error::runtime_error; };
 
+// A table file exists but was written by a newer helpmate than this build
+// understands (TableReader::OpenError::UnsupportedVersion). Kept distinct from
+// MissingTableError so Tablebase::probe can tell "absent, try the color flip"
+// apart from "present but unreadable" -- the latter still permits a flip retry,
+// but if the flip doesn't pan out either, this is the more informative error
+// to surface than a generic "no table" message.
+struct UnsupportedTableVersionError : std::runtime_error {
+    using std::runtime_error::runtime_error;
+};
+
+// Selection criteria for Tablebase::mine. -1 means "don't filter on this".
+// Grouped in a struct so later filters (the web dashboard will want more) can
+// be added without changing every call site again.
+struct MineFilter {
+    int dtm    = -1;   // required, exact
+    int count  = -1;   // optional, exact
+    int starts = -1;   // optional, exact: distinct first moves across optimal lines
+    int ends   = -1;   // optional, exact: distinct final (mating) moves
+};
+
+// Shape of a position's optimal-solution set: how many distinct moves the
+// solutions start with, and how many distinct moves they mate with.
+// `exhaustive` is false when the stored optimal-line count is saturated
+// (COUNT_SAT), in which case the solutions cannot be enumerated in full and
+// starts/ends carry no meaning.
+struct SolutionShape { int starts = 0; int ends = 0; bool exhaustive = true; };
+
+// Shape of an already-enumerated optimal-line set. `count` is the position's
+// stored optimal-line count; when it is saturated (COUNT_SAT) the set cannot be
+// complete, so the numbers are meaningless and `exhaustive` is false. Empty
+// lines (a position that is already mate) contribute nothing.
+// Free function so both branches are unit-testable without a table that
+// saturates -- no such position exists in any material generated so far.
+SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines);
+
 // Read side of the tablebase: loads generated .hm files on demand (lazily, cached)
 // and answers position queries. All public methods are logically const (internal
 // cache access is mutex-guarded), so a single Tablebase can be shared/queried
@@ -34,9 +69,15 @@ public:
     std::vector<std::string> line(const std::string& fen) const;
     // all optimal lines, SAN, capped at `max`.
     std::vector<std::vector<std::string>> lines(const std::string& fen, int max = 100) const;
-    // stream FENs of canonical cells of material `m` with the given dtm (and count,
-    // -1 = any); stop as soon as `cb` returns false.
-    void mine(const Material& m, int dtm, int count, const std::function<bool(const std::string&)>& cb) const;
+    // Distinct first/last moves across all optimal lines from `fen`.
+    SolutionShape solution_shape(const std::string& fen) const;
+    // stream FENs of canonical cells of material `m` matching `f`; stop as soon as
+    // `cb` returns false. When a shape filter (starts/ends) is set, candidates whose
+    // solution count is saturated (unenumerable) are skipped and tallied into
+    // `skipped_saturated` if non-null; existing callers that omit it are unaffected.
+    void mine(const Material& m, const MineFilter& f,
+              const std::function<bool(const std::string&)>& cb,
+              uint64_t* skipped_saturated = nullptr) const;
     // sidecar stats content for material `m`; throws MissingTableError if absent.
     std::string stats_json(const Material& m) const;
     // "h#2", "h#1.5", "h#0" style helpmate notation for a dtm/side-to-move pair.

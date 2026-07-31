@@ -1,5 +1,6 @@
 from __future__ import annotations
 import re
+from typing import Optional
 import helpmate
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
@@ -157,7 +158,22 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     pool = ThreadPoolExecutor(max_workers=2)
 
     @app.get("/v1/mine")
-    def mine(material: str, dtm: int, count: int = -1, max: int = 100):
+    def mine(material: str, dtm: int, count: int = -1, max: int = 100,
+             starts: Optional[int] = None, ends: Optional[int] = None):
+        for name, val in (("starts", starts), ("ends", ends)):
+            if val is None:
+                continue
+            if val < 1:
+                return JSONResponse(status_code=400, content=error_json(
+                    "invalid_filter", f"{name} must be at least 1"))
+            if count >= 0 and val > count:
+                return JSONResponse(status_code=400, content=error_json(
+                    "invalid_filter",
+                    f"{name}={val} cannot exceed count={count}",
+                    hint="a position with N solutions has at most N distinct "
+                         "starting or mating moves"))
+        starts = -1 if starts is None else starts
+        ends = -1 if ends is None else ends
         d, resp = _resolve_or_response(material)
         if resp is not None:
             return resp
@@ -167,13 +183,17 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             # in-process call, a real ThreadPoolExecutor+timeout(0) race can
             # resolve either way depending on OS scheduling, so short-circuit
             # deterministically instead of racing.
-            return {"fens": [], "truncated": True, "note": "timeout"}
-        fut = pool.submit(_tb(chain, d).mine, material, dtm, count, clamped + 1)
+            return {"fens": [], "truncated": True, "note": "timeout",
+                    "skipped_saturated": 0}
+        fut = pool.submit(_tb(chain, d).mine_with_stats, material, dtm, count,
+                          clamped + 1, starts, ends)
         try:
-            fens = fut.result(timeout=mine_timeout)
+            fens, skipped = fut.result(timeout=mine_timeout)
         except FutTimeout:
-            return {"fens": [], "truncated": True, "note": "timeout"}
+            return {"fens": [], "truncated": True, "note": "timeout",
+                    "skipped_saturated": 0}
         truncated = len(fens) > clamped
-        return {"fens": fens[:clamped], "truncated": truncated}
+        return {"fens": fens[:clamped], "truncated": truncated,
+                "skipped_saturated": int(skipped)}
 
     return app

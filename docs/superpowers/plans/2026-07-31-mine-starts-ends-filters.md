@@ -15,6 +15,7 @@
 - **Saturated counts are skipped, not hidden:** a position whose stored count is `COUNT_SAT` (255, defined `src/chess/types.h:31`) cannot be enumerated exhaustively; when a shape filter is active such positions are skipped and counted. CLI prints the tally to stderr when non-zero; the API returns it as `skipped_saturated`.
 - **`--max` is unchanged** — it caps returned rows.
 - **Verified golden** (`KQvk`, position `8/7k/5K2/8/8/8/8/6Q1 b - - 0 1`, dtm 2, count 4): its four optimal lines are `Kh6 Qh2#`, `Kh6 Qh1#`, `Kh6 Qg6#`, `Kh8 Qg7#` — so **starts = 2**, **ends = 4**. Use these values verbatim; they were measured, not assumed.
+- **`mine` emits CANONICAL FENs.** Positions are stored symmetry-reduced, so `mine` prints the canonical representative of each cell — not whichever equivalent FEN you happened to type. The golden position's canonical form is `8/8/8/8/8/2K5/7Q/1k6 b - - 0 1`, whose four optimal lines are `Ka1 Qb2#`, `Kc1 Qg1#`, `Kc1 Qh1#`, `Kc1 Qc2#` — the same shape (starts 2, ends 4), verified by running the built CLI. Use the **canonical** FEN in any assertion about `mine`'s OUTPUT; use either form for `probe`/`line`/`lines`/`solution_shape`, which canonicalize their input.
 - **Zero cost when unused:** shape evaluation runs only when a shape filter is set AND only for candidates that already matched dtm/count.
 - Build: `PATH="$HOME/.local/bin:$PATH"`, `cmake --build build -j4`; never let CMake FetchContent clone from GitHub (SSH passphrase). FAST SUITE = `taskset -c 0-3 ./build/helpmate_tests "~[slow]"` — **never** the bare invocation (it adds a 30-60 minute `[slow]` lane). ctest: `cd build && taskset -c 0-3 ctest --output-on-failure`.
 - Python changes require reinstalling the extension to test:
@@ -287,7 +288,9 @@ git commit   # feat: solution_shape - distinct first/last moves of the optimal l
 TEST_CASE("mine filters on distinct starting and mating moves") {
     Tablebase tb(gen_dir());
     Material kqvk = *Material::parse("KQvk");
-    const std::string golden = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
+    // mine emits canonical (symmetry-reduced) FENs -- this is the golden
+    // position's canonical form: same 4 solutions, starts 2, ends 4.
+    const std::string golden = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1";
 
     auto collect = [&](MineFilter f, int cap = 200) {
         std::vector<std::string> out;
@@ -394,14 +397,15 @@ git commit   # feat: mine filters on distinct starting and mating moves
 In `CMakeLists.txt`, next to the existing `cli_mine` test (the `CLI_TT` directory already holds a generated `KQvk`):
 
 ```cmake
-# v0.6.2: shape filters. The golden KQvk position (dtm 2, count 4) has exactly
-# 2 distinct first moves (Kh6, Kh8) and 4 distinct mating moves.
+# v0.6.2: shape filters. mine prints CANONICAL FENs, so assert against the
+# golden position's canonical form 8/8/8/8/8/2K5/7Q/1k6 b - - 0 1 (dtm 2,
+# count 4; lines Ka1 Qb2#, Kc1 Qg1#, Kc1 Qh1#, Kc1 Qc2# -> starts 2, ends 4).
 add_test(NAME cli_mine_shape COMMAND helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --max 200 --tables ${CLI_TT})
 add_test(NAME cli_mine_shape_miss COMMAND helpmate mine KQvk --dtm 2 --count 4 --starts 3 --ends 4 --max 200 --tables ${CLI_TT})
 add_test(NAME cli_mine_shape_badrange COMMAND helpmate mine KQvk --dtm 2 --count 2 --starts 5 --tables ${CLI_TT})
 add_test(NAME cli_mine_shape_zero COMMAND helpmate mine KQvk --dtm 2 --starts 0 --tables ${CLI_TT})
-set_tests_properties(cli_mine_shape PROPERTIES PASS_REGULAR_EXPRESSION "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" DEPENDS cli_gen)
-set_tests_properties(cli_mine_shape_miss PROPERTIES FAIL_REGULAR_EXPRESSION "8/7k/5K2/8/8/8/8/6Q1 b" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape PROPERTIES PASS_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_miss PROPERTIES FAIL_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b" DEPENDS cli_gen)
 set_tests_properties(cli_mine_shape_badrange PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
 set_tests_properties(cli_mine_shape_zero PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
 ```
@@ -526,8 +530,9 @@ Append to `tests/python/test_smoke.py`:
 ```python
 def test_mine_shape_filters(tables):
     tb = helpmate.Tablebase(tables)
-    golden = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
-    # golden has 2 distinct first moves (Kh6, Kh8) and 4 distinct mating moves
+    # mine returns canonical (symmetry-reduced) FENs; this is the golden
+    # position's canonical form -- starts 2, ends 4.
+    golden = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1"
     hit = tb.mine("KQvk", dtm=2, count=4, starts=2, ends=4, max=200)
     assert golden in hit
     assert golden not in tb.mine("KQvk", dtm=2, count=4, starts=3, max=200)
@@ -541,7 +546,9 @@ def test_mine_shape_filters(tables):
 Append to `tests/server/test_api_mine.py`:
 
 ```python
-GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
+# mine returns canonical (symmetry-reduced) FENs -- the golden position's
+# canonical form; starts 2, ends 4.
+GOLDEN = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1"
 
 def test_mine_shape_filters(client):
     r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,

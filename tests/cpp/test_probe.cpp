@@ -1,9 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include "probe/tablebase.h"
 #include "generator/generator.h"
+#include "format/table_file.h"
 #include <algorithm>
+#include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <set>
+#include <unistd.h>
 using namespace hm;
 static std::string gen_dir() {                        // one shared generated dir per test binary run
     static std::string dir = [] {
@@ -61,7 +65,7 @@ TEST_CASE("line reconstruction") {
 TEST_CASE("mine finds unique-solution cells") {
     Tablebase tb(gen_dir());
     int found = 0;
-    tb.mine(*Material::parse("KQvk"), 2, 1, [&](const std::string& fen) {
+    tb.mine(*Material::parse("KQvk"), MineFilter{.dtm = 2, .count = 1}, [&](const std::string& fen) {
         auto p = tb.probe(fen);
         REQUIRE(p); CHECK(p->dtm == 2); CHECK(p->count == 1);
         return ++found < 10;
@@ -80,4 +84,165 @@ TEST_CASE("errors") {
 TEST_CASE("unsolvable probes to nullopt") {
     Tablebase tb(gen_dir());
     CHECK(!tb.probe("8/8/8/8/8/4k3/8/4K3 w - - 0 1"));   // Kvk was built as part of closures
+}
+TEST_CASE("mine takes a MineFilter and behaves as before for dtm/count") {
+    Tablebase tb(gen_dir());
+    Material kqvk = *Material::parse("KQvk");
+
+    std::vector<std::string> got;
+    tb.mine(kqvk, MineFilter{.dtm = 2, .count = 4}, [&](const std::string& f) {
+        got.push_back(f); return got.size() < 50;
+    });
+    REQUIRE_FALSE(got.empty());
+    // every returned position really has dtm 2 and count 4
+    for (const auto& f : got) {
+        auto p = tb.probe(f);
+        REQUIRE(p.has_value());
+        CHECK(p->dtm == 2);
+        CHECK(p->count == 4);
+    }
+    // the golden position from the "probe goldens" test above is among them, in its
+    // canonical form: mine() emits one canonical representative per symmetry class,
+    // while probe() (used above) accepts any of its 8 symmetric-equivalent FENs.
+    CHECK(std::find(got.begin(), got.end(),
+                    "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1") != got.end());
+
+    // count unset (-1) must not filter
+    size_t any_count = 0;
+    tb.mine(kqvk, MineFilter{.dtm = 2}, [&](const std::string&) {
+        ++any_count; return any_count < 50; });
+    CHECK(any_count >= got.size());
+}
+TEST_CASE("solution_shape counts distinct first and last moves") {
+    Tablebase tb(gen_dir());
+
+    // Golden KQvk position: 4 optimal lines -- Kh6 Qh2#, Kh6 Qh1#, Kh6 Qg6#, Kh8 Qg7#
+    // => 2 distinct first moves (Kh6, Kh8), 4 distinct mating moves.
+    auto sh = tb.solution_shape("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1");
+    CHECK(sh.exhaustive);
+    CHECK(sh.starts == 2);
+    CHECK(sh.ends == 4);
+
+    // A position already mated (dtm 0) has no moves at all.
+    auto mated = tb.solution_shape("8/8/8/8/8/8/8/kQK5 b - - 0 1");
+    CHECK(mated.exhaustive);
+    CHECK(mated.starts == 0);
+    CHECK(mated.ends == 0);
+
+    // Unsolvable position: bare kings.
+    auto uns = tb.solution_shape("8/8/8/8/8/4k3/8/4K3 w - - 0 1");
+    CHECK(uns.exhaustive);
+    CHECK(uns.starts == 0);
+    CHECK(uns.ends == 0);
+}
+
+TEST_CASE("mine filters on distinct starting and mating moves") {
+    Tablebase tb(gen_dir());
+    Material kqvk = *Material::parse("KQvk");
+    // mine emits canonical (symmetry-reduced) FENs -- this is the golden
+    // position's canonical form: same 4 solutions, starts 2, ends 4.
+    const std::string golden = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1";
+
+    auto collect = [&](MineFilter f, int cap = 200) {
+        std::vector<std::string> out;
+        uint64_t skipped = 0;
+        tb.mine(kqvk, f, [&](const std::string& s) {
+            out.push_back(s); return (int)out.size() < cap; }, &skipped);
+        return out;
+    };
+
+    // The golden position has starts 2, ends 4 -- it must appear only for those values.
+    auto hit = collect(MineFilter{.dtm = 2, .count = 4, .starts = 2, .ends = 4});
+    CHECK(std::find(hit.begin(), hit.end(), golden) != hit.end());
+
+    auto miss_starts = collect(MineFilter{.dtm = 2, .count = 4, .starts = 3, .ends = 4});
+    CHECK(std::find(miss_starts.begin(), miss_starts.end(), golden) == miss_starts.end());
+
+    auto miss_ends = collect(MineFilter{.dtm = 2, .count = 4, .starts = 2, .ends = 3});
+    CHECK(std::find(miss_ends.begin(), miss_ends.end(), golden) == miss_ends.end());
+
+    // Every position returned under a starts/ends filter really has that shape.
+    for (const auto& f : collect(MineFilter{.dtm = 4, .starts = 1, .ends = 1}, 40)) {
+        auto sh = tb.solution_shape(f);
+        CHECK(sh.exhaustive);
+        CHECK(sh.starts == 1);
+        CHECK(sh.ends == 1);
+    }
+
+    // Filtering on only one of the two works.
+    for (const auto& f : collect(MineFilter{.dtm = 2, .starts = 1}, 40))
+        CHECK(tb.solution_shape(f).starts == 1);
+}
+
+TEST_CASE("shape_of reports saturation and counts distinct endpoints") {
+    using L = std::vector<std::vector<std::string>>;
+    // Saturated: the line set cannot be complete, so no numbers are reported.
+    auto sat = shape_of(255, L{{"Kh6", "Qh2#"}});
+    CHECK_FALSE(sat.exhaustive);
+    CHECK(sat.starts == 0);
+    CHECK(sat.ends == 0);
+    // The golden shape: 4 lines, 2 distinct first moves, 4 distinct mating moves.
+    auto g = shape_of(4, L{{"Kh6","Qh2#"},{"Kh6","Qh1#"},{"Kh6","Qg6#"},{"Kh8","Qg7#"}});
+    CHECK(g.exhaustive); CHECK(g.starts == 2); CHECK(g.ends == 4);
+    // Already mate: lines() yields one empty line.
+    auto m = shape_of(1, L{{}});
+    CHECK(m.exhaustive); CHECK(m.starts == 0); CHECK(m.ends == 0);
+    // No solutions at all.
+    auto n = shape_of(0, L{});
+    CHECK(n.exhaustive); CHECK(n.starts == 0); CHECK(n.ends == 0);
+}
+
+// Final-review fix: a future-format PRIMARY table must not preempt probe()'s
+// color-flip fallback. Reproduces the reviewer's exact case: a valid KQvk
+// closure (from gen_dir()) plus a hand-crafted future-version Kvkq.hm -- the
+// primary material for the probed FEN -- in the same directory.
+namespace {
+std::filesystem::path copy_gen_dir_to_scratch(const std::string& tag) {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_probe_future_" + tag + "_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    for (auto& entry : fs::directory_iterator(gen_dir()))
+        fs::copy(entry.path(), dir / entry.path().filename(), fs::copy_options::overwrite_existing);
+    return dir;
+}
+void patch_table_version(const std::string& path, uint32_t v) {
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    f.seekp(offsetof(TableHeader, version));
+    f.write(reinterpret_cast<const char*>(&v), sizeof(v));
+}
+}  // namespace
+
+TEST_CASE("probe falls back to color flip past a future-version primary table") {
+    namespace fs = std::filesystem;
+    Material kvkq = *Material::parse("Kvkq");
+
+    fs::path dir = copy_gen_dir_to_scratch("flip_ok");
+    std::string kvkq_path = (dir / "Kvkq.hm").string();
+    // Kvkq is never in the KQvk/KPvk closures generated by gen_dir() (no
+    // capture/promotion reaches it -- it's KQvk's color flip, not a successor),
+    // so this file doesn't already exist; hand-craft it as a future-version table.
+    TableWriter::write_unsolvable(kvkq_path, kvkq, SliceIndex(kvkq).size(), "{}");
+    patch_table_version(kvkq_path, 99);
+
+    Tablebase tb(dir.string());
+    auto p = tb.probe("4k2q/8/8/8/8/8/8/4K3 w - - 0 1");
+    REQUIRE(p);
+    CHECK(p->dtm == 8);
+    CHECK(p->count == 32);
+    CHECK(p->flipped);
+}
+
+TEST_CASE("probe rethrows UnsupportedTableVersionError when both primary and flip are unusable") {
+    namespace fs = std::filesystem;
+    Material kvkq = *Material::parse("Kvkq");
+
+    fs::path dir = copy_gen_dir_to_scratch("both_bad");
+    std::string kvkq_path = (dir / "Kvkq.hm").string();
+    TableWriter::write_unsolvable(kvkq_path, kvkq, SliceIndex(kvkq).size(), "{}");
+    patch_table_version(kvkq_path, 99);
+    patch_table_version((dir / "KQvk.hm").string(), 99);  // the color flip's table, also future-format
+
+    Tablebase tb(dir.string());
+    CHECK_THROWS_AS(tb.probe("4k2q/8/8/8/8/8/8/4K3 w - - 0 1"), UnsupportedTableVersionError);
 }

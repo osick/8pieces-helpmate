@@ -2,6 +2,10 @@ from fastapi.testclient import TestClient
 from helpmate_server.storage import LocalDir, ChainSource
 from helpmate_server.app import create_app
 
+# mine returns canonical (symmetry-reduced) FENs -- the golden position's
+# canonical form; starts 2, ends 4.
+GOLDEN = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1"
+
 def test_mine_invalid_dtm_400_envelope(client):
     # Malformed query param (dtm not an int) triggers RequestValidationError,
     # which must still surface the contract's error envelope, not {"detail": ...}.
@@ -34,7 +38,7 @@ def test_mine_golden(client):
 def test_mine_exhausted_not_truncated(client):
     # Kvk is unsolvable everywhere: mining yields zero rows, nothing truncated.
     b = client.get("/v1/mine", params={"material": "Kvk", "dtm": 2}).json()
-    assert b == {"fens": [], "truncated": False}
+    assert b == {"fens": [], "truncated": False, "skipped_saturated": 0}
 
 def test_mine_cap_clamps(kqvk_dir):
     app = create_app(ChainSource([LocalDir(kqvk_dir)]), mine_cap=3)
@@ -46,10 +50,43 @@ def test_mine_timeout_truncates(kqvk_dir):
     app = create_app(ChainSource([LocalDir(kqvk_dir)]), mine_timeout=0.0)
     c = TestClient(app)
     b = c.get("/v1/mine", params={"material": "KQvk", "dtm": 2}).json()
-    assert b == {"fens": [], "truncated": True, "note": "timeout"}
+    assert b == {"fens": [], "truncated": True, "note": "timeout", "skipped_saturated": 0}
 
 def test_mine_unknown_material(client):
     assert client.get("/v1/mine", params={"material": "KNvkqr", "dtm": 2}).status_code == 404
+
+def test_mine_shape_filters(client):
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,
+                                       "starts": 2, "ends": 4, "max": 200})
+    assert r.status_code == 200
+    body = r.json()
+    assert GOLDEN in body["fens"]
+    assert body["skipped_saturated"] == 0
+
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,
+                                       "starts": 3, "max": 200})
+    assert r.status_code == 200 and GOLDEN not in r.json()["fens"]
+
+def test_mine_shape_validation(client):
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 2, "starts": 5})
+    assert r.status_code == 400
+    assert r.json()["error"]["code"] == "invalid_filter"
+
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "ends": 0})
+    assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_filter"
+
+def test_mine_shape_negative_is_rejected(client):
+    # -1 must be a usage error, not silently "unset" (parity with the CLI)
+    for params in ({"material": "KQvk", "dtm": 2, "starts": -1},
+                   {"material": "KQvk", "dtm": 2, "ends": -1}):
+        r = client.get("/v1/mine", params=params)
+        assert r.status_code == 400, r.text
+        assert r.json()["error"]["code"] == "invalid_filter"
+
+def test_mine_without_shape_filters_is_unfiltered(client):
+    # omitting the parameters must still work (None path)
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5})
+    assert r.status_code == 200 and len(r.json()["fens"]) == 5
 
 def test_server_main_builds(monkeypatch, kqvk_dir):
     import helpmate_server.main as m

@@ -253,12 +253,27 @@ enumerate the actual positions at any (dtm, count).
 ## `mine` — scan for composition candidates
 
 ```
-helpmate mine <MATERIAL> --dtm D [--count C] [--max N] [--tables DIR]
+helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N] [--max N] [--tables DIR]
 ```
 
 - `--dtm D` (**required**): exact distance-to-mate, in plies, to match;
 - `--count C` (optional): additionally require exactly C optimal solutions;
+- `--starts N` (optional): additionally require exactly N *distinct first
+  moves* across the optimal solutions — i.e. how many different ways White
+  can begin the mate, ignoring how each one finishes;
+- `--ends N` (optional): additionally require exactly N *distinct mating
+  moves* across the optimal solutions — i.e. how many different final moves
+  deliver mate, ignoring how each one got there;
 - `--max N`: cap on FENs printed (default 10).
+
+`--starts`/`--ends` are exact-match filters, evaluated (cheaply) only for
+positions that already matched `--dtm`/`--count` — a position that matches
+`--dtm 2 --count 4` but has 3 distinct first moves is excluded by `--starts
+2` just as surely as one with the wrong `--dtm`. Both must be `>= 1`, and if
+`--count` is also given, each must be `<= --count` (a position with C
+solutions cannot have more than C distinct starts or ends); violating either
+rule is a usage error (exit 3), not a silently empty result — including a
+literal `-1`, which is otherwise a value `--starts`/`--ends` could take.
 
 Prints matching FENs one per line, scanning the slice's index planes (an O(1)
 table read per cell — no search):
@@ -273,6 +288,37 @@ $ helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables tt
 (three `h#1` positions with a *unique* solution — raw material for a sound
 one-line composition; `--dtm 2 --count 2` would list positions with exactly
 one dual, etc.)
+
+`--starts`/`--ends` narrow this further to a specific *shape* of dual: take
+`8/8/8/8/8/2K5/7Q/1k6 b - - 0 1` (`dtm=2, count=4`), whose four optimal
+lines are `Ka1 Qb2#`, `Kc1 Qg1#`, `Kc1 Qh1#`, `Kc1 Qc2#`. Only two distinct
+first moves appear (`Ka1`, `Kc1` — one of them, `Kc1`, has three tries), but
+all four mating moves are distinct, so this position has `starts=2, ends=4`:
+
+```
+$ helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --max 3 --tables tt
+8/8/8/8/8/2K5/4Q3/1k6 b - - 0 1
+8/8/8/8/8/2K5/7Q/1k6 b - - 0 1
+```
+
+(the second FEN printed is the position above, in its canonical — i.e.
+symmetry-reduced — form; `mine` always prints canonical FENs, which need not
+match the FEN a query used to reach the same position.)
+
+If any matched position's solution count is *saturated* (stored as 255+,
+meaning the true count is unenumerable — see [DTM
+semantics](#dtm-semantics-plies-hn-notation)), it can't be checked against
+`--starts`/`--ends` and is skipped rather than guessed at; `mine` tallies
+these and, if any were skipped, prints a note to stderr when it exits:
+
+```
+note: skipped N position(s) whose solution count is saturated (255+): their
+solutions cannot be enumerated exhaustively
+```
+
+(`KQvk` has no saturated-count positions, so this note never fires for the
+examples above; it applies to richer material classes where hundreds of
+optimal replies can tie.)
 
 ## `compact` — reclaim disk space in already-unsolvable tables
 
@@ -369,13 +415,30 @@ unsolvable. `TableReader` accepts both versions transparently — probing,
 an ordinary version-1 table or a version-2 marker; nothing reading tables
 needs to change for this feature.
 
+Since v0.6.2, a table file whose format `version` is newer than this build
+understands is diagnosed as such — `error: table ... was written by a newer
+helpmate (unsupported table format version); upgrade this build` (exit code
+`3`) — rather than being reported as a missing table (exit code `2`); the
+message is what tells "you need to build it" apart from "you need a newer
+helpmate". Every command that opens a table reports it this way: the query
+commands (`probe`, `line`, `mine`, `stats`), `compact`, and both table reads
+in `gen` — the `--prune` successor check, which treats it as an error rather
+than silently assuming the successor isn't proven dead, and the sub-table load
+that cross-material lookups depend on during generation. `probe` is the
+one place it isn't necessarily fatal: a future-format table only stops the
+query if it *also* defeats the color-flip fallback above — if the position's
+own slice is the one that's unreadable but the color-flipped slice is a
+usable, understood table, `probe` answers from the flip exactly as it would
+for a missing (not just future-format) primary slice, and the version
+mismatch is never reported at all.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | success — including a reported `unsolvable` answer. |
 | `2` | a table needed to answer the query is missing; the message names it and the exact `helpmate gen` command that builds it. |
-| `3` | bad usage or unparseable input (unknown command, malformed FEN or material string, malformed/out-of-range numeric flag, flag missing its value; includes `compact` given no directory, or a path that is not a directory). |
+| `3` | bad usage or unparseable input (unknown command, malformed FEN or material string, malformed/out-of-range numeric flag, flag missing its value; includes `compact` given no directory, or a path that is not a directory) — also a table written by a newer helpmate (unsupported table format version), which is a runtime error rather than bad usage but shares this exit code. |
 
 ## Resource guidance
 
@@ -447,8 +510,17 @@ Reference:
 - `tb.line(fen)` — one optimal line as a list of SAN strings (empty list if
   unsolvable or already mate).
 - `tb.lines(fen, max=100)` — every optimal line, capped at `max`.
-- `tb.mine(material, dtm, count=-1, max=100)` — list of FENs matching `dtm`
-  exactly and, if `count >= 0`, `count` exactly.
+- `tb.mine(material, dtm, count=-1, max=100, starts=-1, ends=-1)` — list of
+  FENs matching `dtm` exactly and, for each of `count`/`starts`/`ends` that
+  is `>= 0`/`>= 1`, that criterion exactly too (`starts`/`ends`: distinct
+  first moves / distinct mating moves among the optimal solutions — see the
+  CLI [`mine`](#mine--scan-for-composition-candidates) section for what
+  these mean).
+- `tb.mine_with_stats(material, dtm, count=-1, max=100, starts=-1, ends=-1)`
+  — like `tb.mine`, but returns `(fens, skipped_saturated)`: the FEN list
+  plus how many matched-so-far positions were skipped because their stored
+  solution count is saturated (255+) and so couldn't be checked against
+  `starts`/`ends`.
 - `tb.stats(material)` — the stats JSON as a Python dict (fields as in the
   [reference](#statsjson-field-reference) above).
 
@@ -589,9 +661,38 @@ $ curl -sG http://127.0.0.1:8642/v1/line --data-urlencode "fen=8/7k/5K2/8/8/8/8/
 
 ### `GET /v1/mine`
 
+Parameters: `material`, `dtm` (required), `count` (optional, exact match),
+`starts` / `ends` (optional, exact match on the number of distinct first
+moves / distinct mating moves among the optimal solutions — see the CLI
+[`mine`](#mine--scan-for-composition-candidates) section for what these mean
+and why the golden `8/8/8/8/8/2K5/7Q/1k6 b - - 0 1` position has `starts=2,
+ends=4`), and `max`.
+
 ```
 $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "count=1" --data-urlencode "max=3"
-{"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1","8/8/8/8/8/2Q5/8/k1K5 b - - 0 1","8/8/8/8/4Q3/8/8/k1K5 b - - 0 1"],"truncated":true}
+{"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1","8/8/8/8/8/2Q5/8/k1K5 b - - 0 1","8/8/8/8/4Q3/8/8/k1K5 b - - 0 1"],"truncated":true,"skipped_saturated":0}
+```
+
+Every response carries `skipped_saturated`: the number of matched-so-far
+positions whose stored solution count was saturated (255+, unenumerable) and
+so had to be skipped rather than checked against `starts`/`ends` — 0 when no
+`starts`/`ends` filter is given, or when nothing saturated was encountered
+(as above; `KQvk` has no saturated-count positions). `starts`/`ends` narrow
+the match to a specific dual shape:
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "count=4" --data-urlencode "starts=2" --data-urlencode "ends=4" --data-urlencode "max=3"
+{"fens":["8/8/8/8/8/2K5/4Q3/1k6 b - - 0 1","8/8/8/8/8/2K5/7Q/1k6 b - - 0 1"],"truncated":false,"skipped_saturated":0}
+```
+
+`starts`/`ends` must each be `>= 1`, and `<= count` if `count` is also given
+(a position with `count` solutions can't have more distinct starts or ends
+than that); violating either is a `400 invalid_filter`, e.g. asking for more
+starts than the position could possibly have:
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "count=4" --data-urlencode "starts=5"
+{"error":{"code":"invalid_filter","message":"starts=5 cannot exceed count=4","hint":"a position with N solutions has at most N distinct starting or mating moves"}}
 ```
 
 `truncated` is `true` whenever more matches exist than were returned (as
@@ -606,7 +707,7 @@ bites, not the client's 50):
 
 ```
 $ curl -sG http://127.0.0.1:8644/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "max=50"
-{"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1","8/8/8/8/8/2Q5/8/k1K5 b - - 0 1","8/8/8/8/1Q6/8/8/k1K5 b - - 0 1"],"truncated":true}
+{"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1","8/8/8/8/8/2Q5/8/k1K5 b - - 0 1","8/8/8/8/1Q6/8/8/k1K5 b - - 0 1"],"truncated":true,"skipped_saturated":0}
 ```
 
 If the scan doesn't finish within `--mine-timeout` seconds (default 30; a
@@ -617,7 +718,7 @@ explaining why (server started as `helpmate-server --tables <scratch>
 
 ```
 $ curl -sG http://127.0.0.1:8645/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2"
-{"fens":[],"truncated":true,"note":"timeout"}
+{"fens":[],"truncated":true,"note":"timeout","skipped_saturated":0}
 ```
 
 When a scan genuinely exhausts the whole material with fewer matches than
@@ -626,7 +727,7 @@ everywhere, so `dtm=2` matches nothing):
 
 ```
 $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=Kvk" --data-urlencode "dtm=2"
-{"fens":[],"truncated":false}
+{"fens":[],"truncated":false,"skipped_saturated":0}
 ```
 
 ### The 202-fetching contract

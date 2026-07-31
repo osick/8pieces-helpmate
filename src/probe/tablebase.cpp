@@ -1,6 +1,7 @@
 #include "probe/tablebase.h"
 #include "chess/san.h"
 #include "generator/eval.h"
+#include <set>
 #include <utility>
 
 namespace hm {
@@ -27,7 +28,11 @@ const Tablebase::Slice* Tablebase::load(const Material& m) const {
     auto it = cache_.find(m.name());
     if (it != cache_.end()) return it->second.get();
     std::string path = dir_ + "/" + m.name() + ".hm";
-    auto r = TableReader::open(path);
+    TableReader::OpenError oerr = TableReader::OpenError::None;
+    auto r = TableReader::open(path, &oerr);
+    if (!r && oerr == TableReader::OpenError::UnsupportedVersion)
+        throw UnsupportedTableVersionError("table " + path + " was written by a newer helpmate"
+                                           " (unsupported table format version); upgrade this build");
     if (r) {
         // Identity check (before caching anything): the file must actually be the table
         // its name promises, or every later lookup would silently index the wrong planes.
@@ -64,11 +69,25 @@ std::optional<Tablebase::Probe> Tablebase::probe(const std::string& fen) const {
     Material m = Material::of(b->pieces());
     bool flipped = false;
     Board target = *b;
-    if (!load(m)) {
+    const Slice* s = nullptr;
+    // A future-format primary table must not preempt the color-flip fallback: remember
+    // the diagnostic and keep going. Only the primary attempt is wrapped -- if the flip
+    // attempt itself throws (its own table is unreadable/future-format), that propagates
+    // unmodified, and if it merely comes up empty, the remembered primary error (if any)
+    // is more informative than a generic "no table" message.
+    std::optional<UnsupportedTableVersionError> primary_err;
+    try {
+        s = load(m);
+    } catch (const UnsupportedTableVersionError& e) {
+        primary_err = e;
+    }
+    if (!s) {
         target = flip_colors(*b);
         flipped = true;
-        if (!load(Material::of(target.pieces())))
+        if (!load(Material::of(target.pieces()))) {
+            if (primary_err) throw *primary_err;
             throw MissingTableError("no table for " + m.name() + " nor its color flip");
+        }
     }
     ValuePair v = value_of(target);
     if (v.dtm > DTM_MAX) return std::nullopt;  // UNSOLVABLE (INVALID can't reach here: FEN was legal)
@@ -109,18 +128,48 @@ std::vector<std::string> Tablebase::line(const std::string& fen) const {
     return ls.empty() ? std::vector<std::string>{} : ls[0];
 }
 
-void Tablebase::mine(const Material& m, int dtm, int count,
-                      const std::function<bool(const std::string&)>& cb) const {
+SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines) {
+    if (count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
+    std::set<std::string> firsts, lasts;
+    for (const auto& l : lines) {
+        if (l.empty()) continue;                       // dtm 0: already mate, no moves
+        firsts.insert(l.front());
+        lasts.insert(l.back());
+    }
+    return {(int)firsts.size(), (int)lasts.size(), true};
+}
+
+SolutionShape Tablebase::solution_shape(const std::string& fen) const {
+    auto p = probe(fen);
+    if (!p) return {0, 0, true};                       // unsolvable: no solutions at all
+    if (p->count >= (int)COUNT_SAT) return shape_of(p->count, {});  // never enumerate a saturated position
+    return shape_of(p->count, lines(fen, p->count));
+}
+
+void Tablebase::mine(const Material& m, const MineFilter& f,
+                      const std::function<bool(const std::string&)>& cb,
+                      uint64_t* skipped_saturated) const {
     const Slice* s = load(m);
     if (!s) throw MissingTableError("no table for " + m.name());
-    Color stm = (dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
+    Color stm = (f.dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
+    const bool want_shape = f.starts >= 0 || f.ends >= 0;
     std::vector<PlacedPiece> pp;
     for (uint64_t c = 0; c < s->index.size(); ++c) {
         ValuePair v = s->reader.get(stm, c);
-        if (v.dtm != (uint8_t)dtm) continue;
-        if (count >= 0 && v.count != (uint8_t)count) continue;
+        if (v.dtm != (uint8_t)f.dtm) continue;
+        if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
-        if (!cb(Board::from_pieces(pp, stm).fen())) return;
+        std::string fen = Board::from_pieces(pp, stm).fen();
+        if (want_shape) {
+            SolutionShape sh = solution_shape(fen);
+            if (!sh.exhaustive) {                       // count saturated: unknowable
+                if (skipped_saturated) ++*skipped_saturated;
+                continue;
+            }
+            if (f.starts >= 0 && sh.starts != f.starts) continue;
+            if (f.ends   >= 0 && sh.ends   != f.ends)   continue;
+        }
+        if (!cb(fen)) return;
     }
 }
 

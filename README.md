@@ -256,6 +256,11 @@ $ helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables tt
 (three `h#1` positions with a *unique* solution — good raw material for a sound
 one-line helpmate composition)
 
+`--starts N` / `--ends N` (v0.6.2) narrow the scan further, to an exact number of
+distinct first moves / distinct mating moves among the optimal solutions — see
+[USAGE.md](docs/USAGE.md#mine--scan-for-composition-candidates) for the full
+semantics and a worked dual-shape example.
+
 **`compact`** — rewrite already-fully-unsolvable tables (e.g. ones built before v0.6.1
 added pruning at generation time) as tiny marker files, reclaiming disk space with no
 change in queryable results; see [USAGE.md](docs/USAGE.md#compact--reclaim-disk-space-in-already-unsolvable-tables)
