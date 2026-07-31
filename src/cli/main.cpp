@@ -176,18 +176,21 @@ int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
 }
 
 int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count,
-             int maxn, int starts, int ends) {
+             int maxn, int starts, int ends, bool starts_given, bool ends_given) {
     if (pos.empty()) { std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
     if (dtm < 0) { std::cerr << "error: mine requires --dtm D\n\n"; usage(); return 3; }
-    for (auto [flag, val] : {std::pair{"--starts", starts}, std::pair{"--ends", ends}}) {
-        if (val == -1) continue;                       // not given
+    for (auto [flag, val, given, noun] :
+         {std::tuple{"--starts", starts, starts_given, "first moves"},
+          std::tuple{"--ends", ends, ends_given, "mating moves"}}) {
+        if (!given) continue;                            // not given; -1 is a value the
+                                                           // user CAN type, not the sentinel
         if (val < 1) {
             std::cerr << "error: " << flag << " must be at least 1\n"; return 3;
         }
         if (count >= 0 && val > count) {
             std::cerr << "error: " << flag << " " << val << " cannot exceed --count " << count
                       << " (a position with " << count << " solution(s) has at most "
-                      << count << " distinct starting/mating moves)\n";
+                      << count << " distinct " << noun << ")\n";
             return 3;
         }
     }
@@ -297,6 +300,7 @@ int main(int argc, char** argv) {
     std::string tables = "tables";
     int threads = 1, dtm = -1, count = -1, maxn = 10, starts = -1, ends = -1;
     bool all = false, verbose = false, progress = false, force_ram = false;
+    bool starts_given = false, ends_given = false;
     std::vector<std::string> pos;  // positional args
     // Flags below all take a value; if one appears with nothing after it,
     // that's a usage error, not a stray positional argument (e.g. `probe FEN
@@ -328,8 +332,8 @@ int main(int argc, char** argv) {
         else if (a == "--dtm")     set_int(a, i, dtm);
         else if (a == "--count")   set_int(a, i, count);
         else if (a == "--max")     set_int(a, i, maxn);
-        else if (a == "--starts")  set_int(a, i, starts);
-        else if (a == "--ends")    set_int(a, i, ends);
+        else if (a == "--starts")  { set_int(a, i, starts); starts_given = true; }
+        else if (a == "--ends")    { set_int(a, i, ends); ends_given = true; }
         else if (a == "--all") all = true;
         else if (a == "--verbose")   verbose = true;
         else if (a == "--progress")  progress = true;
@@ -342,7 +346,8 @@ int main(int argc, char** argv) {
         if (cmd == "probe") return cmd_probe(pos, tables);
         if (cmd == "line")  return cmd_line(pos, tables, all, maxn);
         if (cmd == "stats") return cmd_stats(pos, tables);
-        if (cmd == "mine")  return cmd_mine(pos, tables, dtm, count, maxn, starts, ends);
+        if (cmd == "mine")  return cmd_mine(pos, tables, dtm, count, maxn, starts, ends,
+                                             starts_given, ends_given);
         if (cmd == "compact") return cmd_compact(pos);
         std::cerr << "error: unknown command \"" << cmd << "\"\n\n";
         usage();

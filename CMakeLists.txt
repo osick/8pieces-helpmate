@@ -86,6 +86,17 @@ add_test(NAME cli_mine_shape COMMAND helpmate mine KQvk --dtm 2 --count 4 --star
 add_test(NAME cli_mine_shape_miss COMMAND helpmate mine KQvk --dtm 2 --count 4 --starts 3 --ends 4 --max 200 --tables ${CLI_TT})
 add_test(NAME cli_mine_shape_badrange COMMAND helpmate mine KQvk --dtm 2 --count 2 --starts 5 --tables ${CLI_TT})
 add_test(NAME cli_mine_shape_zero COMMAND helpmate mine KQvk --dtm 2 --starts 0 --tables ${CLI_TT})
+# --ends is held at its true value (4) in both cli_mine_shape (PASS) and
+# cli_mine_shape_miss (FAIL) above, varying only --starts -- so a regression
+# that ignored --ends filtering entirely would slip past both. This case
+# varies --ends instead, holding --starts at its true value (2).
+add_test(NAME cli_mine_shape_ends_miss COMMAND helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 3 --max 200 --tables ${CLI_TT})
+# Regression test: -1 is a value a user can literally type with --starts/--ends,
+# not just the "not given" sentinel used internally -- it must be rejected like
+# any other value < 1, not silently treated as "not given" and skip filtering.
+add_test(NAME cli_mine_shape_negative COMMAND helpmate mine KQvk --dtm 2 --starts -1 --tables ${CLI_TT})
+# --starts is legal without --count; the golden position has starts 2.
+add_test(NAME cli_mine_shape_no_count COMMAND helpmate mine KQvk --dtm 2 --starts 2 --max 200 --tables ${CLI_TT})
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})
 # v0.5.0: --verbose lifecycle lines go to stderr (ctest matches merged output);
 # on a re-run every slice is already on disk, so "cached" must appear.
@@ -139,6 +150,9 @@ set_tests_properties(cli_mine_shape PROPERTIES PASS_REGULAR_EXPRESSION "8/8/8/8/
 set_tests_properties(cli_mine_shape_miss PROPERTIES FAIL_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b" DEPENDS cli_gen)
 set_tests_properties(cli_mine_shape_badrange PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
 set_tests_properties(cli_mine_shape_zero PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_ends_miss PROPERTIES FAIL_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_negative PROPERTIES PASS_REGULAR_EXPRESSION "error.*--starts" DEPENDS cli_gen)
+set_tests_properties(cli_mine_shape_no_count PROPERTIES PASS_REGULAR_EXPRESSION "8/8/8/8/8/2K5/7Q/1k6 b" DEPENDS cli_gen)
 set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
 set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
 set_tests_properties(cli_gen_verbose PROPERTIES PASS_REGULAR_EXPRESSION "cached" DEPENDS cli_gen)
