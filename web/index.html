@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>helpmate tablebases</title>
+<link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+<header>
+  <h1>helpmate tablebases</h1>
+  <nav>
+    <button data-panel="explorer" class="active">Explorer</button>
+    <button data-panel="materials">Materials</button>
+    <button data-panel="mine">Search</button>
+  </nav>
+</header>
+
+<div id="error-banner" hidden></div>
+
+<main>
+  <section id="panel-explorer">
+    <div id="board"></div>
+    <div class="side">
+      <form id="fen-form">
+        <label for="fen-input">FEN</label>
+        <input id="fen-input" type="text" spellcheck="false"
+               placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
+        <button type="submit">Set</button>
+        <button type="button" id="btn-flip">Flip</button>
+        <button type="button" id="btn-back" disabled>Back</button>
+      </form>
+      <p id="position-summary"></p>
+      <h2>Moves</h2>
+      <ul id="move-list"></ul>
+      <h2>Optimal lines</h2>
+      <ol id="lines"></ol>
+      <button type="button" id="btn-export-pgn">Download PGN</button>
+    </div>
+  </section>
+
+  <section id="panel-materials" hidden>
+    <ul id="material-list"></ul>
+    <div id="material-stats"></div>
+  </section>
+
+  <section id="panel-mine" hidden>
+    <form id="mine-form">
+      <label>Material <input name="material" required placeholder="KQvk"></label>
+      <label>dtm <input name="dtm" type="number" min="0" required></label>
+      <label>count <input name="count" type="number" min="1"></label>
+      <label>starts <input name="starts" type="number" min="1"></label>
+      <label>ends <input name="ends" type="number" min="1"></label>
+      <label>max <input name="max" type="number" min="1" value="50"></label>
+      <button type="submit">Search</button>
+    </form>
+    <p id="mine-status"></p>
+    <ul id="mine-results"></ul>
+    <button type="button" id="btn-export-fens">Download FENs</button>
+    <button type="button" id="btn-export-csv">Download CSV</button>
+  </section>
+</main>
+</body>
+</html>

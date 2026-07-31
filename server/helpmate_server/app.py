@@ -1,11 +1,13 @@
 from __future__ import annotations
 import re
+from pathlib import Path
 from typing import Optional
 import helpmate
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .storage import ChainSource
@@ -224,5 +226,11 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         truncated = len(fens) > clamped
         return {"fens": fens[:clamped], "truncated": truncated,
                 "skipped_saturated": int(skipped)}
+
+    # Dashboard. Mounted last so /v1 routes keep priority; html=True serves
+    # index.html for "/". Absent in a source checkout without web/, so guard it.
+    web_dir = Path(__file__).resolve().parents[2] / "web"
+    if web_dir.is_dir():
+        app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
 
     return app
