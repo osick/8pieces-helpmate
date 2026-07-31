@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>helpmate tablebases</title>
 <link rel="stylesheet" href="/css/app.css">
+<link rel="stylesheet" href="/vendor/cm-chessboard/assets/chessboard.css">
 </head>
 <body>
 <header>
@@ -60,5 +61,10 @@
     <button type="button" id="btn-export-csv">Download CSV</button>
   </section>
 </main>
+
+<script type="module">
+  import { initExplorer } from "/js/explorer.js";
+  initExplorer();
+</script>
 </body>
 </html>
