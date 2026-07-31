@@ -132,6 +132,44 @@ TEST_CASE("solution_shape counts distinct first and last moves") {
     CHECK(uns.ends == 0);
 }
 
+TEST_CASE("mine filters on distinct starting and mating moves") {
+    Tablebase tb(gen_dir());
+    Material kqvk = *Material::parse("KQvk");
+    // mine emits canonical (symmetry-reduced) FENs -- this is the golden
+    // position's canonical form: same 4 solutions, starts 2, ends 4.
+    const std::string golden = "8/8/8/8/8/2K5/7Q/1k6 b - - 0 1";
+
+    auto collect = [&](MineFilter f, int cap = 200) {
+        std::vector<std::string> out;
+        uint64_t skipped = 0;
+        tb.mine(kqvk, f, [&](const std::string& s) {
+            out.push_back(s); return (int)out.size() < cap; }, &skipped);
+        return out;
+    };
+
+    // The golden position has starts 2, ends 4 -- it must appear only for those values.
+    auto hit = collect(MineFilter{.dtm = 2, .count = 4, .starts = 2, .ends = 4});
+    CHECK(std::find(hit.begin(), hit.end(), golden) != hit.end());
+
+    auto miss_starts = collect(MineFilter{.dtm = 2, .count = 4, .starts = 3, .ends = 4});
+    CHECK(std::find(miss_starts.begin(), miss_starts.end(), golden) == miss_starts.end());
+
+    auto miss_ends = collect(MineFilter{.dtm = 2, .count = 4, .starts = 2, .ends = 3});
+    CHECK(std::find(miss_ends.begin(), miss_ends.end(), golden) == miss_ends.end());
+
+    // Every position returned under a starts/ends filter really has that shape.
+    for (const auto& f : collect(MineFilter{.dtm = 4, .starts = 1, .ends = 1}, 40)) {
+        auto sh = tb.solution_shape(f);
+        CHECK(sh.exhaustive);
+        CHECK(sh.starts == 1);
+        CHECK(sh.ends == 1);
+    }
+
+    // Filtering on only one of the two works.
+    for (const auto& f : collect(MineFilter{.dtm = 2, .starts = 1}, 40))
+        CHECK(tb.solution_shape(f).starts == 1);
+}
+
 TEST_CASE("shape_of reports saturation and counts distinct endpoints") {
     using L = std::vector<std::vector<std::string>>;
     // Saturated: the line set cannot be complete, so no numbers are reported.

@@ -129,17 +129,29 @@ SolutionShape Tablebase::solution_shape(const std::string& fen) const {
 }
 
 void Tablebase::mine(const Material& m, const MineFilter& f,
-                      const std::function<bool(const std::string&)>& cb) const {
+                      const std::function<bool(const std::string&)>& cb,
+                      uint64_t* skipped_saturated) const {
     const Slice* s = load(m);
     if (!s) throw MissingTableError("no table for " + m.name());
     Color stm = (f.dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
+    const bool want_shape = f.starts >= 0 || f.ends >= 0;
     std::vector<PlacedPiece> pp;
     for (uint64_t c = 0; c < s->index.size(); ++c) {
         ValuePair v = s->reader.get(stm, c);
         if (v.dtm != (uint8_t)f.dtm) continue;
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
-        if (!cb(Board::from_pieces(pp, stm).fen())) return;
+        std::string fen = Board::from_pieces(pp, stm).fen();
+        if (want_shape) {
+            SolutionShape sh = solution_shape(fen);
+            if (!sh.exhaustive) {                       // count saturated: unknowable
+                if (skipped_saturated) ++*skipped_saturated;
+                continue;
+            }
+            if (f.starts >= 0 && sh.starts != f.starts) continue;
+            if (f.ends   >= 0 && sh.ends   != f.ends)   continue;
+        }
+        if (!cb(fen)) return;
     }
 }
 

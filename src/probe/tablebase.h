@@ -62,9 +62,12 @@ public:
     // Distinct first/last moves across all optimal lines from `fen`.
     SolutionShape solution_shape(const std::string& fen) const;
     // stream FENs of canonical cells of material `m` matching `f`; stop as soon as
-    // `cb` returns false.
+    // `cb` returns false. When a shape filter (starts/ends) is set, candidates whose
+    // solution count is saturated (unenumerable) are skipped and tallied into
+    // `skipped_saturated` if non-null; existing callers that omit it are unaffected.
     void mine(const Material& m, const MineFilter& f,
-              const std::function<bool(const std::string&)>& cb) const;
+              const std::function<bool(const std::string&)>& cb,
+              uint64_t* skipped_saturated = nullptr) const;
     // sidecar stats content for material `m`; throws MissingTableError if absent.
     std::string stats_json(const Material& m) const;
     // "h#2", "h#1.5", "h#0" style helpmate notation for a dtm/side-to-move pair.
