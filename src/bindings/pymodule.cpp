@@ -46,6 +46,19 @@ PYBIND11_MODULE(_helpmate, mod) {
         })
         .def("line", &Tablebase::line)
         .def("lines", &Tablebase::lines, py::arg("fen"), py::arg("max") = 100)
+        .def("moves", [](const Tablebase& t, const std::string& fen) {
+            py::list out;
+            for (const auto& m : t.moves(fen)) {
+                py::dict d;
+                d["uci"] = m.uci;  d["san"] = m.san;  d["fen"] = m.fen;
+                d["dtm"] = m.solvable ? py::cast(m.dtm) : py::none();
+                d["count"] = m.count;
+                d["solvable"] = m.solvable;
+                d["optimal"] = m.optimal;
+                out.append(std::move(d));
+            }
+            return out;
+        }, py::arg("fen"))
         .def("mine", [](const Tablebase& t, const std::string& mat, int dtm, int count,
                         int max, int starts, int ends) {
             validate_mine_shape(count, starts, ends);

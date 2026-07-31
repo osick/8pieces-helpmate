@@ -154,6 +154,35 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                                 content=error_json("invalid_fen", str(e)))
         return {"lines": lines}
 
+    @app.get("/v1/moves")
+    def moves(fen: str):
+        material = None
+        try:
+            material = _dir_for_fen(fen)
+            flipped = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
+            d = chain.resolve(material) or chain.resolve(flipped)
+            if d is None:
+                d, resp = _resolve_or_response(material)
+                if resp is not None:
+                    return resp
+            tb = _tb(chain, d)
+            res = tb.probe(fen)
+            raw = tb.moves(fen)
+        except helpmate.MissingTableError:
+            return unknown(material or fen)
+        except ValueError as e:
+            return JSONResponse(status_code=400,
+                                content=error_json("invalid_fen", str(e)))
+        out = []
+        for m in raw:
+            out.append({**m,
+                        "notation": h_notation(m["dtm"]) if m["solvable"] else None})
+        if res is None:
+            return {"fen": fen, "solvable": False, "moves": out}
+        dtm, count, flip = res
+        return {"fen": fen, "dtm": dtm, "count": count, "notation": h_notation(dtm),
+                "flipped": flip, "moves": out}
+
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
     pool = ThreadPoolExecutor(max_workers=2)
 
