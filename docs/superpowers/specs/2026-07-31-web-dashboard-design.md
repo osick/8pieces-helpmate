@@ -118,15 +118,35 @@ material/FEN/cell context by design).
   material by capture.
 - **JS**: pure helpers (URL state encode/decode, PGN and CSV builders, FEN
   validation) live in `web/js/lib/*.js` with no DOM dependency and are tested
-  with Node's built-in test runner (`node --test`), wired into CI.
-- **Static serving**: a pytest asserting `/` returns the dashboard HTML and
-  that a vendored asset is served, so a broken mount fails CI.
-- **Known limitation, stated plainly**: there is no automated browser test.
-  Playwright is unusable on this machine (openSUSE Leap, per the project's
-  standing constraint), so board interaction, drag-and-drop and rendering are
-  verified against a written manual checklist in `docs/USAGE.md`. The JS that
-  can be tested headlessly is isolated so that the untested part is confined
-  to DOM wiring.
+  with Node's built-in test runner (`node --test`).
+- **Browser (end-to-end)**: pytest + Playwright, driving headless Chromium
+  against a live `helpmate-server` fixture with a generated `KQvk` closure.
+  Playwright was verified working on the development machine on 2026-07-31 —
+  no shared libraries are missing; it needs `--no-sandbox` because user
+  namespaces are restricted, and the driver package (`pip install playwright`)
+  was the only thing that had ever been absent. The cases that matter are
+  exactly the ones a manual checklist forgets:
+  - loading `/` renders the board and the initial position;
+  - dragging a piece updates the FEN box and re-queries the position;
+  - clicking a legal move advances the board, updates the move list, and
+    pushes a new URL; the browser's back button restores the previous position;
+  - opening a shared `#fen=` link restores that exact position;
+  - the mine form rejects an invalid filter combination inline and shows the
+    server's message for one it cannot catch;
+  - a material that is remote-only shows the fetching state rather than an
+    error.
+  These run as their own CI job (`ui`), with the Playwright browser download
+  cached between runs. A broken dashboard fails the build like any other
+  regression.
+
+## CI
+
+The existing `ci.yml` gains a `ui` job: install `.[dev,server]` plus
+`playwright`, `python -m playwright install --with-deps chromium` (cached via
+`actions/cache` on `~/.cache/ms-playwright`), generate a small `KQvk` closure,
+start `helpmate-server`, and run the browser suite. The `node --test` helper
+tests run in the same job — Node is already present on GitHub runners, so no
+extra setup. Existing jobs are unchanged.
 
 ## Out of scope
 
