@@ -131,3 +131,21 @@ TEST_CASE("solution_shape counts distinct first and last moves") {
     CHECK(uns.starts == 0);
     CHECK(uns.ends == 0);
 }
+
+TEST_CASE("shape_of reports saturation and counts distinct endpoints") {
+    using L = std::vector<std::vector<std::string>>;
+    // Saturated: the line set cannot be complete, so no numbers are reported.
+    auto sat = shape_of(255, L{{"Kh6", "Qh2#"}});
+    CHECK_FALSE(sat.exhaustive);
+    CHECK(sat.starts == 0);
+    CHECK(sat.ends == 0);
+    // The golden shape: 4 lines, 2 distinct first moves, 4 distinct mating moves.
+    auto g = shape_of(4, L{{"Kh6","Qh2#"},{"Kh6","Qh1#"},{"Kh6","Qg6#"},{"Kh8","Qg7#"}});
+    CHECK(g.exhaustive); CHECK(g.starts == 2); CHECK(g.ends == 4);
+    // Already mate: lines() yields one empty line.
+    auto m = shape_of(1, L{{}});
+    CHECK(m.exhaustive); CHECK(m.starts == 0); CHECK(m.ends == 0);
+    // No solutions at all.
+    auto n = shape_of(0, L{});
+    CHECK(n.exhaustive); CHECK(n.starts == 0); CHECK(n.ends == 0);
+}

@@ -110,17 +110,22 @@ std::vector<std::string> Tablebase::line(const std::string& fen) const {
     return ls.empty() ? std::vector<std::string>{} : ls[0];
 }
 
-SolutionShape Tablebase::solution_shape(const std::string& fen) const {
-    auto p = probe(fen);
-    if (!p) return {0, 0, true};                       // unsolvable: no solutions at all
-    if (p->count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
+SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines) {
+    if (count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
     std::set<std::string> firsts, lasts;
-    for (const auto& l : lines(fen, p->count)) {
+    for (const auto& l : lines) {
         if (l.empty()) continue;                       // dtm 0: already mate, no moves
         firsts.insert(l.front());
         lasts.insert(l.back());
     }
     return {(int)firsts.size(), (int)lasts.size(), true};
+}
+
+SolutionShape Tablebase::solution_shape(const std::string& fen) const {
+    auto p = probe(fen);
+    if (!p) return {0, 0, true};                       // unsolvable: no solutions at all
+    if (p->count >= (int)COUNT_SAT) return shape_of(p->count, {});  // never enumerate a saturated position
+    return shape_of(p->count, lines(fen, p->count));
 }
 
 void Tablebase::mine(const Material& m, const MineFilter& f,

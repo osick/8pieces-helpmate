@@ -34,6 +34,14 @@ struct MineFilter {
 // starts/ends carry no meaning.
 struct SolutionShape { int starts = 0; int ends = 0; bool exhaustive = true; };
 
+// Shape of an already-enumerated optimal-line set. `count` is the position's
+// stored optimal-line count; when it is saturated (COUNT_SAT) the set cannot be
+// complete, so the numbers are meaningless and `exhaustive` is false. Empty
+// lines (a position that is already mate) contribute nothing.
+// Free function so both branches are unit-testable without a table that
+// saturates -- no such position exists in any material generated so far.
+SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines);
+
 // Read side of the tablebase: loads generated .hm files on demand (lazily, cached)
 // and answers position queries. All public methods are logically const (internal
 // cache access is mutex-guarded), so a single Tablebase can be shared/queried
