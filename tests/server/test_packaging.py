@@ -1,6 +1,7 @@
-def test_import_and_version():
+def test_import():
     import helpmate_server
-    assert helpmate_server.__version__ == "0.7.0"
+    # Version consistency is asserted in tests/repo/test_version_consistency.py
+    assert hasattr(helpmate_server, "__version__")
 
 def test_console_script_targets_exist():
     from helpmate_server.main import main as server_main
