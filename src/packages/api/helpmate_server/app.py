@@ -41,8 +41,9 @@ def _resolve_web_root(explicit: str | None) -> Optional[Path]:
             return packaged
     except ImportError:
         pass
-    checkout = (Path(__file__).resolve().parents[2]
-                / "src" / "packages" / "web" / "helpmate_web" / "static")
+    # parents[2] is src/packages/ -- app.py lives at
+    # src/packages/api/helpmate_server/app.py in a source checkout.
+    checkout = Path(__file__).resolve().parents[2] / "web" / "helpmate_web" / "static"
     return checkout if checkout.is_dir() else None
 
 

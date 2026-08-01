@@ -24,6 +24,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--port", type=int, default=8642)
     p.add_argument("--mine-cap", type=int, default=1000)
     p.add_argument("--mine-timeout", type=float, default=30.0)
+    p.add_argument("--web-root", default=None, metavar="DIR",
+                   help="serve the dashboard from DIR instead of the installed helpmate-web")
+    p.add_argument("--no-web", action="store_true",
+                   help="serve the API only, with no dashboard")
     a = p.parse_args(argv)
     remote = None
     if a.hf_repo:
@@ -31,4 +35,9 @@ def main(argv: list[str] | None = None) -> None:
             p.error("--hf-repo requires --cache")
         remote = RemoteSource(HFHub(a.hf_repo), a.cache)
     chain = ChainSource([LocalDir(d) for d in a.tables], remote)
-    _run(create_app(chain, a.mine_cap, a.mine_timeout), a.host, a.port)
+    try:
+        app = create_app(chain, a.mine_cap, a.mine_timeout,
+                         web_root=a.web_root, serve_web=not a.no_web)
+    except ValueError as e:
+        p.error(str(e))
+    _run(app, a.host, a.port)
