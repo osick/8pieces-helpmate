@@ -53,6 +53,16 @@ jobs:
           echo "probe output: $out"
           echo "$out" | grep -F "dtm=2" | grep -F "count=4"
 
+      # The v0.7.1 CMake split moved executables into subdirectories while
+      # ctest kept passing, because ctest resolves target paths itself. Locally
+      # a stale pre-split binary at the old path hid it for five tasks. Assert
+      # the documented paths exist, so a future layout change fails loudly here
+      # instead of silently everywhere else.
+      - name: Binaries are at their documented paths
+        run: |
+          test -x build/helpmate       || { echo "build/helpmate missing"; exit 1; }
+          test -x build/helpmate_tests || { echo "build/helpmate_tests missing"; exit 1; }
+
   python:
     name: Python bindings
     runs-on: ubuntu-24.04
@@ -118,6 +128,75 @@ jobs:
 
       - name: Browser tests
         run: python -m pytest src/packages/web/tests/ui -v
+
+  lint:
+    name: Lint (ruff, node --check)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install ruff
+      - name: Ruff
+        run: ruff check .
+      # No ESLint: the dashboard is deliberately npm-free with no build step.
+      # `node --check` parses a module without installing anything, but it
+      # only checks the FIRST file given to it -- extra arguments become that
+      # script's argv, not additional files -- so each file is checked in its
+      # own invocation rather than one `node --check a.js b.js c.js` call,
+      # which would silently skip everything after the first.
+      - name: JS syntax
+        run: |
+          for f in $(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js'); do
+            node --check "$f"
+          done
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # mypy needs the server's own dependencies to resolve its imports, but
+      # NOT the compiled `helpmate` extension -- ignore_missing_imports covers
+      # that, and installing it would mean a ten-minute C++ build for a
+      # type-check job.
+      - name: Install typing dependencies
+        run: python -m pip install mypy fastapi uvicorn huggingface_hub
+      - name: mypy
+        run: python -m mypy
+
+  cppformat:
+    name: C++ format (changed lines)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # git-clang-format needs the merge base
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install clang-format
+        run: python -m pip install clang-format
+      # A PR checkout's `origin/<base>` is not guaranteed to be a local ref
+      # even with fetch-depth: 0 -- actions/checkout only configures a
+      # refspec for the ref it checks out, so a plain `git fetch origin
+      # main` lands in FETCH_HEAD without ever creating refs/remotes/
+      # origin/main (verified in a single-branch scratch clone, which
+      # reproduces that narrower default). Fetch with an explicit refspec so
+      # the local origin/<base> ref actually exists, and the merge base
+      # resolves instead of the job going green because BASE fell through to
+      # a fallback that always exists (e.g. HEAD~1).
+      - name: Check formatting of changed lines
+        run: |
+          BASE_REF="${{ github.base_ref || 'main' }}"
+          git fetch origin "+refs/heads/$BASE_REF:refs/remotes/origin/$BASE_REF"
+          BASE="$(git merge-base "origin/$BASE_REF" HEAD)"
+          make format-check BASE="$BASE"
 
   # Informational only: prints the gcovr line/function/branch summary in the
   # job log. No upload to any coverage service (no secrets configured).
