@@ -39,7 +39,7 @@ convenience only.
 
 ## Why ruff's E701/E702/E401 are disabled
 
-Three of ruff's default rules are turned off project-wide in `pyproject.toml`:
+Three of ruff's default rules are turned off project-wide in `ruff.toml`:
 `E701`/`E702` (multiple statements on one line) and `E401` (combined imports).
 All 55 findings they produced on this codebase were deliberate — paired setup
 lines like `hub_dir.mkdir(); cache.mkdir()`, and combined imports like
@@ -47,7 +47,7 @@ lines like `hub_dir.mkdir(); cache.mkdir()`, and combined imports like
 decision, not a baseline of grandfathered violations. Every other default
 rule stays enabled and passes clean on the whole tree; if you're tempted to
 re-enable one of these three, read the comment above `ignore = [...]` in
-`pyproject.toml` first.
+`ruff.toml` first.
 
 ## Why C++ formatting only checks changed lines
 
@@ -94,6 +94,7 @@ GIT_CONFIG_GLOBAL=/dev/null python -m pip install -e . --no-build-isolation
 
 This isn't hardcoded into the Makefile or `pyproject.toml` because it would
 also disable legitimate global config (proxies, credential helpers) for
-everyone, including people without the rewrite. See [`docs/BUILD.md`](BUILD.md), section "Offline / pre-fetched builds (and
-the HTTPS→SSH gitconfig pitfall)", for the full explanation and the
-alternative of reusing an already-fetched `build/_deps` tree instead.
+everyone, including people without the rewrite. See
+[Offline / pre-fetched builds (and the HTTPS→SSH gitconfig pitfall)](BUILD.md#offline--pre-fetched-builds-and-the-httpsssh-gitconfig-pitfall)
+for the full explanation and the alternative of reusing an already-fetched
+`build/_deps` tree instead.

@@ -32,6 +32,29 @@ bumps may change behavior).
 
 ### Fixed
 
+- **`ctest` could pass while testing a stale binary.** The v0.7.1 CMake split
+  moved the built executables into subdirectories. `ctest` resolves target
+  paths itself, so it kept passing, but a pre-split build had left stale
+  binaries at the old top-level paths, and `./build/helpmate_tests
+  "~[slow]"` kept answering — from a binary built before the change it was
+  meant to verify. Five tasks' worth of that gate were therefore meaningless.
+  Fixed in v0.7.1 by `CMAKE_RUNTIME_OUTPUT_DIRECTORY`; this release adds the
+  CI step that asserts the binaries exist at their documented paths, so a
+  future layout change fails loudly in one place instead of silently
+  everywhere.
+- **`make format-check` reported success whenever it could not run.**
+  `git clang-format` writes errors to stderr, `tee` captured only stdout, and
+  with no `pipefail` the recipe's exit status was `tee`'s — always 0. An
+  unresolvable base ref, a missing `clang-format`, or an unwritable temp path
+  all produced a green check. On a shallow CI checkout this would have made
+  the formatting gate a permanent no-op. Every condition that prevents the
+  check from running now exits non-zero.
+- **`node --check` does not validate ES modules.** Node's CommonJS-first
+  auto-detection short-circuits at the first `import`/`export`, so any syntax
+  error after that line was silently accepted. Every dashboard module has an
+  import within its first nine lines, so the JS gate was validating almost
+  nothing. Each file is now checked through a temporary `.mjs` copy, which
+  forces unambiguous ESM parsing.
 - Four unused imports, two ambiguous `l` variable names, one lambda bound to
   a name, and two mypy findings — one of which was a `# type: ignore` naming
   the wrong error code, so it had been silencing nothing.
