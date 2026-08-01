@@ -7,7 +7,7 @@ COVBUILD ?= build-cov
 GCOV ?= gcov-13
 .PHONY: configure build test slowtest stress coverage clean jstest \
 	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all \
-	lint typecheck
+	lint typecheck format-check format
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
@@ -58,6 +58,17 @@ lint:
 	node --check $$(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js')
 typecheck:
 	python -m mypy
+
+# Formatting is enforced on the lines a change touches, not on the whole tree:
+# reformatting all 4365 lines of existing C++ would be one unreviewable commit
+# over the most carefully reviewed code in the project. BASE defaults to the
+# merge base with main, which is what CI uses.
+BASE ?= $(shell git merge-base origin/main HEAD 2>/dev/null || echo HEAD~1)
+format-check:
+	git clang-format -q --diff $(BASE) -- '*.cpp' '*.h' | tee /tmp/hm-fmt.diff
+	@test ! -s /tmp/hm-fmt.diff || { echo "C++ formatting: run 'make format' and commit"; exit 1; }
+format:
+	git clang-format $(BASE) -- '*.cpp' '*.h'
 
 # Pure JS helpers (helpmate_web/static/js/lib) via Node's built-in test
 # runner. No npm packages. A bare directory arg isn't recursed by `node

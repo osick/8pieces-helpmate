@@ -1,0 +1,16 @@
+# Tuned to the code that already exists rather than to a stock style. Measured
+# on the v0.7.1 tree: stock Google makes 3715 replacements across 43 files
+# (4365 lines total); this config makes 971. Enforcement is therefore on
+# CHANGED LINES ONLY (see `make format-check`) -- a PR must format what it
+# touches, and the rest of the tree is never rewritten. The codebase converges
+# as it is edited instead of in one unreviewable commit.
+BasedOnStyle: Google
+ColumnLimit: 110
+IndentWidth: 4
+AccessModifierOffset: -4
+AllowShortFunctionsOnASingleLine: All
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortBlocksOnASingleLine: Always
+AllowShortLoopsOnASingleLine: true
+DerivePointerAlignment: false
+PointerAlignment: Left

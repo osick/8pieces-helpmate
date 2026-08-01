@@ -226,6 +226,18 @@ commands the CI jobs run:
   (`test-api`, `test-web`, `test-bindings`, `test-repo`) — six targets listed
   above, four of them re-run here on top of `test`.
 
+### `make format-check` / `make format`
+
+`make format-check` runs `git clang-format --diff` against `BASE` (the merge
+base with `origin/main`, same as CI) and fails if any changed C++ line isn't
+formatted per `.clang-format`; `make format` applies the fix in place. This is
+enforced on **changed lines only**, never on the whole tree: measured on this
+codebase, stock Google style makes 3715 replacements across 4365 lines of
+existing C++, and the tuned `.clang-format` committed here still makes 971 —
+reformatting that much of the most carefully reviewed code in one commit would
+be churn, not review. A PR is required to format the lines it touches; the
+rest of the tree converges as it is naturally edited.
+
 ## Plain CMake (without make)
 
 ```bash
