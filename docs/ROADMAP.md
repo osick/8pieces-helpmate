@@ -58,6 +58,18 @@ FastAPI process; no build step; cm-chessboard vendored. One API addition:
   note that Playwright was unusable on the development box was wrong — only
   the driver package was missing.
 
+## v0.7.1 — Package split
+
+**Goal:** reorganise the repo into three independently installable
+distributions — `helpmate` (root `pyproject.toml`: C++ core, CLI binary,
+Python bindings), `helpmate-api` (`src/packages/api/`), `helpmate-web`
+(`src/packages/web/`) — each verifiable on its own, with a single `VERSION`
+file every declared version is checked against.
+
+- Design: **approved** — `docs/superpowers/specs/2026-08-01-package-split-design.md`
+- Depends on: v0.7 (splits the dashboard and API that already existed)
+- No release: a repo-layout rung, not a user-facing one.
+
 ## v0.8 — Pattern / theme search
 
 **Goal:** search by theme and pattern, the capability the original notes asked

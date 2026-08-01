@@ -183,6 +183,22 @@ Removes `build/` and `build-cov/`.
 ./src/packages/web` — all three distributions, in the order `helpmate-api`
 requires.
 
+If this hangs with no output and no error, see "`pip install .` hangs with no
+output and no error at all" under [Troubleshooting](#troubleshooting) — it's
+the HTTPS→SSH gitconfig pitfall, and `make install
+GIT_CONFIG_GLOBAL=/dev/null` (GNU Make passes command-line variables through
+to the recipe's environment) works around it without editing global git
+config.
+
+### `make install-dev`
+
+Same three distributions, each installed with its `[dev]` extra
+(`.[dev]`, `./src/packages/api[dev]`, `./src/packages/web[dev]`), so
+`make install-dev && make test-api` (or `test-web`, `test-bindings`,
+`test-repo`) has pytest/httpx/playwright available — plain `make install`
+installs no dev extras and those targets fail on a missing `pytest`. Subject
+to the same `GIT_CONFIG_GLOBAL` note as `make install` above.
+
 ### Per-package test targets
 
 Each installable distribution owns its own test suite; these wrap the
@@ -193,14 +209,22 @@ commands the CI jobs run:
 - `make test-cli` — builds, then `ctest --test-dir $(BUILD) -R "^cli_"` (just
   the CLI integration tests).
 - `make test-api` — `pytest src/packages/api/tests` (requires `helpmate` and
-  `helpmate-api` installed with the `dev` extra).
+  `helpmate-api` installed with the `dev` extra). Two cases in
+  `test_static.py` additionally need a resolvable dashboard — with
+  `helpmate-web` installed they assert it is served; without it they skip
+  rather than fail, since a package must be independently verifiable without
+  the rest of the repo.
 - `make test-web` — `make jstest` then `pytest src/packages/web/tests/ui`
-  (requires `helpmate-api` and `helpmate-web` installed with the `dev` extra).
+  (requires `helpmate`, `helpmate-api` and `helpmate-web` installed with the
+  `dev` extra — the UI conftest imports `helpmate` directly and calls
+  `generate()` to build the fixture closure it drives Playwright against).
 - `make test-bindings` — `pytest src/packages/bindings/tests`.
 - `make test-repo` — `pytest tests/repo`, the repo-level checks (e.g. that
   `VERSION` agrees with every `pyproject.toml` and `helpmate --version`).
-- `make test-all` — `test` (the C++/CLI ctest suite) plus all five of the
-  above.
+- `make test-all` — `test` (the C++/CLI ctest suite, which subsumes
+  `test-core` and `test-cli` above) plus the four package-level targets
+  (`test-api`, `test-web`, `test-bindings`, `test-repo`) — six targets listed
+  above, four of them re-run here on top of `test`.
 
 ## Plain CMake (without make)
 

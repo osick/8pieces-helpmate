@@ -4,7 +4,18 @@ from helpmate_server.app import create_app, _resolve_web_root
 from helpmate_server.storage import ChainSource, LocalDir
 
 
+# These two tests need a real dashboard to serve, which means the
+# helpmate-web package (or the source checkout's fallback) resolving to a
+# real directory. A real (non-editable) helpmate-api install with no
+# helpmate-web present has nothing to serve: `_resolve_web_root(None)`
+# returns None and `client` (built against a `serve_web=True` app) would 404
+# rather than exercise the assertions below. They pass today only because
+# every local install is editable and the source-checkout fallback rescues
+# them -- a package must be independently verifiable without the rest of
+# the repo, so skip rather than fail when the dashboard is genuinely absent.
 def test_dashboard_is_served(client):
+    if _resolve_web_root(None) is None:
+        pytest.skip("helpmate-web not installed")
     r = client.get("/")
     assert r.status_code == 200
     assert "text/html" in r.headers["content-type"]
@@ -14,6 +25,8 @@ def test_dashboard_is_served(client):
         assert anchor in body, anchor
 
 def test_stylesheet_is_served(client):
+    if _resolve_web_root(None) is None:
+        pytest.skip("helpmate-web not installed")
     r = client.get("/css/app.css")
     assert r.status_code == 200
     assert "text/css" in r.headers["content-type"]

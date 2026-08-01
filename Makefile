@@ -6,7 +6,7 @@ COVBUILD ?= build-cov
 # `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
 GCOV ?= gcov-13
 .PHONY: configure build test slowtest stress coverage clean jstest \
-	install test-core test-cli test-api test-web test-bindings test-repo test-all
+	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
@@ -17,9 +17,26 @@ test: build
 # Install all three distributions from this tree, in dependency order:
 # helpmate-api requires helpmate, and nothing is on PyPI yet, so installing
 # them out of order sends pip looking for the name upstream.
+#
+# If this hangs with no output and no error: see docs/BUILD.md's entry with
+# that exact symptom. Short version: pip's isolated build env inherits HOME,
+# so if ~/.gitconfig rewrites https://github.com/ to git@github.com:, CMake
+# FetchContent's clone goes over SSH and can pop an invisible GUI passphrase
+# dialog. Not hardcoded here because it would also disable legitimate global
+# config (proxies, credential helpers); opt in per-invocation instead --
+# GNU Make exports command-line variable assignments to the recipe's
+# environment automatically, so this needs no plumbing in the recipe itself:
+#   make install GIT_CONFIG_GLOBAL=/dev/null
 install:
 	python -m pip install .
 	python -m pip install ./src/packages/api ./src/packages/web
+
+# Same three distributions, with each one's [dev] extra so `make install-dev
+# && make test-api` (etc.) has pytest/httpx/playwright available. Same
+# GIT_CONFIG_GLOBAL note as `install` applies.
+install-dev:
+	python -m pip install ".[dev]"
+	python -m pip install "./src/packages/api[dev]" "./src/packages/web[dev]"
 
 test-core: build
 	$(BUILD)/helpmate_tests "~[slow]"

@@ -54,9 +54,24 @@ def test_server_matches_version_file(version):
     assert helpmate_server.__version__ == version
 
 
+def test_web_matches_version_file(version):
+    helpmate_web = pytest.importorskip("helpmate_web")
+    assert helpmate_web.__version__ == version
+
+
 def test_cli_binary_matches_version_file(version):
     exe = shutil.which("helpmate") or str(ROOT / "build" / "helpmate")
     if not Path(exe).exists():
         pytest.skip("helpmate binary not built or installed")
     out = subprocess.run([exe, "--version"], capture_output=True, text=True).stdout
-    assert version in out, out
+    # A plain substring check also matches "0.7.10" when looking for "0.7.1";
+    # require the version to end a word so a patch-digit suffix cannot slip by.
+    assert re.search(rf"helpmate {re.escape(version)}\b", out), out
+
+
+def test_api_dependency_floor_matches_version_file(version):
+    api_pyproject = ROOT / "src" / "packages" / "api" / "pyproject.toml"
+    section = api_pyproject.read_text().split("[project]", 1)[1]
+    m = re.search(r'"helpmate>=([^,]+),<', section)
+    assert m, f"no helpmate>=...,<... dependency in {api_pyproject}"
+    assert m.group(1) == version
