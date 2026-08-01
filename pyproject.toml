@@ -16,3 +16,25 @@ dev = ["pytest", "chess>=1.10"]
 cmake.version = ">=3.24"
 wheel.packages = ["src/packages/bindings/helpmate"]
 cmake.define.HELPMATE_PYTHON = "ON"
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true          # helpmate is a compiled extension
+files = ["src/packages/api/helpmate_server"]
+
+# This machine's shared site-packages (used by several unrelated projects,
+# not a venv scoped to helpmate-api) currently holds fastapi/starlette/anyio
+# builds whose own `Requires-Python` is >=3.10, and huggingface_hub's
+# __init__.py eagerly re-imports its whole public surface under
+# `if TYPE_CHECKING` (for static analysis), reaching its optional
+# huggingface_hub.inference._mcp integration and the real `mcp` package too.
+# Several of those third-party files use `match`, a 3.10+ syntax feature, so
+# mypy's py39 parser hard-crashes while descending into them -- before any
+# of our own files are even type-checked, and regardless of which one is
+# skipped first, since the next transitive dependency hits the same wall.
+# `ignore_missing_imports` doesn't help here: these modules ARE found, just
+# unparsable at py39. helpmate-api's own code (fully covered by `files`
+# above) is unaffected either way, so rather than raise our target version
+# or chase every transitive package one at a time, stop mypy from opening
+# any third-party source at all and treat imports as Any.
+follow_imports = "skip"

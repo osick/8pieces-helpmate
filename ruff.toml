@@ -1,0 +1,23 @@
+# Ruff's default rules, minus three that disagree with this project's style
+# rather than finding defects in it. This is a ruleset decision, not a
+# baseline: there is no list of grandfathered violations anywhere, and every
+# rule left enabled passes on the whole tree.
+#
+#   E701/E702  paired statements on one line. The test suites write setup as
+#              `hub_dir.mkdir(); cache.mkdir()` deliberately -- the pairing is
+#              the point, and splitting them reads worse.
+#   E401       combined imports (`import pytest, helpmate`). Same reasoning.
+#
+# Measured on the v0.7.1 tree: enabling these three would flag 55 lines, none
+# of which is a defect.
+line-length = 100
+target-version = "py39"
+
+[lint]
+ignore = ["E701", "E702", "E401"]
+
+[format]
+# `ruff format` is deliberately NOT adopted: on the v0.7.1 tree it rewrites
+# 1101 lines across 23 files to impose its spacing on code written compactly
+# on purpose. Style here is settled by review.
+exclude = ["*"]

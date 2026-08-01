@@ -6,7 +6,8 @@ COVBUILD ?= build-cov
 # `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
 GCOV ?= gcov-13
 .PHONY: configure build test slowtest stress coverage clean jstest \
-	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all
+	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all \
+	lint typecheck
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
@@ -51,6 +52,12 @@ test-bindings:
 test-repo:
 	python -m pytest tests/repo -v
 test-all: test test-api test-web test-bindings test-repo
+
+lint:
+	ruff check .
+	node --check $$(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js')
+typecheck:
+	python -m mypy
 
 # Pure JS helpers (helpmate_web/static/js/lib) via Node's built-in test
 # runner. No npm packages. A bare directory arg isn't recursed by `node
