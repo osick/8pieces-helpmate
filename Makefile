@@ -64,9 +64,34 @@ typecheck:
 # over the most carefully reviewed code in the project. BASE defaults to the
 # merge base with main, which is what CI uses.
 BASE ?= $(shell git merge-base origin/main HEAD 2>/dev/null || echo HEAD~1)
+# No pipe here on purpose: `git clang-format` writes errors to stderr, and a
+# `| tee` pipeline's exit status is tee's (0 whenever /tmp is writable) unless
+# SHELL is set up for pipefail, which this Makefile deliberately doesn't do
+# for every other recipe. Redirecting to a file and checking $? explicitly
+# keeps "could not run" and "ran fine but found a diff" distinguishable.
+#
+# git-clang-format's --diff follows `diff`/`git diff --exit-code` convention:
+# 0 = no differences, 1 = differences found (it ran fine either way), and
+# everything else comes only from its own die() helper (bad BASE, missing
+# clang-format binary, a failed internal git call, ...), always exit 2. So
+# status 0/1 both mean "ran successfully"; anything >= 2 means "could not
+# run" and must fail loudly with its stderr, not be swallowed as if it
+# just meant "no diff".
 format-check:
-	git clang-format -q --diff $(BASE) -- '*.cpp' '*.h' | tee /tmp/hm-fmt.diff
-	@test ! -s /tmp/hm-fmt.diff || { echo "C++ formatting: run 'make format' and commit"; exit 1; }
+	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
+		echo "format-check: BASE '$(BASE)' does not resolve to a commit"; exit 1; }
+	@git clang-format -q --diff $(BASE) -- '*.cpp' '*.h' >/tmp/hm-fmt.diff 2>/tmp/hm-fmt.err; \
+	status=$$?; \
+	if [ "$$status" -ge 2 ]; then \
+		echo "format-check: git clang-format failed to run (exit $$status)"; \
+		cat /tmp/hm-fmt.err >&2; \
+		exit 1; \
+	fi; \
+	if [ -s /tmp/hm-fmt.diff ]; then \
+		cat /tmp/hm-fmt.diff; \
+		echo "C++ formatting: run 'make format' and commit"; \
+		exit 1; \
+	fi
 format:
 	git clang-format $(BASE) -- '*.cpp' '*.h'
 

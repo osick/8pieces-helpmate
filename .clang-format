@@ -1,9 +1,16 @@
 # Tuned to the code that already exists rather than to a stock style. Measured
-# on the v0.7.1 tree: stock Google makes 3715 replacements across 43 files
-# (4365 lines total); this config makes 971. Enforcement is therefore on
-# CHANGED LINES ONLY (see `make format-check`) -- a PR must format what it
-# touches, and the rest of the tree is never rewritten. The codebase converges
-# as it is edited instead of in one unreviewable commit.
+# on the v0.7.1 tree with clang-format 22.1.8:
+#   clang-format --style='{BasedOnStyle: Google}' \
+#     --output-replacements-xml $(git ls-files 'src/**/*.cpp' 'src/**/*.h') | grep -c '<replacement '
+# stock Google (ColumnLimit 80, the default) makes 4180 replacements across 43
+# files (4365 lines total). Adding just `ColumnLimit: 100` to stock Google
+# (same command, with that one override in --style) brings it down to 3715 --
+# most of the churn is line-wrapping, not brace or indent style. This config
+# makes 971 (same command, no --style override -- clang-format picks up this
+# file). Enforcement is therefore on CHANGED LINES ONLY (see
+# `make format-check`) -- a PR must format what it touches, and the rest of
+# the tree is never rewritten. The codebase converges as it is edited instead
+# of in one unreviewable commit.
 BasedOnStyle: Google
 ColumnLimit: 110
 IndentWidth: 4

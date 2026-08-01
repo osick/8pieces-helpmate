@@ -232,11 +232,18 @@ commands the CI jobs run:
 base with `origin/main`, same as CI) and fails if any changed C++ line isn't
 formatted per `.clang-format`; `make format` applies the fix in place. This is
 enforced on **changed lines only**, never on the whole tree: measured on this
-codebase, stock Google style makes 3715 replacements across 4365 lines of
-existing C++, and the tuned `.clang-format` committed here still makes 971 —
-reformatting that much of the most carefully reviewed code in one commit would
-be churn, not review. A PR is required to format the lines it touches; the
-rest of the tree converges as it is naturally edited.
+codebase with clang-format 22.1.8 (`clang-format --style='{BasedOnStyle:
+Google}' --output-replacements-xml $(git ls-files 'src/**/*.cpp' 'src/**/*.h')
+| grep -c '<replacement '`), stock Google style (`ColumnLimit: 80`, the
+default) makes 4180 replacements across 4365 lines of existing C++. Adding
+just `ColumnLimit: 100` to that same stock style (`--style='{BasedOnStyle:
+Google, ColumnLimit: 100}'`) brings it down to 3715 — most of the difference
+is line-wrapping. The tuned `.clang-format` committed here still makes only
+971 (same command, no `--style` override needed since clang-format picks up
+the committed file) — reformatting anywhere near that much of the most
+carefully reviewed code in one commit would be churn, not review. A PR is
+required to format the lines it touches; the rest of the tree converges as it
+is naturally edited.
 
 ## Plain CMake (without make)
 
