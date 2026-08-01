@@ -13,6 +13,24 @@ on:
     branches: [main]
   pull_request:
 
+# Lint/format/typecheck tool versions, pinned so the PR gate's ruleset can't
+# change under a PR just because upstream shipped a release. This bit CI
+# for real: `pip install ruff` unpinned picked up 0.16.1, whose default rule
+# set is much larger than 0.15.x's, and 46 "errors" appeared on a tree
+# nobody had touched (see ruff.toml for why none were defects; the fix there
+# is an explicit `select`, which is a second, independent layer of defense --
+# this pin is the first). clang-format is the most dangerous of the three: a
+# new release can reformat code differently and fail format-check on lines
+# nobody touched. Bump these deliberately, in a commit that also fixes
+# whatever new findings the bump introduces -- never silently. Keep these in
+# sync with the local dev versions; tests/repo/test_lint_tool_versions.py
+# fails loudly if a contributor's local install drifts from what's pinned
+# here (it parses this file, so it can't itself go stale).
+env:
+  RUFF_VERSION: "0.16.1"
+  MYPY_VERSION: "1.19.1"
+  CLANG_FORMAT_VERSION: "22.1.8"
+
 jobs:
   cpp:
     name: C++ build, fast tests, CLI smoke
@@ -138,7 +156,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ruff
-        run: python -m pip install ruff
+        run: python -m pip install "ruff==${{ env.RUFF_VERSION }}"
       # No ESLint: the dashboard is deliberately npm-free with no build step.
       # `make lint` is the single source of truth for both ruff and the JS
       # syntax gate (see the Makefile's `lint` target for why each file is
@@ -160,7 +178,7 @@ jobs:
       # that, and installing it would mean a ten-minute C++ build for a
       # type-check job.
       - name: Install typing dependencies
-        run: python -m pip install mypy fastapi uvicorn huggingface_hub
+        run: python -m pip install "mypy==${{ env.MYPY_VERSION }}" fastapi uvicorn huggingface_hub
       - name: mypy
         run: python -m mypy
 
@@ -175,7 +193,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install clang-format
-        run: python -m pip install clang-format
+        run: python -m pip install "clang-format==${{ env.CLANG_FORMAT_VERSION }}"
       # A PR checkout's `origin/<base>` is not guaranteed to be a local ref
       # even with fetch-depth: 0 -- actions/checkout only configures a
       # refspec for the ref it checks out, so a plain `git fetch origin
