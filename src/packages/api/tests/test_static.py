@@ -46,3 +46,48 @@ def test_explicit_web_root_that_is_not_a_directory_is_an_error(tmp_path):
 def test_the_packaged_dashboard_is_found_by_import():
     helpmate_web = pytest.importorskip("helpmate_web")
     assert _resolve_web_root(None) == helpmate_web.static_dir()
+
+
+# The three cases below exercise helpmate_server.main.main() itself, not
+# create_app()/_resolve_web_root() directly -- they fail if --web-root/--no-web
+# are removed from the CLI, or if the ValueError->parser.error() plumbing in
+# main() is reverted, even though create_app()'s own behavior is unchanged.
+# main() ends by blocking in uvicorn.run(); follow test_api_mine.py's
+# test_server_main_builds and monkeypatch helpmate_server.main._run with a
+# recorder instead of letting it start a real server.
+
+def test_main_no_web_serves_no_dashboard(monkeypatch):
+    import helpmate_server.main as m
+    captured = {}
+    monkeypatch.setattr(m, "_run", lambda app, host, port: captured.update(app=app))
+    m.main(["--no-web"])
+    c = TestClient(captured["app"])
+    assert c.get("/").status_code == 404
+    assert c.get("/v1/health").status_code == 200
+
+
+def test_main_web_root_is_served(monkeypatch, tmp_path):
+    import helpmate_server.main as m
+    (tmp_path / "index.html").write_text("<p>custom-dashboard-marker</p>")
+    captured = {}
+    monkeypatch.setattr(m, "_run", lambda app, host, port: captured.update(app=app))
+    m.main(["--web-root", str(tmp_path)])
+    c = TestClient(captured["app"])
+    r = c.get("/")
+    assert r.status_code == 200
+    assert "custom-dashboard-marker" in r.text
+
+
+def test_main_web_root_not_a_directory_exits_via_parser_error(monkeypatch, tmp_path, capsys):
+    import helpmate_server.main as m
+    called = []
+    monkeypatch.setattr(m, "_run", lambda app, host, port: called.append(True))
+    missing = tmp_path / "nope"
+    with pytest.raises(SystemExit) as excinfo:
+        m.main(["--web-root", str(missing)])
+    assert excinfo.value.code == 2
+    # _run must never be reached, and the message must come from the
+    # ValueError raised by _resolve_web_root (via parser.error), not from
+    # argparse's own "unrecognized arguments" error or an unhandled traceback.
+    assert called == []
+    assert "not a directory" in capsys.readouterr().err
