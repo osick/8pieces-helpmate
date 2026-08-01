@@ -51,9 +51,12 @@ FastAPI process; no build step; cm-chessboard vendored. One API addition:
 
 - Design: **approved** — `docs/superpowers/specs/2026-07-31-web-dashboard-design.md`
 - Depends on: v0.6 API, v0.6.2 filters
-- Known limitation: no automated browser tests (Playwright unusable on this
-  box); DOM wiring is verified by a written manual checklist, everything
-  testable headlessly is isolated and tested.
+- Delivered beyond the MVP line: the piece palette / free position editing,
+  and the mate-length and solution-count histograms in the material browser.
+- Verified end-to-end: Playwright + headless Chromium drives a real server in
+  CI (`ui` job), alongside `node --test` for the pure helpers. The earlier
+  note that Playwright was unusable on the development box was wrong — only
+  the driver package was missing.
 
 ## v0.8 — Pattern / theme search
 

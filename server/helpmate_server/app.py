@@ -1,11 +1,13 @@
 from __future__ import annotations
 import re
+from pathlib import Path
 from typing import Optional
 import helpmate
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
 from .storage import ChainSource
@@ -154,6 +156,35 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                                 content=error_json("invalid_fen", str(e)))
         return {"lines": lines}
 
+    @app.get("/v1/moves")
+    def moves(fen: str):
+        material = None
+        try:
+            material = _dir_for_fen(fen)
+            flipped = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
+            d = chain.resolve(material) or chain.resolve(flipped)
+            if d is None:
+                d, resp = _resolve_or_response(material)
+                if resp is not None:
+                    return resp
+            tb = _tb(chain, d)
+            res = tb.probe(fen)
+            raw = tb.moves(fen)
+        except helpmate.MissingTableError:
+            return unknown(material or fen)
+        except ValueError as e:
+            return JSONResponse(status_code=400,
+                                content=error_json("invalid_fen", str(e)))
+        out = []
+        for m in raw:
+            out.append({**m,
+                        "notation": h_notation(m["dtm"]) if m["solvable"] else None})
+        if res is None:
+            return {"fen": fen, "solvable": False, "moves": out}
+        dtm, count, flip = res
+        return {"fen": fen, "dtm": dtm, "count": count, "notation": h_notation(dtm),
+                "flipped": flip, "moves": out}
+
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
     pool = ThreadPoolExecutor(max_workers=2)
 
@@ -195,5 +226,17 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         truncated = len(fens) > clamped
         return {"fens": fens[:clamped], "truncated": truncated,
                 "skipped_saturated": int(skipped)}
+
+    # Dashboard. Mounted last so /v1 routes keep priority; html=True serves
+    # index.html for "/". Two layouts are supported: a source checkout, where
+    # web/ sits next to server/ at the repo root (two levels up from this
+    # file), and an installed wheel, where wheel.packages ships web/ as a
+    # sibling package of helpmate_server in site-packages (one level up).
+    # Absent in a source checkout without web/, so guard it.
+    _here = Path(__file__).resolve()
+    for _candidate in (_here.parents[1] / "web", _here.parents[2] / "web"):
+        if _candidate.is_dir():
+            app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="web")
+            break
 
     return app

@@ -1395,6 +1395,17 @@ once the explorer has been used in anger — by then it will be clear whether
 composers want a palette at all, given a FEN box and a board that plays moves.
 Flagged to the user rather than silently dropped.
 
+**Outcome (2026-08-01): pulled back into v0.7 at the user's request**, after
+they reviewed screenshots of the working dashboard. The "being edited" state
+the deferral was worried about is what the implementation actually models:
+arming a palette entry swaps the board's input handler, retires the previous
+position's value rather than leaving a stale dtm on screen, and suppresses
+probing until the editing session ends. A missing or duplicated king is
+reported client-side; everything else stays the server's call. Delivered in
+the same pass: the mate-length and solution-count histograms, and a UX pass
+(intro and per-panel help, move-list legend, empty states, a server chip, and
+a considered palette/typography with dark-mode support).
+
 ## Verification checklist (whole plan)
 
 - C++ fast suite, ctest, `node --test`, and the Python + UI pytest suites all green; `helpmate --version` reports 0.7.0.

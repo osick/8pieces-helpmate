@@ -246,3 +246,103 @@ TEST_CASE("probe rethrows UnsupportedTableVersionError when both primary and fli
     Tablebase tb(dir.string());
     CHECK_THROWS_AS(tb.probe("4k2q/8/8/8/8/8/8/4K3 w - - 0 1"), UnsupportedTableVersionError);
 }
+
+TEST_CASE("moves lists every legal move with the value it leads to") {
+    Tablebase tb(gen_dir());
+    auto ms = tb.moves("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1");
+
+    // Black king on h7, White king f6 covers g6/g7/h6... the black king's legal
+    // moves are exactly Kh6 and Kh8 (g8 is covered by nothing, but g7/g6 are).
+    std::set<std::string> sans;
+    for (const auto& m : ms) sans.insert(m.san);
+    CHECK(sans.count("Kh6") == 1);
+    CHECK(sans.count("Kh8") == 1);
+
+    // Both are optimal (they lead to dtm 1 from this dtm-2 position).
+    for (const auto& m : ms) {
+        INFO("move " << m.san);
+        if (m.san == "Kh6" || m.san == "Kh8") {
+            CHECK(m.optimal);
+            CHECK(m.solvable);
+            CHECK(m.dtm == 1);
+        } else {
+            CHECK_FALSE(m.optimal);
+        }
+        // every entry carries a usable resulting position
+        auto after = Board::from_fen(m.fen);
+        CHECK(after.has_value());
+        CHECK_FALSE(m.uci.empty());
+    }
+    // the number of optimal moves matches the distinct first moves of the
+    // optimal lines (Kh6, Kh8) -- see the golden lines in the plan header
+    int opt = 0;
+    for (const auto& m : ms) if (m.optimal) ++opt;
+    CHECK(opt == 2);
+}
+
+TEST_CASE("moves reports unsolvable children instead of hiding them") {
+    Tablebase tb(gen_dir());
+    // dtm-0 position: Black is already mated, so there are no legal moves.
+    CHECK(tb.moves("8/8/8/8/8/8/8/kQK5 b - - 0 1").empty());
+    // A position where a capture leads into Kvk (unsolvable): the move must be
+    // listed with solvable=false rather than dropped or throwing.
+    // Fixture verified with a scratch Board::legal_moves() dump: black king h8,
+    // white queen h7, white king a1, black to move -- the only legal move is
+    // Kxh7 (a genuine capture; the a1 king defends nothing relevant to h7).
+    auto ms = tb.moves("7k/7Q/8/8/8/8/8/K7 b - - 0 1");
+    bool saw_capture = false;
+    for (const auto& m : ms)
+        if (m.san.find('x') != std::string::npos) {
+            saw_capture = true;
+            CHECK_FALSE(m.optimal);
+            CHECK_FALSE(m.solvable);
+            CHECK(m.dtm == -1);
+        }
+    INFO("this FEN must offer at least one capture for the test to mean anything");
+    CHECK(saw_capture);
+}
+
+TEST_CASE("moves reports a child with no table as unsolvable, without throwing") {
+    namespace fs = std::filesystem;
+    // A scratch copy of the generated tables with Kvk.hm REMOVED: capturing the
+    // queen now leads to material whose table is genuinely absent, which is the
+    // only way to exercise moves()'s MissingTableError guard (the KQvk closure
+    // always builds Kvk, so an unmodified tables dir cannot reach this path).
+    fs::path dir = fs::temp_directory_path() / ("hm_moves_notable_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    for (const auto& e : fs::directory_iterator(gen_dir()))
+        fs::copy_file(e.path(), dir / e.path().filename());
+    fs::remove(dir / "Kvk.hm");
+
+    Tablebase tb(dir.string());
+    auto ms = tb.moves("7k/7Q/8/8/8/8/8/K7 b - - 0 1");   // only legal move: Kxh7 -> Kvk
+    REQUIRE(ms.size() == 1);
+    CHECK(ms[0].san == "Kxh7");
+    CHECK_FALSE(ms[0].solvable);      // no table -> reported, not thrown
+    CHECK(ms[0].dtm == -1);
+    CHECK_FALSE(ms[0].optimal);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("moves rejects a bad FEN like probe does") {
+    Tablebase tb(gen_dir());
+    CHECK_THROWS_AS(tb.moves("garbage"), std::invalid_argument);
+}
+
+TEST_CASE("a king capture is reported as valueless, not thrown") {
+    // The position editor can build a position where the side NOT to move is
+    // already in check; capturing that king is then a "legal move" whose
+    // result no tablebase can describe. The move list must stay complete and
+    // the request must not fail with an invalid_fen naming a FEN the caller
+    // never sent.
+    Tablebase tb(gen_dir());
+    auto ms = tb.moves("7k/8/8/8/8/8/8/K6Q w - - 0 1");   // Rh1-style check on h8
+    REQUIRE_FALSE(ms.empty());
+    auto it = std::find_if(ms.begin(), ms.end(),
+                           [](const MoveInfo& m) { return m.uci == "h1h8"; });
+    REQUIRE(it != ms.end());
+    CHECK_FALSE(it->solvable);
+    CHECK(it->dtm == -1);
+    CHECK_FALSE(it->optimal);
+}

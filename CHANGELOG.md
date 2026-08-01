@@ -6,6 +6,97 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.7.0] - 2026-08-01
+
+### Added
+
+- **Web dashboard**: `helpmate-server` now also serves a static single-page
+  dashboard at `/` (mounted after every `/v1` route, so the API is never
+  shadowed) — no separate process or build step, just
+  `helpmate-server --tables <dir>` and open `http://127.0.0.1:8642/`.
+  - **Explorer** panel: an interactive board (drag a piece to play a legal
+    move, with a promotion dialog when needed) showing the position's
+    dtm/count/h#n and every optimal move, click a move to advance and push
+    history, `Back` to undo, `Flip` to change orientation, a FEN box to jump
+    to any position, and a "Download PGN" export of the current line. The
+    current position lives in the URL (`#fen=...`), so any explorer view is
+    a shareable link that opens directly to that position in a fresh tab.
+  - **Position editor**: a piece palette under the board places pieces by
+    clicking squares, with `Erase`, `Clear board` and a `To move` selector.
+    Editing deliberately does not probe on every click — a half-built
+    position is illegal by definition — so the value appears when the
+    editing session ends. A position with no king, or two of one colour, is
+    reported directly instead of spending a request to be told
+    `invalid_fen`.
+  - **Materials** panel: browse every catalogued material class and its
+    generation-time stats — where the cells went (solvable / no mate /
+    illegal), a mate-length histogram split by side to move, a histogram of
+    how many distinct optimal solutions positions have (exact for 1–4, then
+    bucketed by octave, with the saturated 255+ bucket called out), and the
+    deepest and deepest-unique sample positions, each clickable into the
+    explorer.
+  - **Search** panel: the `mine` scan (material, dtm, optional
+    count/starts/ends/max) with truncation and skipped-saturated reporting,
+    plus "Download FENs" (plain text) and "Download CSV" exports of the
+    result set.
+  - No CDN dependencies: the board library (`cm-chessboard`) is vendored
+    under `web/vendor/`, so the dashboard works fully offline.
+- **`GET /v1/moves`**: given a `fen`, returns the position's own
+  dtm/count/notation/flipped (or `solvable: false`) plus every legal move
+  annotated with its resulting FEN, dtm, count, notation, and whether it is
+  one of the optimal moves — the data the explorer's move list and
+  click-to-advance are built on. See
+  [USAGE.md](docs/USAGE.md#get-v1moves) for the response shape and a real
+  captured example.
+- **Browser test suite** (`tests/ui/`, Playwright + headless Chromium): 11
+  end-to-end tests driving a real `helpmate-server` process against a
+  freshly generated `KQvk` closure — the golden position's dtm/count/move
+  count, click-to-advance plus `Back`, a `#fen=` link opening the exact
+  position in a fresh tab, panel exclusivity, both stats histograms and
+  their agreement with the cell tiles, a full palette editing session, the
+  missing-kings report, the server chip, and the mine panel's
+  truncation/validation behavior. Wired into CI as a new `ui` job (installs
+  the `dev`+`server` extras, caches and installs headless Chromium, runs the
+  pure-JS helper tests and the Playwright suite).
+- **Pure JS helpers** (`web/js/lib/`) covered by `node --test
+  tests/js/*.test.js` (`make jstest`), independent of the browser suite: URL
+  state encode/decode, FEN/PGN/CSV export formatting, FEN composition and
+  king validation for the editor, and the histogram/cell-summary shaping the
+  materials panel draws.
+
+### Fixed
+
+- **Every dashboard panel rendered at once**: `#panel-explorer { display:
+  flex }` is an id selector and outranks the user-agent `[hidden]` rule, so
+  hiding a panel did nothing and the three screens stacked. `[hidden] {
+  display: none !important }` restores the intent; a browser test now
+  asserts panel exclusivity, which the previous suite could not catch
+  because it only checked that elements inside the target panel were
+  visible.
+- **`Tablebase::moves` threw on a king capture**: a capture of the king is
+  a "legal move" only from an already illegal position (the side not to move
+  is in check) — reachable from the new position editor — and probing the
+  resulting position raised `invalid_argument`, so a whole `/v1/moves`
+  request failed with an `invalid_fen` naming a FEN the caller never sent,
+  while `/v1/probe` answered the same input fine. Such a move is now
+  reported as having no value, like a move into a material with no table,
+  and the move list stays complete.
+- **`wheel.packages` didn't ship `web/`**: a non-editable `pip install`
+  built a server with no dashboard to serve. `web/` is now included in
+  `[tool.scikit-build] wheel.packages`, and `create_app`'s static-mount
+  lookup checks both the installed-wheel layout (`web/` as a sibling
+  package of `helpmate_server` in `site-packages`) and the source-checkout
+  layout (`web/` at the repo root), so the dashboard is served either way.
+- **`tests/ui/conftest.py` server fixture hardening**: the env dict literal
+  used to let a pre-existing `HELPMATE_TABLES` in the environment silently
+  win over the freshly generated scratch tables dir; a stuck server on
+  teardown could raise `TimeoutExpired` and leak an orphan process holding
+  the port; and a startup crash was swallowed by `DEVNULL`, surfacing only
+  as a generic "server did not start" after the poll timeout. All three
+  fixed: the scratch tables dir always wins, teardown falls back to `kill()`
+  on a timeout, and captured subprocess output is included in the startup
+  error so a CI failure is diagnosable.
+
 ## [0.6.2] - 2026-07-31
 
 ### Added

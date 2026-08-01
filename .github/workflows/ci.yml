@@ -78,6 +78,41 @@ jobs:
       - name: Run Python tests
         run: python -m pytest tests/python tests/server -v
 
+  ui:
+    name: Dashboard (browser tests)
+    runs-on: ubuntu-24.04
+    env:
+      CC: gcc-13
+      CXX: g++-13
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install package with dev and server extras
+        run: python -m pip install .[dev,server]
+
+      # Browsers are cached; --with-deps installs the system libraries the
+      # runner image lacks. The cache key follows the playwright version so a
+      # driver bump re-downloads rather than using a stale browser.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      # `node --test tests/js/` (a bare directory) discovers nothing on
+      # Node 23 - it silently runs zero tests. `make jstest` is what the
+      # local suite actually runs (node --test tests/js/*.test.js).
+      - name: JS helper tests
+        run: make jstest
+
+      - name: Browser tests
+        run: python -m pytest tests/ui -v
+
   # Informational only: prints the gcovr line/function/branch summary in the
   # job log. No upload to any coverage service (no secrets configured).
   coverage:

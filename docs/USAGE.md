@@ -532,6 +532,54 @@ material strings raise `ValueError`.
 Python tests live in `tests/python/` (`pytest tests/python`; add `--run-slow`
 for the exhaustive python-chess cross-validation of the full KQvk closure).
 
+## Web dashboard
+
+The browser front end for everything above. It is served by the same process
+as the API — there is no second port, no build step, no npm, and nothing is
+fetched from a CDN at runtime:
+
+```bash
+pip install ".[server]"
+helpmate-server --tables ~/tb --port 8642
+# then open http://127.0.0.1:8642/
+```
+
+Three screens:
+
+- **Explorer** — an interactive board. Drag a piece to play its move, or click
+  one from the complete legal-move list, which shows the value each move leads
+  to and outlines in green the ones that keep the shortest mate. Below it, the
+  optimal lines in SAN, exportable as PGN. The position is encoded in the URL
+  (`/#fen=<urlencoded>`), so every position is a shareable link and the
+  browser's back button walks the history.
+- **Materials** — every table the server can reach, with piece count, size and
+  location (`local` / `cached` / `remote`). Selecting one shows where its
+  cells went (solvable / no mate / illegal), a histogram of mate lengths split
+  by side to move, a histogram of how many optimal solutions positions have,
+  and the deepest sample positions — each clickable into the explorer.
+- **Search** — a form over [`/v1/mine`](#get-v1mine), including the `starts` /
+  `ends` shape filters. Results are clickable FENs, exportable as a FEN list
+  or CSV. Impossible filter combinations (`starts` greater than `count`) are
+  rejected before the request; the server stays the authority for the rest.
+
+**Editing a position.** Under the board, a palette places pieces: pick one,
+then click squares. `Erase` empties the squares you click, `Clear board`
+empties all of them, and the `To move` selector sets the side. While editing,
+the board is not probed on every click — a half-built position is illegal by
+definition — so click the armed palette entry again (or press `Set`) to
+evaluate what you have built. A position with no king, or two of one colour,
+says so directly instead of spending a request to be told `invalid_fen`.
+
+**What it needs from the server.** Only the read-only `/v1` routes. Every
+contract the API defines is surfaced rather than hidden: `202 fetching` shows
+a download-in-progress state and polls, `404` shows the returned `helpmate
+gen …` hint, `400` is displayed next to the offending field, and an
+unreachable server is reported in the header chip.
+
+Third-party code is vendored, not fetched: **cm-chessboard** 8.7.5 (MIT) lives
+under `web/vendor/cm-chessboard/` with its LICENSE and upstream version
+recorded in `web/vendor/README.md`.
+
 ## API server
 
 A small read-only HTTP API (FastAPI + uvicorn) for serving generated tables:
@@ -658,6 +706,38 @@ $ curl -sG http://127.0.0.1:8642/v1/line --data-urlencode "fen=8/7k/5K2/8/8/8/8/
 $ curl -sG http://127.0.0.1:8642/v1/line --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --data-urlencode "all=true"
 {"lines":[["Kh6","Qh2#"],["Kh6","Qh1#"],["Kh6","Qg6#"],["Kh8","Qg7#"]]}
 ```
+
+### `GET /v1/moves`
+
+The position's own value plus **every legal move** with the value it leads
+to, in one call. This is what the dashboard's move list is built from: a
+browser would otherwise need its own move generator and one `probe` per move.
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
+{"fen":"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1","dtm":2,"count":4,"notation":"h#1","flipped":false,
+ "moves":[
+  {"uci":"h7h6","san":"Kh6","fen":"8/8/5K1k/8/8/8/8/6Q1 w - - 0 1","dtm":1,"count":3,
+   "solvable":true,"optimal":true,"notation":"h#0.5"},
+  {"uci":"h7h8","san":"Kh8","fen":"7k/8/5K2/8/8/8/8/6Q1 w - - 0 1","dtm":1,"count":1,
+   "solvable":true,"optimal":true,"notation":"h#0.5"}]}
+```
+
+(line-wrapped here; the server sends one line.)
+
+- `optimal` is `true` exactly when the move reaches `dtm - 1`, i.e. it keeps
+  the shortest mate.
+- The list is always the **complete** legal-move list. A move leading to an
+  unsolvable position, to a material with no table, or to something no
+  tablebase can describe (capturing a king, reachable only from an already
+  illegal position) carries `"dtm": null, "solvable": false, "optimal": false`
+  rather than being omitted.
+- An unsolvable query position reports `"solvable": false` at the top level
+  and still enumerates its moves — a composer may want to walk into a
+  solvable branch.
+- Errors follow `probe`: 400 `invalid_fen`, 404 `unknown_material` with the
+  `helpmate gen …` hint, and the 202-fetching contract for remote-only
+  material. The color-flip fallback applies too, reported as `"flipped": true`.
 
 ### `GET /v1/mine`
 

@@ -4,13 +4,13 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "helpmate"
-version = "0.6.2"
+version = "0.7.0"
 description = "Helpmate tablebases: cooperative mate distances and solution counts"
 requires-python = ">=3.9"
 license = {file = "LICENSE"}
 
 [project.optional-dependencies]
-dev = ["pytest", "chess>=1.10", "httpx"]
+dev = ["pytest", "chess>=1.10", "httpx", "playwright"]
 server = ["fastapi>=0.110", "uvicorn>=0.29", "huggingface_hub>=0.23"]
 
 [project.scripts]
@@ -19,5 +19,5 @@ helpmate-tables = "helpmate_server.tables_cli:main"
 
 [tool.scikit-build]
 cmake.version = ">=3.24"
-wheel.packages = ["python/helpmate", "server/helpmate_server"]
+wheel.packages = ["python/helpmate", "server/helpmate_server", "web"]
 cmake.define.HELPMATE_PYTHON = "ON"

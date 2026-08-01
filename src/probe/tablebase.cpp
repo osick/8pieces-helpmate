@@ -128,6 +128,47 @@ std::vector<std::string> Tablebase::line(const std::string& fen) const {
     return ls.empty() ? std::vector<std::string>{} : ls[0];
 }
 
+std::vector<MoveInfo> Tablebase::moves(const std::string& fen) const {
+    auto b = Board::from_fen(fen);
+    if (!b) throw std::invalid_argument("bad FEN: " + fen);
+    int parent_dtm = -1;
+    if (auto p = probe(fen)) parent_dtm = p->dtm;
+
+    std::vector<MoveInfo> out;
+    for (const Move& m : b->legal_moves()) {
+        MoveInfo mi;
+        mi.uci = m.uci();
+        mi.san = san(*b, m);          // SAN must be computed BEFORE the move is made
+        b->make(m);
+        mi.fen = b->fen();
+        b->unmake(m);
+        try {
+            if (auto c = probe(mi.fen)) {
+                mi.dtm = c->dtm;
+                mi.count = c->count;
+                mi.solvable = true;
+                // parent_dtm > 0: a dtm-0 position is mate and has no legal moves, so the
+                // loop body never runs for it (this guard just avoids an accidental match
+                // against the sentinel -1 when the parent itself was unsolvable).
+                mi.optimal = parent_dtm > 0 && c->dtm == parent_dtm - 1;
+            }
+        } catch (const MissingTableError&) {
+            // no table for the resulting material: leave solvable=false
+        } catch (const std::invalid_argument&) {
+            // The move leads somewhere the tablebase cannot describe at all --
+            // in practice a king capture, which is only reachable when the
+            // query position is itself illegal (the side not to move is
+            // already in check). The position editor produces such positions
+            // on the way to real ones, so the move list must stay complete and
+            // report the move as having no value, exactly like a missing
+            // table. Throwing here would answer a whole legal-move request
+            // with an invalid_fen error naming a FEN the caller never sent.
+        }
+        out.push_back(std::move(mi));
+    }
+    return out;
+}
+
 SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines) {
     if (count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
     std::set<std::string> firsts, lasts;

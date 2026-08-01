@@ -5,13 +5,19 @@ COVBUILD ?= build-cov
 # with "Version mismatch gcc/gcov" against a GCC-13 build); override with
 # `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
 GCOV ?= gcov-13
-.PHONY: configure build test slowtest stress coverage clean
+.PHONY: configure build test slowtest stress coverage clean jstest
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
 	cmake --build $(BUILD) -j
 test: build
 	ctest --test-dir $(BUILD) --output-on-failure
+
+# Pure JS helpers (web/js/lib) via Node's built-in test runner. No npm
+# packages. A bare directory arg isn't recursed by `node --test` on the
+# Node version this repo targets, so the JS test files are globbed explicitly.
+jstest:
+	node --test tests/js/*.test.js
 
 # Catch2 cases tagged [slow] (full KPvkp closure generation, KNvkq invariant sweep).
 # Excluded from `make test` / ctest by catch_discover_tests' "~[slow]" spec.
