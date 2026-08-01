@@ -195,7 +195,7 @@ commands the CI jobs run:
 - `make test-api` — `pytest src/packages/api/tests` (requires `helpmate` and
   `helpmate-api` installed with the `dev` extra).
 - `make test-web` — `make jstest` then `pytest src/packages/web/tests/ui`
-  (requires `helpmate-web`'s `dev` extra, which includes Playwright).
+  (requires `helpmate-api` and `helpmate-web` installed with the `dev` extra).
 - `make test-bindings` — `pytest src/packages/bindings/tests`.
 - `make test-repo` — `pytest tests/repo`, the repo-level checks (e.g. that
   `VERSION` agrees with every `pyproject.toml` and `helpmate --version`).
