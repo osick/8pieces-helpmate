@@ -139,19 +139,13 @@ jobs:
           python-version: "3.12"
       - name: Install ruff
         run: python -m pip install ruff
-      - name: Ruff
-        run: ruff check .
       # No ESLint: the dashboard is deliberately npm-free with no build step.
-      # `node --check` parses a module without installing anything, but it
-      # only checks the FIRST file given to it -- extra arguments become that
-      # script's argv, not additional files -- so each file is checked in its
-      # own invocation rather than one `node --check a.js b.js c.js` call,
-      # which would silently skip everything after the first.
-      - name: JS syntax
-        run: |
-          for f in $(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js'); do
-            node --check "$f"
-          done
+      # `make lint` is the single source of truth for both ruff and the JS
+      # syntax gate (see the Makefile's `lint` target for why each file is
+      # checked through a temp `.mjs` copy) so local runs and CI can't drift
+      # apart again.
+      - name: Lint
+        run: make lint
 
   typecheck:
     name: Type check (mypy)

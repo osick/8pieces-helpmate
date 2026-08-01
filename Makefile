@@ -53,9 +53,34 @@ test-repo:
 	python -m pytest tests/repo -v
 test-all: test test-api test-web test-bindings test-repo
 
+# `node --check` on a plain `.js` file does automatic CommonJS/ESM detection:
+# it tries a CJS parse first, and as soon as it hits the file's first
+# `import`/`export` it concludes "this is a module" and stops validating --
+# it does NOT then fully parse the rest of the file as ESM. Every dashboard
+# JS file has its first import/export within the first ~9 lines, so a syntax
+# error anywhere after that point is silently accepted (verified: an
+# unterminated string appended to a copy of each file still exits 0 as
+# `.js`, but exits 1 -- correctly -- once the same content is checked as
+# `.mjs`, which forces unambiguous ESM parsing). So each file is copied to a
+# temp `.mjs` path and checked there. Names are flattened (not just
+# basename) so js/foo.js and js/lib/foo.js can't collide, and node's error
+# output -- which names the temp path, not the real one -- has the temp path
+# substituted back to the real source path before printing.
 lint:
 	ruff check .
-	node --check $$(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js')
+	@tmp="$$(mktemp -d)" || { echo "lint: cannot create a temp dir"; exit 2; }; \
+	status=0; \
+	for f in $$(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js'); do \
+	  copy="$$tmp/$$(echo "$$f" | tr '/' '_').mjs"; \
+	  cp "$$f" "$$copy"; \
+	  if ! err="$$(node --check "$$copy" 2>&1)"; then \
+	    echo "lint: JS syntax error in $$f"; \
+	    echo "$$err" | sed "s#$$copy#$$f#g" >&2; \
+	    status=1; \
+	  fi; \
+	done; \
+	rm -rf "$$tmp"; \
+	exit $$status
 typecheck:
 	python -m mypy
 
