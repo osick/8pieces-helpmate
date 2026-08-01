@@ -329,3 +329,20 @@ TEST_CASE("moves rejects a bad FEN like probe does") {
     Tablebase tb(gen_dir());
     CHECK_THROWS_AS(tb.moves("garbage"), std::invalid_argument);
 }
+
+TEST_CASE("a king capture is reported as valueless, not thrown") {
+    // The position editor can build a position where the side NOT to move is
+    // already in check; capturing that king is then a "legal move" whose
+    // result no tablebase can describe. The move list must stay complete and
+    // the request must not fail with an invalid_fen naming a FEN the caller
+    // never sent.
+    Tablebase tb(gen_dir());
+    auto ms = tb.moves("7k/8/8/8/8/8/8/K6Q w - - 0 1");   // Rh1-style check on h8
+    REQUIRE_FALSE(ms.empty());
+    auto it = std::find_if(ms.begin(), ms.end(),
+                           [](const MoveInfo& m) { return m.uci == "h1h8"; });
+    REQUIRE(it != ms.end());
+    CHECK_FALSE(it->solvable);
+    CHECK(it->dtm == -1);
+    CHECK_FALSE(it->optimal);
+}

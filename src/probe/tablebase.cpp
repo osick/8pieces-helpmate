@@ -154,6 +154,15 @@ std::vector<MoveInfo> Tablebase::moves(const std::string& fen) const {
             }
         } catch (const MissingTableError&) {
             // no table for the resulting material: leave solvable=false
+        } catch (const std::invalid_argument&) {
+            // The move leads somewhere the tablebase cannot describe at all --
+            // in practice a king capture, which is only reachable when the
+            // query position is itself illegal (the side not to move is
+            // already in check). The position editor produces such positions
+            // on the way to real ones, so the move list must stay complete and
+            // report the move as having no value, exactly like a missing
+            // table. Throwing here would answer a whole legal-move request
+            // with an invalid_fen error naming a FEN the caller never sent.
         }
         out.push_back(std::move(mi));
     }

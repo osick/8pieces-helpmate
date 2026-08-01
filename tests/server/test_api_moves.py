@@ -57,3 +57,30 @@ def test_all_legal_moves_are_listed_not_only_optimal_ones(client):
     assert len(suboptimal) >= 1                          # solvable but not on a shortest path
     for m in suboptimal:
         assert m["dtm"] is not None and m["dtm"] != body["dtm"] - 1
+
+def test_moves_uses_the_color_flip_fallback_like_probe(client):
+    # Only the KQvk slice is generated, so a black-queen position resolves
+    # through the flipped material and must say so.
+    fen = "7K/8/8/8/8/8/8/k5q1 w - - 0 1"
+    r = client.get("/v1/moves", params={"fen": fen})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["flipped"] is True
+    assert body["dtm"] is not None and body["notation"].startswith("h#")
+    p = client.get("/v1/probe", params={"fen": fen}).json()
+    assert (body["dtm"], body["count"], body["flipped"]) == (p["dtm"], p["count"], p["flipped"])
+
+def test_a_king_capture_is_reported_not_raised(client):
+    # The position editor can build a position where the side NOT to move is
+    # already in check; capturing that king is then a "legal move" leading
+    # somewhere no tablebase can describe. That must not fail the whole
+    # request with an invalid_fen naming a FEN the caller never sent --
+    # /v1/probe answers this input, so /v1/moves has to as well.
+    fen = "7k/8/8/8/8/8/8/K6Q w - - 0 1"
+    assert client.get("/v1/probe", params={"fen": fen}).status_code == 200
+    r = client.get("/v1/moves", params={"fen": fen})
+    assert r.status_code == 200, r.text
+    capture = [m for m in r.json()["moves"] if m["uci"] == "h1h8"]
+    assert len(capture) == 1
+    assert capture[0]["solvable"] is False
+    assert capture[0]["dtm"] is None and capture[0]["optimal"] is False
