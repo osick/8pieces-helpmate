@@ -20,8 +20,35 @@ def error_json(code: str, message: str, hint: str | None = None) -> dict:
 def _tb(chain: ChainSource, material_dir) -> helpmate.Tablebase:
     return helpmate.Tablebase(str(material_dir))
 
+def _resolve_web_root(explicit: str | None) -> Optional[Path]:
+    """Where the dashboard's static files live, or None to serve no dashboard.
+
+    Order: an explicit --web-root (a hard error if wrong, because the user
+    named it), then the installed helpmate-web package, then the source
+    checkout. Locating it by import means a wheel, an editable install and a
+    container all answer the same way -- the previous version guessed between
+    two filesystem layouts and silently served nothing when it guessed wrong.
+    """
+    if explicit is not None:
+        p = Path(explicit)
+        if not p.is_dir():
+            raise ValueError(f"--web-root is not a directory: {p}")
+        return p
+    try:
+        import helpmate_web
+        packaged = helpmate_web.static_dir()
+        if packaged.is_dir():
+            return packaged
+    except ImportError:
+        pass
+    checkout = (Path(__file__).resolve().parents[2]
+                / "src" / "packages" / "web" / "helpmate_web" / "static")
+    return checkout if checkout.is_dir() else None
+
+
 def create_app(chain: ChainSource, mine_cap: int = 1000,
-               mine_timeout: float = 30.0) -> FastAPI:
+               mine_timeout: float = 30.0, web_root: str | None = None,
+               serve_web: bool = True) -> FastAPI:
     app = FastAPI(title="helpmate API", version=__version__)
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
 
@@ -228,15 +255,9 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                 "skipped_saturated": int(skipped)}
 
     # Dashboard. Mounted last so /v1 routes keep priority; html=True serves
-    # index.html for "/". Two layouts are supported: a source checkout, where
-    # web/ sits next to server/ at the repo root (two levels up from this
-    # file), and an installed wheel, where wheel.packages ships web/ as a
-    # sibling package of helpmate_server in site-packages (one level up).
-    # Absent in a source checkout without web/, so guard it.
-    _here = Path(__file__).resolve()
-    for _candidate in (_here.parents[1] / "web", _here.parents[2] / "web"):
-        if _candidate.is_dir():
-            app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="web")
-            break
+    # index.html for "/".
+    root = _resolve_web_root(web_root) if serve_web else None
+    if root is not None:
+        app.mount("/", StaticFiles(directory=str(root), html=True), name="web")
 
     return app

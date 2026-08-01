@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { toPgn, toFenList, toCsv } from "../../web/js/lib/export.js";
+import { toPgn, toFenList, toCsv } from "../../helpmate_web/static/js/lib/export.js";
 
 const FEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 

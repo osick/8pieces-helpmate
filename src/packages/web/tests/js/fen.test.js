@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import {
   EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement,
   kingProblem, looksLikePlacement,
-} from "../../web/js/lib/fen.js";
+} from "../../helpmate_web/static/js/lib/fen.js";
 
 const GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 

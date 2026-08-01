@@ -13,11 +13,12 @@ build: configure
 test: build
 	ctest --test-dir $(BUILD) --output-on-failure
 
-# Pure JS helpers (web/js/lib) via Node's built-in test runner. No npm
-# packages. A bare directory arg isn't recursed by `node --test` on the
-# Node version this repo targets, so the JS test files are globbed explicitly.
+# Pure JS helpers (helpmate_web/static/js/lib) via Node's built-in test
+# runner. No npm packages. A bare directory arg isn't recursed by `node
+# --test` on the Node version this repo targets, so the JS test files are
+# globbed explicitly.
 jstest:
-	node --test tests/js/*.test.js
+	node --test src/packages/web/tests/js/*.test.js
 
 # Catch2 cases tagged [slow] (full KPvkp closure generation, KNvkq invariant sweep).
 # Excluded from `make test` / ctest by catch_discover_tests' "~[slow]" spec.

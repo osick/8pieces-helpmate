@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 // in place before it is imported.
 globalThis.window = { location: { origin: "http://x" } };
 
-const { getJson, api, ApiError } = await import("../../web/js/api.js");
+const { getJson, api, ApiError } = await import("../../helpmate_web/static/js/api.js");
 
 function stubFetch(handler) {
   const calls = [];

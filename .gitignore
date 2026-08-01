@@ -24,12 +24,20 @@ var/
 wheels/
 share/python-wheels/
 
-# web/js/lib is dashboard source (URL-state/export helpers), not a Python
-# build artifact -- exempt it from the generic lib/ rule above.
-!web/js/lib/
-# web/vendor/cm-chessboard/lib is vendored third-party JS (Svg.js, Utils.js),
-# not a Python build artifact -- exempt it from the generic lib/ rule above.
-!web/vendor/cm-chessboard/lib/
+# The dashboard's js/lib holds source (URL-state, export, FEN and stats
+# helpers), not a Python build artifact -- exempt it from the generic lib/
+# rule above. Same for cm-chessboard's vendored lib/.
+!src/packages/web/helpmate_web/static/js/lib/
+!src/packages/web/helpmate_web/static/vendor/cm-chessboard/lib/
+# hatchling's VCS-exclude matcher (src/packages/web/pyproject.toml's wheel
+# build) applies these patterns relative to the subpackage root it is
+# building from, not the repo root where this file lives -- unlike git,
+# which always matches relative to a .gitignore's own location. Without a
+# second, package-relative copy of the same two negations, the wheel build
+# silently drops both lib/ directories even though `git ls-files` (and a
+# checkout) look correct. Confirmed with the wheel zip-content check.
+!helpmate_web/static/js/lib/
+!helpmate_web/static/vendor/cm-chessboard/lib/
 *.egg-info/
 .installed.cfg
 *.egg

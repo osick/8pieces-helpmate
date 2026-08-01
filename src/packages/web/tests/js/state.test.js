@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { encodeState, decodeState } from "../../web/js/lib/state.js";
+import { encodeState, decodeState } from "../../helpmate_web/static/js/lib/state.js";
 
 const FEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 

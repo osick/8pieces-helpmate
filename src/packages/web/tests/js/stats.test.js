@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dtmBars, uniquenessBuckets, cellSummary, fmtCount } from "../../web/js/lib/stats.js";
+import { dtmBars, uniquenessBuckets, cellSummary, fmtCount } from "../../helpmate_web/static/js/lib/stats.js";
 
 // Shape of a real /v1/materials/{name}/stats payload, trimmed.
 const STATS = {
