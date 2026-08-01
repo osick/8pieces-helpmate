@@ -40,12 +40,12 @@ add_library(chessmg_core STATIC
 target_include_directories(chessmg_core SYSTEM PUBLIC ${chessmg_SOURCE_DIR}/chessmg/libcmg)
 target_compile_options(chessmg_core PRIVATE -O2 -w)
 
-set(HELPMATE_SOURCES src/chess/board.cpp src/chess/san.cpp src/indexing/material.cpp src/indexing/kk.cpp src/indexing/slice_index.cpp src/format/table_file.cpp src/generator/oracle.cpp src/generator/generator.cpp src/probe/tablebase.cpp)  # tasks append here
+set(HELPMATE_SOURCES src/core/chess/board.cpp src/core/chess/san.cpp src/core/indexing/material.cpp src/core/indexing/kk.cpp src/core/indexing/slice_index.cpp src/core/format/table_file.cpp src/core/generator/oracle.cpp src/core/generator/generator.cpp src/core/probe/tablebase.cpp)  # tasks append here
 add_library(helpmate_core STATIC ${HELPMATE_SOURCES})
-configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/core/version.h.in
                ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
 target_include_directories(helpmate_core PUBLIC ${CMAKE_BINARY_DIR}/generated)
-target_include_directories(helpmate_core PUBLIC src)
+target_include_directories(helpmate_core PUBLIC src/core)
 target_link_libraries(helpmate_core PUBLIC chessmg_core nlohmann_json::nlohmann_json Threads::Threads)
 target_compile_options(helpmate_core PRIVATE -O2 -Wall -Wextra)
 
@@ -56,7 +56,7 @@ if(HELPMATE_COVERAGE)
 endif()
 
 enable_testing()
-add_executable(helpmate_tests tests/cpp/test_sanity.cpp tests/cpp/test_board.cpp tests/cpp/test_san.cpp tests/cpp/test_material.cpp tests/cpp/test_kk.cpp tests/cpp/test_slice_index.cpp tests/cpp/test_table_file.cpp tests/cpp/test_oracle.cpp tests/cpp/test_generator_init.cpp tests/cpp/test_generator_kqvk.cpp tests/cpp/test_generator_pawns.cpp tests/cpp/test_counts.cpp tests/cpp/test_stats.cpp tests/cpp/test_threads.cpp tests/cpp/test_probe.cpp tests/cpp/test_generator_lookup_guards.cpp tests/cpp/test_ram_guard.cpp tests/cpp/test_slice_index_6piece.cpp tests/cpp/test_generator_prune.cpp)
+add_executable(helpmate_tests src/core/tests/test_sanity.cpp src/core/tests/test_board.cpp src/core/tests/test_san.cpp src/core/tests/test_material.cpp src/core/tests/test_kk.cpp src/core/tests/test_slice_index.cpp src/core/tests/test_table_file.cpp src/core/tests/test_oracle.cpp src/core/tests/test_generator_init.cpp src/core/tests/test_generator_kqvk.cpp src/core/tests/test_generator_pawns.cpp src/core/tests/test_counts.cpp src/core/tests/test_stats.cpp src/core/tests/test_threads.cpp src/core/tests/test_probe.cpp src/core/tests/test_generator_lookup_guards.cpp src/core/tests/test_ram_guard.cpp src/core/tests/test_slice_index_6piece.cpp src/core/tests/test_generator_prune.cpp)
 target_link_libraries(helpmate_tests PRIVATE helpmate_core Catch2::Catch2WithMain)
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
@@ -64,20 +64,20 @@ catch_discover_tests(helpmate_tests TEST_SPEC "~[slow]")
 # Slow tests (full KPvkp closure generation) are excluded from `make test` by default.
 # Run them manually with: ./build/helpmate_tests "[slow]"
 
-add_executable(helpmate src/cli/main.cpp)
+add_executable(helpmate src/packages/cli/main.cpp)
 target_link_libraries(helpmate PRIVATE helpmate_core)
 install(TARGETS helpmate RUNTIME DESTINATION bin)
 
 # Test-support only (not installed): writes a legacy-format all-unsolvable
 # table so `helpmate compact`'s ctest coverage has a real rewrite target --
-# see tests/cpp/mk_legacy_table.cpp for why `helpmate gen` can no longer
+# see src/packages/cli/tests/mk_legacy_table.cpp for why `helpmate gen` can no longer
 # produce this fixture itself.
-add_executable(mk_legacy_table tests/cpp/mk_legacy_table.cpp)
+add_executable(mk_legacy_table src/packages/cli/tests/mk_legacy_table.cpp)
 target_link_libraries(mk_legacy_table PRIVATE helpmate_core)
 
 if(HELPMATE_PYTHON)
   find_package(pybind11 CONFIG REQUIRED)
-  pybind11_add_module(_helpmate src/bindings/pymodule.cpp)
+  pybind11_add_module(_helpmate src/packages/bindings/pymodule.cpp)
   target_link_libraries(_helpmate PRIVATE helpmate_core)
   install(TARGETS _helpmate DESTINATION helpmate)
 endif()
@@ -146,7 +146,7 @@ add_test(NAME cli_compact_mismatch_fixture_rename COMMAND ${CMAKE_COMMAND} -E re
 add_test(NAME cli_compact_mismatch COMMAND helpmate compact ${COMPACT_MISMATCH_TT})
 add_test(NAME cli_compact_mismatch_no_sidecar COMMAND ${CMAKE_COMMAND}
          -DABSENT_PATH=${COMPACT_MISMATCH_TT}/KQvk.stats.json
-         -P ${CMAKE_SOURCE_DIR}/tests/cpp/assert_absent.cmake)
+         -P ${CMAKE_SOURCE_DIR}/src/packages/cli/tests/assert_absent.cmake)
 # Final-review fix: compact must diagnose a table written by a newer helpmate
 # (TableReader::OpenError::UnsupportedVersion) with the same clear "newer
 # helpmate ... upgrade this build" message the rest of the tool uses, not the
