@@ -59,39 +59,36 @@ lint:
 typecheck:
 	python -m mypy
 
-# Formatting is enforced on the lines a change touches, not on the whole tree:
-# reformatting all 4365 lines of existing C++ would be one unreviewable commit
-# over the most carefully reviewed code in the project. BASE defaults to the
-# merge base with main, which is what CI uses.
-BASE ?= $(shell git merge-base origin/main HEAD 2>/dev/null || echo HEAD~1)
-# No pipe here on purpose: `git clang-format` writes errors to stderr, and a
-# `| tee` pipeline's exit status is tee's (0 whenever /tmp is writable) unless
-# SHELL is set up for pipefail, which this Makefile deliberately doesn't do
-# for every other recipe. Redirecting to a file and checking $? explicitly
-# keeps "could not run" and "ran fine but found a diff" distinguishable.
+# Formatting is enforced on the lines a change touches, not on the whole tree
+# (see docs/BUILD.md for the measurement). Every condition that prevents the
+# check from doing its job must exit non-zero: a gate that silently passes is
+# worse than no gate.
 #
-# git-clang-format's --diff follows `diff`/`git diff --exit-code` convention:
+# git-clang-format's --diff follows the `git diff --exit-code` convention:
 # 0 = no differences, 1 = differences found (it ran fine either way), and
-# everything else comes only from its own die() helper (bad BASE, missing
-# clang-format binary, a failed internal git call, ...), always exit 2. So
-# status 0/1 both mean "ran successfully"; anything >= 2 means "could not
-# run" and must fail loudly with its stderr, not be swallowed as if it
-# just meant "no diff".
+# only its own die() helper (bad BASE, missing clang-format binary, a failed
+# internal git call, ...) exits >= 2 -- verified against the installed
+# implementation (~/.local/lib/python3*/site-packages/clang_format/
+# git_clang_format.py: print_diff() returns `git diff --exit-code`'s
+# returncode; die() is sys.exit(2)). So status 0/1 both mean "ran
+# successfully"; only >= 2 means "could not run".
+BASE ?= $(shell git merge-base origin/main HEAD 2>/dev/null || echo HEAD~1)
 format-check:
-	@git rev-parse --verify --quiet "$(BASE)^{commit}" >/dev/null || { \
-		echo "format-check: BASE '$(BASE)' does not resolve to a commit"; exit 1; }
-	@git clang-format -q --diff $(BASE) -- '*.cpp' '*.h' >/tmp/hm-fmt.diff 2>/tmp/hm-fmt.err; \
-	status=$$?; \
-	if [ "$$status" -ge 2 ]; then \
-		echo "format-check: git clang-format failed to run (exit $$status)"; \
-		cat /tmp/hm-fmt.err >&2; \
-		exit 1; \
+	@command -v clang-format >/dev/null 2>&1 || { \
+	  echo "format-check: clang-format is not installed (pip install clang-format)"; exit 2; }
+	@git rev-parse --verify -q "$(BASE)^{commit}" >/dev/null || { \
+	  echo "format-check: BASE '$(BASE)' does not resolve to a commit"; exit 2; }
+	@out="$$(mktemp)" || { echo "format-check: cannot create a temp file"; exit 2; }; \
+	git clang-format -q --diff "$(BASE)" -- '*.cpp' '*.h' >"$$out" 2>"$$out.err"; st=$$?; \
+	if [ $$st -ge 2 ]; then \
+	  echo "format-check: git clang-format failed (exit $$st):"; cat "$$out.err" >&2; \
+	  rm -f "$$out" "$$out.err"; exit 2; \
 	fi; \
-	if [ -s /tmp/hm-fmt.diff ]; then \
-		cat /tmp/hm-fmt.diff; \
-		echo "C++ formatting: run 'make format' and commit"; \
-		exit 1; \
-	fi
+	if [ -s "$$out" ]; then \
+	  cat "$$out"; rm -f "$$out" "$$out.err"; \
+	  echo "C++ formatting: run 'make format' and commit"; exit 1; \
+	fi; \
+	rm -f "$$out" "$$out.err"
 format:
 	git clang-format $(BASE) -- '*.cpp' '*.h'
 
