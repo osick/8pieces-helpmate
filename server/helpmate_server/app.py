@@ -228,9 +228,15 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                 "skipped_saturated": int(skipped)}
 
     # Dashboard. Mounted last so /v1 routes keep priority; html=True serves
-    # index.html for "/". Absent in a source checkout without web/, so guard it.
-    web_dir = Path(__file__).resolve().parents[2] / "web"
-    if web_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(web_dir), html=True), name="web")
+    # index.html for "/". Two layouts are supported: a source checkout, where
+    # web/ sits next to server/ at the repo root (two levels up from this
+    # file), and an installed wheel, where wheel.packages ships web/ as a
+    # sibling package of helpmate_server in site-packages (one level up).
+    # Absent in a source checkout without web/, so guard it.
+    _here = Path(__file__).resolve()
+    for _candidate in (_here.parents[1] / "web", _here.parents[2] / "web"):
+        if _candidate.is_dir():
+            app.mount("/", StaticFiles(directory=str(_candidate), html=True), name="web")
+            break
 
     return app

@@ -2,6 +2,7 @@ import os
 import socket
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.request
 
@@ -25,11 +26,12 @@ def _free_port():
 @pytest.fixture(scope="session")
 def server(tables):
     port = _free_port()
+    log = tempfile.TemporaryFile(mode="w+")
     p = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "--factory",
          "helpmate_server.main:_app_for_tests", "--port", str(port)],
-        env={"HELPMATE_TABLES": tables, **os.environ},
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        env={**os.environ, "HELPMATE_TABLES": tables},
+        stdout=log, stderr=subprocess.STDOUT,
     )
     url = f"http://127.0.0.1:{port}"
     for _ in range(100):
@@ -40,10 +42,19 @@ def server(tables):
             time.sleep(0.1)
     else:
         p.kill()
-        raise RuntimeError("server did not start")
+        p.wait()
+        log.seek(0)
+        output = log.read()
+        log.close()
+        raise RuntimeError(f"server did not start; output:\n{output}")
     yield url
-    p.terminate()
-    p.wait(timeout=10)
+    try:
+        p.terminate()
+        p.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        p.kill()
+        p.wait()
+    log.close()
 
 
 @pytest.fixture(scope="session")

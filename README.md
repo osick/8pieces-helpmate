@@ -54,14 +54,26 @@ count — is an O(1) table lookup, not a fresh search.
   optimal lines, the complete `stats.json` field reference, mining, exit codes,
   DTM/h#n semantics, resource guidance per piece count, and the Python API.
 
-## API server
+## API server and web dashboard
 
 `pip install ".[server]"` adds `helpmate-server` (a read-only HTTP API —
-health/catalog/stats/probe/line/mine, with on-demand fetching from a Hugging
-Face dataset for tables not stored locally) and `helpmate-tables`
+health/catalog/stats/probe/line/moves/mine, with on-demand fetching from a
+Hugging Face dataset for tables not stored locally) and `helpmate-tables`
 (push/pull tables to that dataset). See the
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
+
+The same process serves a **web dashboard** at `/` — an interactive board with
+per-move evaluations and optimal lines, a material browser with mate-length
+and solution-count histograms, and composition search with the `starts`/`ends`
+shape filters. No build step, no CDN: plain ES modules with cm-chessboard
+vendored.
+
+```bash
+helpmate-server --tables ~/tb --port 8642   # then open http://127.0.0.1:8642/
+```
+
+See the ["Web dashboard" section of docs/USAGE.md](docs/USAGE.md#web-dashboard).
 
 ## Quick start
 
