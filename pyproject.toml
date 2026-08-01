@@ -20,6 +20,7 @@ cmake.define.HELPMATE_PYTHON = "ON"
 [tool.mypy]
 python_version = "3.9"
 ignore_missing_imports = true          # helpmate is a compiled extension
+follow_imports = "normal"
 files = ["src/packages/api/helpmate_server"]
 
 # This machine's shared site-packages (used by several unrelated projects,
@@ -34,7 +35,13 @@ files = ["src/packages/api/helpmate_server"]
 # skipped first, since the next transitive dependency hits the same wall.
 # `ignore_missing_imports` doesn't help here: these modules ARE found, just
 # unparsable at py39. helpmate-api's own code (fully covered by `files`
-# above) is unaffected either way, so rather than raise our target version
-# or chase every transitive package one at a time, stop mypy from opening
-# any third-party source at all and treat imports as Any.
+# above) is unaffected either way. Rather than blanket-skip import-following
+# for every third-party module (which would silently make uvicorn and
+# helpmate_web imports Any too, even though neither is in the crash chain),
+# scope the skip to just the modules that actually crash the py39 parser:
+# huggingface_hub (source of the TYPE_CHECKING chain), mcp (the optional
+# integration it reaches), and anyio/starlette/fastapi (the transitive
+# dependencies that use `match` themselves).
+[[tool.mypy.overrides]]
+module = ["huggingface_hub.*", "mcp.*", "anyio.*", "starlette.*", "fastapi.*"]
 follow_imports = "skip"
