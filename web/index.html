@@ -10,56 +10,126 @@
 </head>
 <body>
 <header>
-  <h1>helpmate tablebases</h1>
-  <nav>
+  <div class="brand">
+    <h1>helpmate tablebases</h1>
+    <p class="tagline">Every solution to every position, precomputed.</p>
+  </div>
+  <nav aria-label="Screens">
     <button data-panel="explorer" class="active">Explorer</button>
     <button data-panel="materials">Materials</button>
     <button data-panel="mine">Search</button>
   </nav>
+  <span id="server-chip" class="chip" hidden></span>
 </header>
 
 <div id="error-banner" hidden></div>
 
 <main>
   <section id="panel-explorer">
-    <div id="board"></div>
+    <div class="board-col">
+      <div id="board"></div>
+
+      <div id="palette" class="palette">
+        <span class="eyebrow">Edit position</span>
+        <div id="palette-pieces" class="palette-pieces"></div>
+        <div class="palette-actions">
+          <button type="button" id="btn-erase" data-piece="">Erase</button>
+          <button type="button" id="btn-clear-board">Clear board</button>
+        </div>
+        <p id="edit-hint" class="hint">
+          Pick a piece, then click squares to place it; <b>Erase</b> empties the
+          squares you click. Click the same palette entry again to stop editing
+          and evaluate the position.
+        </p>
+      </div>
+    </div>
+
     <div class="side">
+      <p class="help">
+        Drag a piece to play its move, or click one from the list. Moves
+        outlined in green keep the shortest mate; greyed moves lead nowhere.
+        The position lives in the address bar, so any link you copy reopens it.
+      </p>
+
       <form id="fen-form">
-        <label for="fen-input">FEN</label>
-        <input id="fen-input" type="text" spellcheck="false"
+        <label class="eyebrow" for="fen-input">Position (FEN)</label>
+        <input id="fen-input" type="text" spellcheck="false" autocomplete="off"
                placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
-        <button type="submit">Set</button>
-        <button type="button" id="btn-flip">Flip</button>
-        <button type="button" id="btn-back" disabled>Back</button>
+        <div class="row">
+          <label class="inline" for="stm-select">To move
+            <select id="stm-select">
+              <option value="b">Black</option>
+              <option value="w">White</option>
+            </select>
+          </label>
+          <span class="spacer"></span>
+          <button type="submit">Set</button>
+          <button type="button" id="btn-flip">Flip</button>
+          <button type="button" id="btn-back" disabled>Back</button>
+        </div>
       </form>
-      <p id="position-summary"></p>
-      <h2>Moves</h2>
+
+      <p id="position-summary" class="verdict"></p>
+
+      <h2 class="eyebrow">Moves</h2>
       <ul id="move-list"></ul>
-      <h2>Optimal lines</h2>
+      <p class="legend">
+        <span class="key optimal"></span> keeps the shortest mate
+        <span class="key dead"></span> no mate from here
+      </p>
+
+      <h2 class="eyebrow">Optimal lines</h2>
       <ol id="lines"></ol>
       <button type="button" id="btn-export-pgn">Download PGN</button>
+
+      <details class="primer">
+        <summary>What am I looking at?</summary>
+        <p>In a <b>helpmate</b> both sides cooperate: Black moves first and
+        helps White mate Black as fast as possible. <b>h#2</b> means two moves
+        each, ending in mate. The table stores the distance in plies (half
+        moves), so h#2 is 4 plies, and a White-to-move position sits on the
+        half step — h#1.5.</p>
+        <p>Alongside the distance it stores how many <b>distinct optimal
+        lines</b> reach mate in exactly that many plies. One line means a
+        sound problem; several mean duals. The counter saturates at 255.</p>
+      </details>
     </div>
   </section>
 
   <section id="panel-materials" hidden>
-    <ul id="material-list"></ul>
-    <div id="material-stats"></div>
+    <div class="list-col">
+      <h2 class="eyebrow">Tables</h2>
+      <p class="help">Every table this server can reach. Pick one to see how its
+      solutions are distributed.</p>
+      <ul id="material-list"></ul>
+    </div>
+    <div id="material-stats" class="detail-col"></div>
   </section>
 
   <section id="panel-mine" hidden>
+    <h2 class="eyebrow">Search a material</h2>
+    <p class="help">
+      Find positions by mate length and by the shape of their solution set.
+      <b>starts</b> is how many different first moves the optimal solutions
+      use, <b>ends</b> how many different mating moves they finish on — one
+      start and one end is a clean single-solution problem; four starts
+      converging on one end is a theme.
+    </p>
     <form id="mine-form">
-      <label>Material <input name="material" required placeholder="KQvk"></label>
-      <label>dtm <input name="dtm" type="number" min="0" required></label>
-      <label>count <input name="count" type="number" min="1"></label>
-      <label>starts <input name="starts" type="number" min="1"></label>
-      <label>ends <input name="ends" type="number" min="1"></label>
-      <label>max <input name="max" type="number" min="1" value="50"></label>
+      <label>Material <input name="material" required placeholder="KQvk" autocomplete="off"></label>
+      <label>dtm (plies) <input name="dtm" type="number" min="0" required></label>
+      <label>count <input name="count" type="number" min="1" placeholder="any"></label>
+      <label>starts <input name="starts" type="number" min="1" placeholder="any"></label>
+      <label>ends <input name="ends" type="number" min="1" placeholder="any"></label>
+      <label>max results <input name="max" type="number" min="1" value="50"></label>
       <button type="submit">Search</button>
     </form>
-    <p id="mine-status"></p>
+    <p id="mine-status" class="verdict"></p>
     <ul id="mine-results"></ul>
-    <button type="button" id="btn-export-fens">Download FENs</button>
-    <button type="button" id="btn-export-csv">Download CSV</button>
+    <div class="row">
+      <button type="button" id="btn-export-fens">Download FENs</button>
+      <button type="button" id="btn-export-csv">Download CSV</button>
+    </div>
   </section>
 </main>
 
@@ -68,7 +138,8 @@
   import { initExplorer } from "/js/explorer.js";
   import { initMaterials } from "/js/materials.js";
   import { initMine } from "/js/mine.js";
-  initPanels(); initExplorer(); initMaterials(); initMine();
+  import { initServerChip } from "/js/chip.js";
+  initPanels(); initExplorer(); initMaterials(); initMine(); initServerChip();
 </script>
 </body>
 </html>

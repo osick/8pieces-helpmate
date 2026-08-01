@@ -1,4 +1,4 @@
-import { api, ApiError } from "./api.js";
+import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { encodeState } from "./lib/state.js";
 import { toFenList, toCsv } from "./lib/export.js";
 
@@ -10,8 +10,6 @@ let rows = [];
 // the wrong query's results. Mirrors explorer.js's render()/materials.js's
 // showStats() guard.
 let mineSeq = 0;
-// 202 retry bound: ~60s of polling (40 * 1500ms) before giving up.
-const DOWNLOAD_RETRY_CAP = 40;
 
 function validate(q) {
   // Mirrors the server's rules so an obvious mistake never costs a round trip.
@@ -44,15 +42,21 @@ async function runQuery(q, status, results, seq, retries = 0) {
     setTimeout(() => {
       if (seq !== mineSeq) return; // user started a new search: stop retrying
       runQuery(q, status, results, seq, retries + 1);
-    }, 1500);
+    }, DOWNLOAD_RETRY_MS);
     return;
   }
   const b = res.body;
   rows = b.fens.map((fen) => ({ fen, dtm: Number(q.dtm), count: q.count === "" ? "" : Number(q.count) }));
   status.textContent =
     `${b.fens.length} position(s)` +
-    (b.truncated ? " (truncated)" : "") +
+    (b.truncated ? " (truncated — raise max results for more)" : "") +
     (b.skipped_saturated ? ` · ${b.skipped_saturated} skipped (count saturated)` : "");
+  if (!b.fens.length) {
+    const li = document.createElement("li");
+    li.className = "empty";
+    li.textContent = "Nothing matches. Try a different dtm, or drop the count/starts/ends filters.";
+    results.appendChild(li);
+  }
   for (const fen of b.fens) {
     const li = document.createElement("li");
     li.textContent = fen;

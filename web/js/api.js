@@ -3,6 +3,12 @@
 //     polls. We return the status so callers can branch.
 //   * 4xx/5xx carry the {"error": {code, message, hint}} envelope; we turn
 //     that into an ApiError so every screen can render it the same way.
+// How long a screen keeps polling a 202 "fetching" response before it gives
+// up and tells the user to retry: 40 attempts at 1500ms is ~60s. One policy,
+// shared by every screen that can meet a downloading table.
+export const DOWNLOAD_RETRY_CAP = 40;
+export const DOWNLOAD_RETRY_MS = 1500;
+
 export class ApiError extends Error {
   constructor(status, code, message, hint) {
     super(message || `HTTP ${status}`);
