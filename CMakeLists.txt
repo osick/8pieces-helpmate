@@ -44,6 +44,16 @@ target_compile_options(chessmg_core PRIVATE -O2 -w)
 
 enable_testing()
 
+# Keep every executable at the top of the build tree. Without this, splitting
+# the build into subdirectories moves them to build/src/core/helpmate_tests and
+# build/src/packages/cli/helpmate -- which silently breaks every documented
+# path (README, docs/BUILD.md, the Makefile's slowtest/test-core/test-cli
+# targets, and CI's end-to-end smoke step), while ctest keeps passing because
+# it resolves target locations itself. Worse, a pre-split build leaves stale
+# binaries at the old paths, so the breakage is invisible in a dirty tree and
+# only appears on a clean checkout.
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
+
 # Order matters: cli and bindings both link helpmate_core.
 add_subdirectory(src/core)
 add_subdirectory(src/packages/cli)
