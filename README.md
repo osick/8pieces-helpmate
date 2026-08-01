@@ -56,7 +56,8 @@ count — is an O(1) table lookup, not a fresh search.
 
 ## API server and web dashboard
 
-`pip install ".[server]"` adds `helpmate-server` (a read-only HTTP API —
+`pip install . ./src/packages/api` (or `make install`, which also adds the
+web package) gives you `helpmate-server` (a read-only HTTP API —
 health/catalog/stats/probe/line/moves/mine, with on-demand fetching from a
 Hugging Face dataset for tables not stored locally) and `helpmate-tables`
 (push/pull tables to that dataset). See the
@@ -167,6 +168,36 @@ ctest --test-dir build --output-on-failure     # fast test suite (optional)
 
 ### Install
 
+The easiest path, and the one that sidesteps everything in "Step-by-step
+build" above except its passphrase caveat: `pip install .` runs its own
+CMake configure and build (via scikit-build-core) and puts the `helpmate`
+CLI command directly on `PATH` inside whatever Python environment you
+installed into — no separate `cmake --install` step, and no C++ toolchain
+needed on a machine that only installs the resulting wheel.
+
+```bash
+pip install .
+helpmate --help
+```
+
+The repo is three separately installable distributions — `helpmate` (core +
+CLI + Python bindings, above), `helpmate-api` (the HTTP server), and
+`helpmate-web` (the dashboard). Install all three, in dependency order
+(`helpmate-api` requires `helpmate`, and nothing is published to PyPI yet),
+with:
+
+```bash
+make install
+# or: pip install . ./src/packages/api ./src/packages/web
+```
+
+See [docs/BUILD.md](docs/BUILD.md) for the full Python packaging story,
+including the pre-seeded `_deps` workflow and a silent-hang gitconfig trap
+worth knowing about before your first `pip install`.
+
+Alternatively, install just the plain CMake-built binary without touching
+Python at all:
+
 ```bash
 cmake --install build --prefix "$HOME/.local"  # installs ~/.local/bin/helpmate
 helpmate --help                                # works if ~/.local/bin is on PATH
@@ -178,9 +209,6 @@ the single self-contained binary wherever you like:
 ```bash
 install -Dm755 build/helpmate ~/.local/bin/helpmate
 ```
-
-The Python package is installed separately with `pip install .` — see
-[docs/BUILD.md](docs/BUILD.md).
 
 ### Coverage
 
@@ -348,11 +376,11 @@ memory-mappable byte planes — DTM-white-to-move, DTM-black-to-move,
 count-white-to-move, count-black-to-move — one byte per index cell, sentinel `255` for
 unsolvable/invalid cells. `TableReader`/`TableWriter` (mmap-backed, atomic
 write-then-rename) are the whole implementation; see
-[`src/format/table_file.h`](src/format/table_file.h) for the exact layout.
+[`src/core/format/table_file.h`](src/core/format/table_file.h) for the exact layout.
 
 ## Architecture
 
-- **Indexing** (`src/indexing/`): each position maps to a dense integer index within
+- **Indexing** (`src/core/indexing/`): each position maps to a dense integer index within
   its material's plane via a symmetry-reduced mixed-radix scheme. Both kings are
   indexed jointly through a precomputed non-adjacent-kings table — 1806 states for
   slices with pawns (left-right mirror symmetry only, since pawns break diagonal
@@ -364,7 +392,7 @@ write-then-rename) are the whole implementation; see
   (necessarily different-material) sub-slice table the EP capture lands in. Castling
   is out of scope entirely — no castling rights ever appear in any FEN this project
   reads or writes.
-- **Generation** (`src/generator/`): for material `M`, first compute the closure of
+- **Generation** (`src/core/generator/`): for material `M`, first compute the closure of
   every sub-slice reachable via a capture or promotion (topologically sorted, built
   before `M` itself, since `M`'s forward-scan needs their tables to look up capture/
   promotion successors), then run an init pass (mark invalid cells; mark dtm=0 for
@@ -378,7 +406,7 @@ write-then-rename) are the whole implementation; see
   ever reads values below `d`, so there is no read/write race between threads working
   on different chunks of the same pass, and multithreaded output is required to be
   byte-identical to single-threaded output (enforced by tests).
-- **Storage/probing** (`src/format/`, `src/probe/`): tables are written atomically
+- **Storage/probing** (`src/core/format/`, `src/core/probe/`): tables are written atomically
   (temp file + rename) and read back via mmap, so probing a huge table costs a page
   fault, not a full load. `Tablebase` lazily loads and caches whatever slices a query
   touches, reconstructs optimal lines by greedy descent through the dtm planes (with
@@ -393,14 +421,14 @@ Because the entire point of a tablebase is that its answers are trustworthy, thi
 project leans hard on independent cross-checks rather than trusting the generator to
 grade its own homework:
 
-- **An independent oracle.** `src/generator/oracle.cpp` is a from-scratch cooperative
+- **An independent oracle.** `src/core/generator/oracle.cpp` is a from-scratch cooperative
   iterative-deepening DFS solver that shares only the move generator with the
   fixed-point generator — no shared indexing, no shared search structure. It re-solves
   sampled positions from every generated slice, checking both dtm *and* the number of
   optimal lines (which it enumerates itself, capped at 255), and any mismatch fails
   the build.
 - **Exhaustive python-chess cross-validation — a third, wholly independent
-  implementation.** `tests/python/test_crosscheck.py::test_exhaustive_kqvk` (marked
+  implementation.** `src/packages/bindings/tests/test_crosscheck.py::test_exhaustive_kqvk` (marked
   `slow`, run with `--run-slow`) enumerates *every one* of the 368,452 legal `KQvk`
   positions, runs a plain forward-scan BFS written directly against
   [python-chess](https://python-chess.readthedocs.io/) (no helpmate code involved in
@@ -426,11 +454,11 @@ only, on `helpmate_core`'s sources under `src/`): **91.6% line coverage** (741/8
 lines), 97.2% function coverage, 61.8% branch coverage. The full per-file HTML report
 is at `build-cov/coverage/index.html` after running `make coverage`.
 
-The biggest measured gaps: `src/format/table_file.cpp` (85%) and `src/chess/board.cpp`
+The biggest measured gaps: `src/core/format/table_file.cpp` (85%) and `src/core/chess/board.cpp`
 (90%) — mostly defensive error paths for malformed/truncated table files and rare
-hash/copy edge cases; `src/generator/parallel.h` (68%) — the per-worker
+hash/copy edge cases; `src/core/generator/parallel.h` (68%) — the per-worker
 exception-propagation path, which by design only runs when a worker thread throws,
-not exercised by the happy-path tests; `src/generator/eval.h` (50% by gcov's line
+not exercised by the happy-path tests; `src/core/generator/eval.h` (50% by gcov's line
 count, but see caveat below).
 
 Caveat worth stating plainly rather than hiding: `eval.h`'s en-passant branch and
@@ -486,5 +514,5 @@ intentionally not addressed here.
 - **Slow tests**: the full-closure and multithreaded-determinism tests tagged `[slow]`
   (tens of minutes each) are excluded from `make test` and from `pip install`'s default
   test run; run them explicitly (`./build/helpmate_tests "[slow]"`,
-  `pytest tests/python --run-slow`) when you want that level of assurance for a new
+  `pytest src/packages/bindings/tests --run-slow`) when you want that level of assurance for a new
   material class or after touching the generator.

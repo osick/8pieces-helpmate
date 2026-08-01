@@ -12,7 +12,7 @@ static Material mat_or_throw(const std::string& s) {
     if (!m) throw std::invalid_argument("bad material string: " + s);
     return *m;
 }
-// Mirrors the validation in src/cli/main.cpp's cmd_mine. Unlike the CLI, this
+// Mirrors the validation in src/packages/cli/main.cpp's cmd_mine. Unlike the CLI, this
 // binding has no "was the flag given" distinction: -1 is the documented wire
 // value for "unset" (the HTTP API converts None -> -1 before calling), so -1
 // must always be accepted here, even though the CLI treats a user-typed -1

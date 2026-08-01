@@ -529,20 +529,29 @@ Errors: a missing table with no usable color-flip fallback raises
 the exact `helpmate gen` invocation that would build it; malformed FENs or
 material strings raise `ValueError`.
 
-Python tests live in `tests/python/` (`pytest tests/python`; add `--run-slow`
-for the exhaustive python-chess cross-validation of the full KQvk closure).
+Python tests live in `src/packages/bindings/tests/` (`pytest
+src/packages/bindings/tests`; add `--run-slow` for the exhaustive
+python-chess cross-validation of the full KQvk closure).
 
 ## Web dashboard
 
 The browser front end for everything above. It is served by the same process
 as the API — there is no second port, no build step, no npm, and nothing is
-fetched from a CDN at runtime:
+fetched from a CDN at runtime. Install all three distributions, in
+dependency order (`helpmate-api` requires `helpmate`; `helpmate-web` is what
+gives the API a dashboard to serve):
 
 ```bash
-pip install ".[server]"
+make install
+# or: pip install . ./src/packages/api ./src/packages/web
 helpmate-server --tables ~/tb --port 8642
 # then open http://127.0.0.1:8642/
 ```
+
+If `helpmate-web` isn't installed (just `helpmate` + `helpmate-api`), the
+server still runs but `/` 404s — pass `--web-root DIR` to serve a dashboard
+checkout from an arbitrary directory instead, or `--no-web` to say
+explicitly that you want the API alone.
 
 Three screens:
 
@@ -577,8 +586,9 @@ gen …` hint, `400` is displayed next to the offending field, and an
 unreachable server is reported in the header chip.
 
 Third-party code is vendored, not fetched: **cm-chessboard** 8.7.5 (MIT) lives
-under `web/vendor/cm-chessboard/` with its LICENSE and upstream version
-recorded in `web/vendor/README.md`.
+under `src/packages/web/helpmate_web/static/vendor/cm-chessboard/` with its
+LICENSE and upstream version recorded in
+`src/packages/web/helpmate_web/static/vendor/README.md`.
 
 ## API server
 
@@ -591,12 +601,15 @@ pulling them from that dataset.
 ### Install
 
 ```bash
-pip install ".[server]"
+pip install . ./src/packages/api
+# or, to also get the dashboard: make install
 ```
 
-This installs `fastapi`, `uvicorn`, and `huggingface_hub` on top of the base
-package, and registers two console scripts: `helpmate-server` and
-`helpmate-tables`.
+`helpmate-api` requires `helpmate` (the core + CLI + bindings), so it must
+install second; nothing is published to PyPI yet, so installing out of
+order sends pip looking for the name upstream. This installs `fastapi`,
+`uvicorn`, and `huggingface_hub` on top of the base package, and registers
+two console scripts: `helpmate-server` and `helpmate-tables`.
 
 ### Start the server
 
@@ -608,6 +621,12 @@ helpmate-server --tables ~/myhelpmate/tables --hf-repo USER/DS \
 - `--tables DIR` (repeatable): one or more local directories searched, in
   order, for `.hm`/`.stats.json` files. Omit entirely to serve only from the
   remote.
+- `--web-root DIR`: serve the dashboard from `DIR` instead of the installed
+  `helpmate-web` package (useful for a source checkout of the dashboard
+  without installing it).
+- `--no-web`: serve the API only — `/` 404s instead of the dashboard. Useful
+  when `helpmate-web` isn't installed and you want that to be a deliberate
+  choice rather than an unexplained 404.
 - `--hf-repo USER/DATASET` + `--cache DIR`: an optional Hugging Face dataset
   repo consulted when a material isn't found in any `--tables` dir; downloads
   land in `--cache` (`--hf-repo` requires `--cache`, and vice versa isn't
@@ -875,7 +894,7 @@ A material present in neither local dirs nor the remote manifest is a plain
 ### `helpmate-tables` — push/pull to a Hugging Face dataset
 
 ```bash
-pip install ".[server]"   # same extra as the API server
+pip install . ./src/packages/api   # same install as the API server
 ```
 
 ```

@@ -10,7 +10,7 @@ def _run(app, host: str, port: int) -> None:
 
 def _app_for_tests():
     # Factory for `uvicorn --factory helpmate_server.main:_app_for_tests`,
-    # used by the browser test suite (tests/ui) to serve a real
+    # used by the browser test suite (src/packages/web/tests/ui) to serve a real
     # helpmate-server against a scratch tables dir named by the environment.
     tables = os.environ["HELPMATE_TABLES"]
     return create_app(ChainSource([LocalDir(tables)]))

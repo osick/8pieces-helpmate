@@ -5,13 +5,35 @@ COVBUILD ?= build-cov
 # with "Version mismatch gcc/gcov" against a GCC-13 build); override with
 # `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
 GCOV ?= gcov-13
-.PHONY: configure build test slowtest stress coverage clean jstest
+.PHONY: configure build test slowtest stress coverage clean jstest \
+	install test-core test-cli test-api test-web test-bindings test-repo test-all
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
 	cmake --build $(BUILD) -j
 test: build
 	ctest --test-dir $(BUILD) --output-on-failure
+
+# Install all three distributions from this tree, in dependency order:
+# helpmate-api requires helpmate, and nothing is on PyPI yet, so installing
+# them out of order sends pip looking for the name upstream.
+install:
+	python -m pip install .
+	python -m pip install ./src/packages/api ./src/packages/web
+
+test-core: build
+	$(BUILD)/helpmate_tests "~[slow]"
+test-cli: build
+	ctest --test-dir $(BUILD) --output-on-failure -R "^cli_"
+test-api:
+	python -m pytest src/packages/api/tests -v
+test-web: jstest
+	python -m pytest src/packages/web/tests/ui -v
+test-bindings:
+	python -m pytest src/packages/bindings/tests -v
+test-repo:
+	python -m pytest tests/repo -v
+test-all: test test-api test-web test-bindings test-repo
 
 # Pure JS helpers (helpmate_web/static/js/lib) via Node's built-in test
 # runner. No npm packages. A bare directory arg isn't recursed by `node
@@ -50,7 +72,8 @@ coverage:
 	cmake --build $(COVBUILD) -j2
 	ctest --test-dir $(COVBUILD) --output-on-failure
 	mkdir -p $(COVBUILD)/coverage
-	gcovr --root . --filter 'src/' --exclude '.*_deps.*' \
+	gcovr --root . --filter 'src/core/' --filter 'src/packages/cli/' \
+	  --exclude '.*/tests/.*' --exclude '.*_deps.*' \
 	  --gcov-executable $(GCOV) --gcov-ignore-parse-errors=all \
 	  --html-details $(COVBUILD)/coverage/index.html \
 	  --print-summary $(COVBUILD) | tee $(COVBUILD)/coverage-summary.txt
