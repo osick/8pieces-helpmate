@@ -4,6 +4,7 @@
 #include "generator/generator.h"
 #include "indexing/material.h"
 #include "chess/board.h"
+#include "version.h"
 namespace py = pybind11;
 using namespace hm;
 static Material mat_or_throw(const std::string& s) {
@@ -29,6 +30,7 @@ static void validate_mine_shape(int count, int starts, int ends) {
             "ends=" + std::to_string(ends) + " cannot exceed count=" + std::to_string(count));
 }
 PYBIND11_MODULE(_helpmate, mod) {
+    mod.attr("__version__") = hm::HELPMATE_VERSION;
     py::register_exception<MissingTableError>(mod, "MissingTableError", PyExc_RuntimeError);
     mod.def("generate", [](const std::string& mat, const std::string& tables, int threads,
                            bool verbose, bool progress, bool force_ram) {

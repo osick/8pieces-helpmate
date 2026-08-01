@@ -1,5 +1,7 @@
 import json as _json
-from ._helpmate import Tablebase as _Tablebase, generate, MissingTableError
+from ._helpmate import (
+    Tablebase as _Tablebase, generate, MissingTableError, __version__,
+)
 
 class Tablebase(_Tablebase):
     def stats(self, material: str) -> dict:
@@ -11,4 +13,4 @@ class Tablebase(_Tablebase):
         their optimal-line count is saturated (255+) and therefore not enumerable."""
         return self._mine_with_stats(material, dtm, count, max, starts, ends)
 
-__all__ = ["Tablebase", "generate", "MissingTableError"]
+__all__ = ["Tablebase", "generate", "MissingTableError", "__version__"]

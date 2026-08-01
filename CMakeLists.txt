@@ -1,5 +1,11 @@
 cmake_minimum_required(VERSION 3.24)
-project(helpmate VERSION 0.7.0 LANGUAGES CXX)
+
+# The repo-root VERSION file is the single source of truth. CMake feeds it to
+# project(), which feeds version.h and the cli_version test regex below, so a
+# release bump touches one file here instead of three.
+file(READ ${CMAKE_CURRENT_SOURCE_DIR}/VERSION HELPMATE_VERSION_RAW)
+string(STRIP "${HELPMATE_VERSION_RAW}" HELPMATE_VERSION_STR)
+project(helpmate VERSION ${HELPMATE_VERSION_STR} LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CMAKE_BUILD_TYPE)
@@ -36,6 +42,9 @@ target_compile_options(chessmg_core PRIVATE -O2 -w)
 
 set(HELPMATE_SOURCES src/chess/board.cpp src/chess/san.cpp src/indexing/material.cpp src/indexing/kk.cpp src/indexing/slice_index.cpp src/format/table_file.cpp src/generator/oracle.cpp src/generator/generator.cpp src/probe/tablebase.cpp)  # tasks append here
 add_library(helpmate_core STATIC ${HELPMATE_SOURCES})
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/src/version.h.in
+               ${CMAKE_BINARY_DIR}/generated/version.h @ONLY)
+target_include_directories(helpmate_core PUBLIC ${CMAKE_BINARY_DIR}/generated)
 target_include_directories(helpmate_core PUBLIC src)
 target_link_libraries(helpmate_core PUBLIC chessmg_core nlohmann_json::nlohmann_json Threads::Threads)
 target_compile_options(helpmate_core PRIVATE -O2 -Wall -Wextra)
@@ -165,7 +174,9 @@ set_tests_properties(cli_mine_shape_no_count PROPERTIES PASS_REGULAR_EXPRESSION 
 set_tests_properties(cli_missing PROPERTIES PASS_REGULAR_EXPRESSION "helpmate gen" DEPENDS cli_gen)
 set_tests_properties(cli_badfen PROPERTIES PASS_REGULAR_EXPRESSION "error")
 set_tests_properties(cli_gen_verbose PROPERTIES PASS_REGULAR_EXPRESSION "cached" DEPENDS cli_gen)
-set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION "helpmate 0\\.7\\.0")
+# Regex-escape the dots so 0.7.1 does not also match 0X7Y1.
+string(REPLACE "." "\\." HELPMATE_VERSION_RE "${PROJECT_VERSION}")
+set_tests_properties(cli_version PROPERTIES PASS_REGULAR_EXPRESSION "helpmate ${HELPMATE_VERSION_RE}")
 set_tests_properties(cli_badint_malformed PROPERTIES PASS_REGULAR_EXPRESSION "error.*--dtm")
 set_tests_properties(cli_badint_range PROPERTIES PASS_REGULAR_EXPRESSION "error.*--threads")
 set_tests_properties(cli_line_already_mate PROPERTIES PASS_REGULAR_EXPRESSION "already mate" DEPENDS cli_gen)
