@@ -27,7 +27,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -68,15 +68,17 @@ jobs:
 
       # scikit-build-core runs its own CMake configure (with -DHELPMATE_PYTHON=ON)
       # inside the pip build; FetchContent fetches the pinned deps over HTTPS.
-      # The [server] extra (fastapi/uvicorn/huggingface_hub) is needed to run
-      # tests/server alongside the existing Python binding tests.
-      - name: Install package with dev and server extras
-        run: python -m pip install .[dev,server]
+      # helpmate-api requires helpmate, so the three distributions install in
+      # dependency order.
+      - name: Install all three distributions
+        run: |
+          python -m pip install .[dev]
+          python -m pip install './src/packages/api[dev]' './src/packages/web[dev]'
 
       # Slow tests (exhaustive KQvk cross-check, ~10 min) need --run-slow and
-      # are skipped by default via tests/python/conftest.py.
+      # are skipped by default via src/packages/bindings/tests/conftest.py.
       - name: Run Python tests
-        run: python -m pytest tests/python tests/server -v
+        run: python -m pytest src/packages/bindings/tests src/packages/api/tests tests/repo -v
 
   ui:
     name: Dashboard (browser tests)
@@ -90,8 +92,12 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install package with dev and server extras
-        run: python -m pip install .[dev,server]
+      # helpmate-api requires helpmate, so the three distributions install in
+      # dependency order.
+      - name: Install all three distributions
+        run: |
+          python -m pip install .[dev]
+          python -m pip install './src/packages/api[dev]' './src/packages/web[dev]'
 
       # Browsers are cached; --with-deps installs the system libraries the
       # runner image lacks. The cache key follows the playwright version so a
@@ -100,18 +106,18 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('pyproject.toml') }}
+          key: playwright-${{ runner.os }}-${{ hashFiles('src/packages/web/pyproject.toml') }}
       - name: Install Chromium
         run: python -m playwright install --with-deps chromium
 
-      # `node --test tests/js/` (a bare directory) discovers nothing on
-      # Node 23 - it silently runs zero tests. `make jstest` is what the
-      # local suite actually runs (node --test tests/js/*.test.js).
+      # `node --test src/packages/web/tests/js/` (a bare directory) discovers
+      # nothing on Node 23 - it silently runs zero tests. `make jstest` is
+      # what the local suite actually runs (globs *.test.js explicitly).
       - name: JS helper tests
         run: make jstest
 
       - name: Browser tests
-        run: python -m pytest tests/ui -v
+        run: python -m pytest src/packages/web/tests/ui -v
 
   # Informational only: prints the gcovr line/function/branch summary in the
   # job log. No upload to any coverage service (no secrets configured).
@@ -129,7 +135,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
+          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
 
       - uses: actions/setup-python@v5
         with:

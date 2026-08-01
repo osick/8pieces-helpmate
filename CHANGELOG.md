@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.7.1] - 2026-08-01
+
+### Changed
+
+- **The repo is now three separately installable distributions.**
+  `helpmate` (C++ core, the `helpmate` CLI binary, and the Python bindings),
+  `helpmate-api` (the FastAPI service and `helpmate-tables`), and
+  `helpmate-web` (the dashboard). Each has its own `pyproject.toml` or
+  `CMakeLists.txt` and owns its own test suite under
+  `src/packages/<name>/tests/`. `make install` installs all three in
+  dependency order.
+- **`pip install helpmate` now puts the `helpmate` command on PATH.** The
+  wheel carries the compiled binary, so using the CLI no longer requires a
+  C++ toolchain on the target machine.
+- **The API locates the dashboard by importing `helpmate_web`**, with
+  `--web-root DIR` to override and `--no-web` to serve the API alone. The
+  previous version guessed between two filesystem layouts and served nothing
+  when it guessed wrong.
+- **One `VERSION` file** feeds CMake, `version.h` and the `cli_version` test
+  regex; a repo-level test asserts the three `pyproject.toml` literals,
+  `helpmate.__version__`, `helpmate_server.__version__` and
+  `helpmate --version` all agree with it.
+
+### Migration
+
+`pip install ".[server]"` no longer exists — the server is a different
+distribution. Use `make install`, or
+`pip install . ./src/packages/api ./src/packages/web` **in that order**
+(`helpmate-api` requires `helpmate`, and nothing is published to PyPI yet).
+
 ## [0.7.0] - 2026-08-01
 
 ### Added

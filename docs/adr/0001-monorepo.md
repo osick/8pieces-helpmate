@@ -38,6 +38,9 @@ docs/       all documentation, specs, ADRs (this file); no separate docs repo
 specs/      raw idea notes (input to brainstorming sessions)
 ```
 
+This diagram shows the layout at the time of this ADR (2026-07-30); v0.7.1 reorganised the
+repository into `src/core/` plus `src/packages/{cli,bindings,api,web}/` without changing this decision. See `docs/BUILD.md` for the current package layout.
+
 CI uses path filters so, e.g., `server/**`-only changes do not rebuild the
 C++ matrix. Table files stay out of git without exception.
 

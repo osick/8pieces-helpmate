@@ -72,6 +72,32 @@ prompt — including the *separate* CMake configure that `pip install` runs (see
 On CI runners and ordinary machines without such rewrites, plain HTTPS cloning
 works out of the box and none of this is needed.
 
+## Package layout
+
+The C++ tree lives under `src/core/` (the engine: generator, indexing,
+probe, storage) with the CLI and Python bindings as thin consumers in
+`src/packages/cli/` and `src/packages/bindings/`. Above that, three
+separately installable distributions, each with its own
+`pyproject.toml`/`CMakeLists.txt` and its own test suite under
+`src/packages/<name>/tests/`:
+
+| Distribution | Path | Contains |
+|---|---|---|
+| `helpmate` | root `pyproject.toml` (builds `src/core` + `src/packages/cli` + `src/packages/bindings`) | the compiled `helpmate` CLI binary and the `helpmate` Python module |
+| `helpmate-api` | `src/packages/api/` | the FastAPI service (`helpmate-server`) and `helpmate-tables` |
+| `helpmate-web` | `src/packages/web/` | the static dashboard, served by `helpmate-server` when installed |
+
+`helpmate-api` depends on `helpmate`, and nothing is published to PyPI yet,
+so they must install in dependency order — `make install` does this for all
+three:
+
+```bash
+make install
+# equivalent to:
+python -m pip install .
+python -m pip install ./src/packages/api ./src/packages/web
+```
+
 ## Makefile targets
 
 The Makefile is a thin wrapper over CMake; every target can be prefixed with
@@ -151,6 +177,55 @@ interpretation of the resulting numbers).
 
 Removes `build/` and `build-cov/`.
 
+### `make install`
+
+`python -m pip install .` then `python -m pip install ./src/packages/api
+./src/packages/web` — all three distributions, in the order `helpmate-api`
+requires.
+
+If this hangs with no output and no error, see "`pip install .` hangs with no
+output and no error at all" under [Troubleshooting](#troubleshooting) — it's
+the HTTPS→SSH gitconfig pitfall, and `make install
+GIT_CONFIG_GLOBAL=/dev/null` (GNU Make passes command-line variables through
+to the recipe's environment) works around it without editing global git
+config.
+
+### `make install-dev`
+
+Same three distributions, each installed with its `[dev]` extra
+(`.[dev]`, `./src/packages/api[dev]`, `./src/packages/web[dev]`), so
+`make install-dev && make test-api` (or `test-web`, `test-bindings`,
+`test-repo`) has pytest/httpx/playwright available — plain `make install`
+installs no dev extras and those targets fail on a missing `pytest`. Subject
+to the same `GIT_CONFIG_GLOBAL` note as `make install` above.
+
+### Per-package test targets
+
+Each installable distribution owns its own test suite; these wrap the
+commands the CI jobs run:
+
+- `make test-core` — builds, then `$(BUILD)/helpmate_tests "~[slow]"` (the
+  same Catch2 cases `make test`'s ctest run drives, invoked directly).
+- `make test-cli` — builds, then `ctest --test-dir $(BUILD) -R "^cli_"` (just
+  the CLI integration tests).
+- `make test-api` — `pytest src/packages/api/tests` (requires `helpmate` and
+  `helpmate-api` installed with the `dev` extra). Two cases in
+  `test_static.py` additionally need a resolvable dashboard — with
+  `helpmate-web` installed they assert it is served; without it they skip
+  rather than fail, since a package must be independently verifiable without
+  the rest of the repo.
+- `make test-web` — `make jstest` then `pytest src/packages/web/tests/ui`
+  (requires `helpmate`, `helpmate-api` and `helpmate-web` installed with the
+  `dev` extra — the UI conftest imports `helpmate` directly and calls
+  `generate()` to build the fixture closure it drives Playwright against).
+- `make test-bindings` — `pytest src/packages/bindings/tests`.
+- `make test-repo` — `pytest tests/repo`, the repo-level checks (e.g. that
+  `VERSION` agrees with every `pyproject.toml` and `helpmate --version`).
+- `make test-all` — `test` (the C++/CLI ctest suite, which subsumes
+  `test-core` and `test-cli` above) plus the four package-level targets
+  (`test-api`, `test-web`, `test-bindings`, `test-repo`) — six targets listed
+  above, four of them re-run here on top of `test`.
+
 ## Plain CMake (without make)
 
 ```bash
@@ -170,12 +245,25 @@ you never set this by hand — `pip install` does).
 pip install .            # or: pip install -e .[dev] for the pytest/python-chess dev extras
 ```
 
-Packaging is via scikit-build-core + pybind11 (build requirements are fetched
-from PyPI over HTTPS). `pip install` runs **its own** CMake configure with
-`-DHELPMATE_PYTHON=ON` — entirely separate from the plain-CMake `build/` tree —
-and compiles the same `helpmate_core` C++ sources into the extension module
-`helpmate._helpmate`. Requires Python ≥ 3.9 plus the same CMake ≥ 3.24 and
-GCC ≥ 13 (export `CC`/`CXX` if your defaults are older).
+`helpmate` (the root `pyproject.toml`) is the only one of the three
+distributions that compiles anything — `helpmate-api` and `helpmate-web`
+(`src/packages/api/`, `src/packages/web/`) are plain hatchling wheels with no
+C++ involved. Install all three, in dependency order, with `make install` or
+
+```bash
+pip install . ./src/packages/api ./src/packages/web
+```
+
+(`helpmate-api` depends on `helpmate`, and nothing is published to PyPI yet,
+so installing out of order sends pip looking for the name upstream).
+
+Packaging of `helpmate` itself is via scikit-build-core + pybind11 (build
+requirements are fetched from PyPI over HTTPS). `pip install` runs **its
+own** CMake configure with `-DHELPMATE_PYTHON=ON` — entirely separate from
+the plain-CMake `build/` tree — and compiles the same `helpmate_core` C++
+sources into the extension module `helpmate._helpmate`. Requires Python ≥
+3.9 plus the same CMake ≥ 3.24 and GCC ≥ 13 (export `CC`/`CXX` if your
+defaults are older).
 
 Because that configure is separate, it re-runs `FetchContent` — on a machine
 with the HTTPS→SSH gitconfig rewrite, pre-seed the dependency sources exactly
@@ -194,11 +282,34 @@ SKBUILD_CMAKE_ARGS="-DFETCHCONTENT_FULLY_DISCONNECTED=ON;\
 also set `SKBUILD_BUILD_DIR=<dir>` to keep and reuse scikit-build-core's build
 tree between installs.)
 
+**Named symptom: `pip install .` hangs with no output and no error**, not
+even a passphrase prompt you can answer. This is a different failure mode
+from the SSH-prompt case above, and easy to misdiagnose because there is
+nothing on stderr to search for. `pip`'s isolated build environment inherits
+`HOME`, so a `~/.gitconfig` with `url."git@github.com:".insteadOf =
+https://github.com/` still applies to the `FetchContent` clone inside the
+pip build — but the clone runs from a subprocess with no attached terminal,
+so instead of an SSH passphrase prompt on stdin, it pops a **GUI** passphrase
+dialog (`ssh-askpass` or similar). On a headless box, over SSH, or on a CI
+runner, that dialog never appears anywhere you can see or answer it, and the
+install just sits there indefinitely — no timeout, no error. If `pip
+install .` (or `pip install -e .[dev]`) hangs with no output for more than a
+few seconds and `build/_deps` isn't already populated, this is almost
+certainly it. Fix: bypass the global gitconfig for the install, the same as
+the plain-CMake case —
+
+```bash
+GIT_CONFIG_GLOBAL=/dev/null pip install .
+```
+
+— or pre-seed `build/_deps` and pass `SKBUILD_CMAKE_ARGS` as above so the
+pip build's CMake configure never touches the network at all.
+
 Run the Python tests with:
 
 ```bash
-pytest tests/python              # fast (~seconds)
-pytest tests/python --run-slow   # + exhaustive KQvk cross-check (~10 min)
+pytest src/packages/bindings/tests              # fast (~seconds)
+pytest src/packages/bindings/tests --run-slow   # + exhaustive KQvk cross-check (~10 min)
 ```
 
 ## Continuous integration
@@ -219,6 +330,13 @@ GitHub Release with a `helpmate-<tag>-linux-x86_64.tar.gz` binary tarball.
   the pre-fetched `_deps` workflow (`FETCHCONTENT_FULLY_DISCONNECTED` +
   `FETCHCONTENT_SOURCE_DIR_*`, via `SKBUILD_CMAKE_ARGS` for pip) or a one-off
   `GIT_CONFIG_GLOBAL=/dev/null` configure.
+- **`pip install .` hangs with no output and no error at all** — not an SSH
+  prompt, a *silent* hang: pip's isolated build environment inherits `HOME`,
+  so the same gitconfig rewrite above triggers a GUI passphrase dialog
+  (`ssh-askpass`) instead of a terminal prompt, and that dialog is invisible
+  and unanswerable over SSH or in CI. See [Python package
+  (pip)](#python-package-pip) for the full explanation; fix is the same
+  `GIT_CONFIG_GLOBAL=/dev/null pip install .`, or pre-seed `build/_deps`.
 - **C++20 errors / unknown flags at configure time** — the default compiler is
   too old; export `CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13` (adjust paths) and
   wipe the build dir before re-configuring.

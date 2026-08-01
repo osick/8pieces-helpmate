@@ -1,0 +1,21 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "helpmate-web"
+version = "0.7.1"
+description = "Web dashboard for helpmate tablebases (static files)"
+requires-python = ">=3.9"
+license = {text = "MIT"}
+
+[project.optional-dependencies]
+dev = ["pytest", "playwright"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["helpmate_web"]
+
+# Hatchling honours .gitignore by default, and the repo's generic Python
+# `lib/` rule would otherwise drop js/lib and cm-chessboard/lib from the
+# wheel -- the negations in .gitignore are what keep them in. Verified by the
+# wheel-content check in the plan; do not set ignore-vcs without re-checking.
