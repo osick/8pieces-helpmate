@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.7.5] - 2026-08-02
+
+### Added
+
+- **Block-compressed tables** (`version 3`, `encoding 2`): the four planes are
+  addressed as one logical byte range, cut into 64 KB blocks compressed
+  independently with zstd, with a `uint64` offset index and a bounded cache of
+  decompressed blocks. Random access is preserved — a probe decompresses one
+  block. Measured 14.5× on a real 6-piece plane.
+- **`helpmate gen --compress`** and **`helpmate compact --compress`**. The
+  converter rewrites tables already on disk one at a time via a temp file and
+  atomic rename, and skips markers, already-compressed tables, and anything
+  written in the last hour, so a running generation is never disturbed.
+- **libzstd** is now a build prerequisite (`libzstd-devel` on openSUSE,
+  `libzstd-dev` on Debian/Ubuntu).
+
+### Changed
+
+- Raw tables remain the default for `gen`. The default flips in a later
+  version, once the performance gate has been run at scale.
+- Compressed tables carry `version = 3` as well as `encoding = 2`, so binaries
+  released before this format report "written by a newer helpmate … upgrade
+  this build" rather than "unreadable table".
+
 ## [0.7.2] - 2026-08-01
 
 ### Added

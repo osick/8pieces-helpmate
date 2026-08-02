@@ -65,6 +65,67 @@ consequence: the index bakes in "White delivers mate", so probing a position
 where *Black* is the mating side (e.g. `KvkQ` when only `KQvk` was generated)
 is answered through an automatic **color flip** (see `probe` below).
 
+### Table format
+
+Every `.hm` file opens with the same 64-byte header (magic, `version`,
+`encoding`, canonical material name, symmetry kind, plane size, max dtm) plus
+a length-prefixed JSON metadata blob; what follows the header depends on
+`version`:
+
+- **version 1** — an ordinary table: four contiguous byte planes (DTM-white,
+  DTM-black, count-white, count-black), one byte per index cell, `encoding =
+  1` (raw).
+- **version 2** — a **marker** table: header + JSON only, no payload at all.
+  Every cell reads as unsolvable/invalid. Written when a slice's closure
+  computation finds no solvable cell at all (e.g. `Kvk`); see
+  [Pruning and marker tables](#pruning-and-marker-tables) below.
+- **version 3** — a **block-compressed** table (since v0.7.5), `encoding =
+  2`. The four planes are treated as one logical byte range, cut into fixed
+  64 KB blocks, each compressed independently with zstd (level 3 by
+  default), plus a `uint64` offset index and a small bounded cache of
+  decompressed blocks in the reader. Random access is preserved — a probe
+  decompresses at most one block, not the whole table — at the cost of a
+  small per-probe overhead: measured warm-probe latency is 2.94 us -> 3.02 us
+  (1.09x, worst case across materials measured), and the raw path itself
+  costs 18.3 ns -> 19.3 ns per `get()` (+5.5%) simply from one reader having
+  to support both formats. Compression ratio depends heavily on table size:
+  a real 6-piece plane measured 14.5x at the default 64 KB/level 3, and a
+  real 5-piece table (`KBvkbn`) went from 462 MiB to 50 MiB end to end
+  (9.22x). Small materials compress far less well — `KQvk` at 146 KB measures
+  only 2.0x — because the fixed per-file overhead (header, JSON, a block
+  index covering just 2-3 blocks) dominates a file too small to give zstd
+  much to work with. This is expected, not a defect: don't read "only 2x" on
+  a toy table as evidence something is broken.
+
+**Older binaries and compressed tables.** A version-3 table is readable only
+by v0.7.5+. A pre-0.7.5 binary that encounters one does not report a generic
+"unreadable table" error — the version field is checked before the payload
+is touched, so it reports *"table ... was written by a newer helpmate
+(unsupported table format version); upgrade this build"*, same message a
+future version-4+ format would produce. `gen` and `probe` both surface this
+distinction (`OpenError::UnsupportedVersion` vs. `Unreadable`).
+
+**Opting in.** `helpmate gen --compress` writes new tables directly as
+version 3 instead of version 1; raw stays the default (`gen` without the
+flag behaves exactly as before) — the default flips to compressed in a
+later version, once the performance gate above has been re-run at larger
+scale than a handful of measured materials. `helpmate compact --compress`
+instead rewrites *existing* raw tables on disk to block-compressed, one file
+at a time via a temp file and atomic rename, streaming off the source
+table's mmap at constant memory rather than buffering all four planes (a
+6-piece table's four planes are ~31 GB; the converter's own peak RSS is
+12-14 MiB regardless of table size). It leaves markers and tables that are
+already compressed alone, and — like plain `compact` — skips any `.hm` file
+whose material doesn't match its filename. It also skips any file **written
+in the last hour**, checked before the file is even opened: a multi-hour/
+multi-day generation run may still be writing into the same directory, and
+rewriting a table mid-write would corrupt it, so `compact --compress` simply
+leaves recent files for a later run rather than risking that.
+
+See `tools/bench_compression.py` (documented in [BUILD.md](BUILD.md)) to
+re-measure any of the numbers above against your own hardware or a larger
+table.
+
 ## Getting the binary
 
 Build per [BUILD.md](BUILD.md); the CLI lands at `./build/helpmate`. Running
@@ -77,7 +138,7 @@ Common options (all subcommands): `--tables DIR` — the table directory
 ## `gen` — generate tables
 
 ```
-helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [--force-ram]
+helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [--force-ram] [--compress]
 ```
 
 - `--threads N`: worker threads for generation (default 1). Multithreaded
@@ -103,6 +164,11 @@ helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [-
   fit, `gen` aborts with the slice name and both sizes in GiB; `--force-ram`
   proceeds anyway (e.g. when you trust swap to absorb it). On systems without
   a readable `/proc/meminfo` the guard is skipped.
+- `--compress`: write every table in this run as block-compressed (version
+  3) instead of raw (version 1). Raw remains the default when the flag is
+  omitted. See [Table format](#table-format) above for the format, the
+  measured compression/latency numbers, and why compressed tables need
+  v0.7.5+ to read.
 
 Example (real output; all reporting lines on stderr, the two `.hm` result
 lines on stdout as before):
@@ -323,7 +389,7 @@ optimal replies can tie.)
 ## `compact` — reclaim disk space in already-unsolvable tables
 
 ```
-helpmate compact <DIR> [--dry-run]
+helpmate compact <DIR> [--dry-run] [--compress]
 ```
 
 Rewrites every `.hm` table in `DIR` whose cells are **all** unsolvable (or
@@ -334,6 +400,15 @@ rewritten again). When a run rewrites nothing at all — every table was either
 solvable or already a marker — it prints `already compact`. `--dry-run`
 reports what *would* be rewritten and reclaims nothing — it never opens a
 file for writing.
+
+With `--compress` (since v0.7.5), `compact` switches to a different mode
+entirely: instead of hunting for all-unsolvable tables, it rewrites every
+*raw* table in `DIR` as block-compressed, skipping markers, tables already
+compressed, and — always, not just under `--dry-run` — anything written in
+the last hour, so a generation run still writing into the same directory is
+never disturbed. See [Table format](#table-format) above for the mechanics
+and the measured numbers; `--compress` and the marker-compaction mode above
+are mutually exclusive.
 
 This exists for tables generated **before v0.6.1**, when `gen` had no pruning
 and wrote a full-size table even for slices like `Kvk` where every cell is

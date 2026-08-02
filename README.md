@@ -378,6 +378,16 @@ unsolvable/invalid cells. `TableReader`/`TableWriter` (mmap-backed, atomic
 write-then-rename) are the whole implementation; see
 [`src/core/format/table_file.h`](src/core/format/table_file.h) for the exact layout.
 
+Since v0.7.5 there's a third table shape alongside the raw layout above and
+the all-unsolvable marker: a **block-compressed** table (`version = 3`,
+`encoding = 2`) that cuts the four planes into 64 KB blocks compressed
+independently with zstd, keeping random-access probing cheap while shrinking
+real multi-piece tables by 9-14x on disk. It's opt-in (`gen --compress`,
+`compact --compress`) and requires a v0.7.5+ reader — see
+[docs/USAGE.md's Table format section](docs/USAGE.md#table-format) for the
+full format, the measured numbers, and the `compact --compress` conversion
+mechanics.
+
 ## Architecture
 
 - **Indexing** (`src/core/indexing/`): each position maps to a dense integer index within
