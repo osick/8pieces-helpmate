@@ -159,6 +159,24 @@ workloads) vs extending ChessMG — outcome decides everything downstream.
 
 ## Backlog (unscheduled)
 
+### `helpmate list <dir>` — what is actually on disk
+
+**Goal:** the local equivalent of the API's `/v1/materials`: material, table
+version, encoding, block size, `max_dtm`, and size on disk, one line per file.
+
+Raised 2026-08-02 while considering whether compressed tables should use a
+distinct `.hmc` extension. They should not — the header already carries
+`version` and `encoding`, and a filename that can disagree with its own
+contents is a bug waiting to happen (`compact` already has to refuse tables
+whose filename disagrees with their header material). But the impulse behind
+the question was real: after converting a corpus there is no way to see at a
+glance which files are compressed, short of inferring it from size. This is a
+tooling gap, not a naming one.
+
+- Depends on: nothing
+- Small. Consider folding the same information into `stats` output.
+
+
 ### Compression — promoted to v0.7.5
 
 Moved out of the Backlog on 2026-08-02 after the decision spike this entry
