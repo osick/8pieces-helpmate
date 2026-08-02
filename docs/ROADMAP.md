@@ -106,10 +106,15 @@ for. Split out of v0.7 because it needs its own foundations: a definition of
 what a "theme" is, a precomputed index per material, generation tooling, and
 new query endpoints. Starts with its own brainstorming session.
 
+- Design: **approved** — `docs/superpowers/specs/2026-08-03-theme-detection-design.md`
 - Depends on: v0.7 (the UI that will present it), v0.6 storage
-- Open questions: the theme taxonomy itself (model, pin, self-block,
-  interference, promotion themes...); index format and size; whether themes
-  are computed during generation or as a separate pass.
+- Scoped to twelve cheap, precisely-defined themes computed on the fly during
+  a `mine` scan — no precomputed index, no new file format, since definitions
+  will change as they are argued with. Naming follows the Helpmate Analyzer
+  glossary so results are comparable with established practice.
+- Deferred to a later rung: cross-solution themes (echo, Zilahi, AUW), the
+  geometric patterns, twins and set play. Permanently impossible: anything
+  requiring castling, which the table format never supports.
 
 ## Unscheduled — Cross-platform CLI builds
 
