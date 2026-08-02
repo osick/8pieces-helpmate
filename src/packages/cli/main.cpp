@@ -71,12 +71,12 @@ void usage() {
                  "                 slice whose planes exceed available memory)\n"
                  "  --compress     gen: write block-compressed tables (v0.7.5+ readers only)\n"
                  "                 compact: rewrite existing tables as block-compressed\n"
-                 "  --block-size N gen/compact --compress: block size in KiB (default 16,\n"
-                 "                 i.e. 16 KiB -- mining-heavy workloads favor small blocks;\n"
-                 "                 see docs/USAGE.md). Must be >= 4 (4 KiB) and <= 16384\n"
-                 "                 (16 MiB). compact --compress can re-block an\n"
-                 "                 already-compressed table to a new size in place, without\n"
-                 "                 regenerating it.\n"
+                 "  --block-size N gen/compact --compress: block size in KiB (default 64,\n"
+                 "                 i.e. 64 KiB -- mine --count/--starts runs ~6.5x slower on a\n"
+                 "                 compressed table at any block size; see docs/USAGE.md).\n"
+                 "                 Must be >= 4 (4 KiB) and <= 16384 (16 MiB). compact\n"
+                 "                 --compress can re-block an already-compressed table to a\n"
+                 "                 new size in place, without regenerating it.\n"
                  "  --all          line: print every optimal line, not just one\n"
                  "  --max N        cap on lines/FENs printed (default: 10)\n"
                  "  --dtm D        mine: required, exact distance-to-mate to match\n"
@@ -598,8 +598,8 @@ int main(int argc, char** argv) {
     }
     if (bad_int) return 3;
 
-    // --block-size is given in KiB (documented in --help): "16" means 16
-    // KiB == 16384 bytes, matching how the size/miss-cost trade-off is
+    // --block-size is given in KiB (documented in --help): "64" means 64
+    // KiB == 65536 bytes, matching how the size/miss-cost trade-off is
     // discussed everywhere else (docs/USAGE.md, kDefaultBlockSize's
     // comment). Bounds mirror what TableReader::open() enforces at the
     // upper end (kMaxBlockSize, 16 MiB) plus a 4 KiB floor below which a

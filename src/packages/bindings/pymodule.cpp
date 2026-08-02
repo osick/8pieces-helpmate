@@ -43,16 +43,18 @@ PYBIND11_MODULE(_helpmate, mod) {
             o.progress = progress;
             o.force_ram = force_ram;
             o.compress = compress;
-            o.block_size = block_size;
+            // KiB, matching the CLI's --block-size. Keeping the two in the
+            // same unit matters more than matching GenOptions' internal bytes:
+            // a user reading `--block-size 64` and writing block_size=64 must
+            // get the same table, not a 64-byte-block one.
+            o.block_size = block_size * 1024;
             return generate(mat_or_throw(mat), o);
         },
         py::arg("material"), py::arg("tables") = "tables", py::arg("threads") = 1, py::arg("verbose") = false,
         py::arg("progress") = false, py::arg("force_ram") = false,
         // compress/block_size mirror the CLI's `gen --compress`/`--block-size`
-        // (see docs/USAGE.md's Table format section). Unlike the CLI flag
-        // (which takes KiB), block_size here is raw BYTES, matching
-        // GenOptions::block_size and every other block_size in this codebase.
-        py::arg("compress") = false, py::arg("block_size") = kDefaultBlockSize);
+        // (see docs/USAGE.md's Table format section), in the SAME unit: KiB.
+        py::arg("compress") = false, py::arg("block_size") = kDefaultBlockSize / 1024);
     py::class_<Tablebase>(mod, "Tablebase")
         .def(py::init<std::string>())
         .def("probe", [](const Tablebase& t, const std::string& fen) -> py::object {

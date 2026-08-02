@@ -380,13 +380,13 @@ write-then-rename) are the whole implementation; see
 
 Since v0.7.5 there's a third table shape alongside the raw layout above and
 the all-unsolvable marker: a **block-compressed** table (`version = 3`,
-`encoding = 2`) that cuts the four planes into fixed-size blocks (16 KiB by
+`encoding = 2`) that cuts the four planes into fixed-size blocks (64 KiB by
 default, tunable per run with `--block-size`) compressed independently with
 zstd, keeping random-access probing cheap while shrinking real multi-piece
-tables by 9-14x on disk. The default was tuned down from an initial 64 KiB
-because `helpmate mine`'s exhaustive-solution paths probe positions
-effectively at random, which is disproportionately sensitive to block-miss
-cost — see [docs/USAGE.md's Table format
+tables by 9-14x on disk. Compressing a table you actively mine with
+`helpmate mine --count`/`--starts` costs ~6.5x on that path, regardless of
+block size (a 16 KiB default was tried and measured to help nothing there
+while compressing worse) — see [docs/USAGE.md's Table format
 section](docs/USAGE.md#table-format) for the measured trade-off. It's opt-in
 (`gen --compress`, `compact --compress`), requires a v0.7.5+ reader, and an
 already-compressed table can be re-blocked to a new `--block-size` in place

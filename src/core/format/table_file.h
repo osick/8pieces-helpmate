@@ -14,18 +14,24 @@ constexpr uint8_t kEncodingRaw = 1;     // 4 contiguous byte planes
 constexpr uint8_t kEncodingBlocks = 2;  // block index + compressed blocks
 constexpr uint8_t kCodecNone = 0;
 constexpr uint8_t kCodecZstd = 1;
-// 16 KiB/level 3: measured 11.4x ratio at ~11us/block miss cost, chosen over
-// the format's original 64 KiB/14.5x default because `helpmate mine`'s
-// --count/--starts path probes child positions effectively at random, so on
-// a real table nearly every probe misses the reader's decompressed-block
-// cache and pays a full block decompress for one byte -- measured 5x slower
-// end to end at 64 KiB on a 477 MB table. Smaller blocks shrink that miss
-// cost at some ratio cost; see docs/USAGE.md's Table format section for the
-// full measured trade-off (16 KiB vs 64 KiB) and tools/bench_compression.py
-// to reproduce it. A plain sequential scan or a single probe barely notices
-// block size (measured 9-14% either way) -- this default is chosen for the
-// random-access mining workload specifically.
-constexpr uint32_t kDefaultBlockSize = 16384;
+// 64 KiB/level 3. `helpmate mine`'s --count/--starts path probes child
+// positions effectively at random, so on a real table nearly every probe
+// misses the reader's decompressed-block cache and pays a full block
+// decompress for one byte -- measured ~6.5x slower end to end than raw on
+// a 462 MiB table. A plain sequential scan or a single probe barely notices
+// block size (measured 9-14% either way).
+//
+// A 16 KiB default was tried on the theory that smaller blocks would cut
+// the mining regression (less to decompress per miss). Measured on the same
+// 462 MiB table it did NOT: 16 KiB and 64 KiB both ran ~6.5x slower than raw
+// on `mine --count`, while 16 KiB compressed worse (5.94x ratio, 77.8 MiB)
+// than 64 KiB (6.53x ratio, 70.8 MiB). Decompression is evidently not the
+// bottleneck -- the per-miss overhead in BlockCache is the suspect, but that
+// is unconfirmed and needs profiling, not another guessed block size. See
+// docs/USAGE.md's Table format section for the full numbers and
+// tools/bench_compression.py to reproduce them. Retune only with a
+// measurement.
+constexpr uint32_t kDefaultBlockSize = 65536;
 // Ceiling enforced at open(): block_size is retunable per file with no
 // version bump, so a crafted header can otherwise claim an arbitrary value.
 // The reader sizes its decompressed-block cache from block_size (see
