@@ -299,7 +299,19 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
                             if (ok) {
                                 const uint64_t* offs =
                                     reinterpret_cast<const uint64_t*>(idx + sizeof(uint64_t));
-                                ok = offs[nb] <= remaining - index_bytes;
+                                const uint64_t payload_bytes = remaining - index_bytes;
+                                ok = offs[nb] <= payload_bytes;
+                                // Interior offsets are untrusted too: get()/byte_at() index
+                                // blocks_ + offs[b] .. blocks_ + offs[b+1] without further
+                                // checking, so a single out-of-bounds or decreasing entry
+                                // reads (or feeds zstd) arbitrary memory. This is an O(n_blocks)
+                                // scan at open time -- one sequential pass over the whole index,
+                                // once per open, against a file that can be tens of GB; do not
+                                // "optimise" it away by trusting the final offset alone.
+                                if (ok && offs[0] != 0) ok = false;
+                                if (ok) {
+                                    for (uint64_t i = 0; ok && i < nb; ++i) { ok = offs[i] <= offs[i + 1]; }
+                                }
                             }
                         }
                     }

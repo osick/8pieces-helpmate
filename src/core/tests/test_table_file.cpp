@@ -9,6 +9,7 @@
 #include <random>
 #include <vector>
 
+#include "format/block_codec.h"
 #include "format/table_file.h"
 #include "indexing/material.h"
 #include "probe/tablebase.h"
@@ -337,4 +338,108 @@ TEST_CASE("the committed golden compressed table still reads correctly") {
     CHECK(p->count == 4);
     CHECK_FALSE(p->flipped);
     fs::remove_all(dir);
+}
+
+// Shared by the two adversarial-index tests below: writes a valid
+// block-compressed table with at least 3 blocks and returns the byte offset
+// of offs[0] in the file, i.e. sizeof(TableHeader) + json_len +
+// sizeof(uint64_t) (the stated block count precedes the offsets array).
+namespace {
+uint64_t write_compressed_for_index_tamper(const std::string& path) {
+    Material mat = Material::parse("KQvk").value();
+    // 4 * plane_size must exceed 2 * 65536 so there are at least 3 blocks
+    // (kDefaultBlockSize) to give the monotonicity check an interior pair.
+    const uint64_t ps = 40000;
+    std::vector<uint8_t> dw(ps, 1), db(ps, 2), cw(ps, 3), cb(ps, 4);
+    const std::string meta = "{}";
+    TableWriter::write_compressed(path, mat, ps, 5, meta, dw.data(), db.data(), cw.data(), cb.data());
+
+    const uint64_t nb = block_count(4 * ps, kDefaultBlockSize);
+    REQUIRE(nb >= 3);
+    return sizeof(TableHeader) + meta.size() + sizeof(uint64_t);
+}
+
+void patch_u64_at(const std::string& path, uint64_t byte_offset, uint64_t value) {
+    std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+    REQUIRE(f.is_open());
+    f.seekp(static_cast<std::streamoff>(byte_offset));
+    f.write(reinterpret_cast<const char*>(&value), sizeof(value));
+    REQUIRE(f.good());
+}
+}  // namespace
+
+TEST_CASE("a crafted interior block offset is rejected at open, not left to crash get()") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_offs_huge_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string path = (dir / "t.hm").string();
+
+    const uint64_t offs0_pos = write_compressed_for_index_tamper(path);
+    const uint64_t offs1_pos = offs0_pos + sizeof(uint64_t);
+
+    // Sanity: the table is readable before tampering.
+    {
+        auto z = TableReader::open(path);
+        REQUIRE(z.has_value());
+    }
+
+    // Mirrors the reviewer's reproduction: an interior offset set far past the
+    // end of the payload. Before Fix 1, open() only checked offs[nb]; this
+    // offs[1] was invisible to it, and get() would later hand it straight to
+    // the block cache / zstd and segfault (ZSTD_decompress_usingDDict via
+    // hm::decompress_block via BlockCache::byte_at).
+    patch_u64_at(path, offs1_pos, 100000000000ull);
+
+    TableReader::OpenError err = TableReader::OpenError::None;
+    auto z = TableReader::open(path, &err);
+    CHECK_FALSE(z.has_value());
+    CHECK(err == TableReader::OpenError::Unreadable);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a non-monotonic interior offset pair is rejected at open") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_offs_nonmono_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string path = (dir / "t.hm").string();
+
+    const uint64_t offs0_pos = write_compressed_for_index_tamper(path);
+    const uint64_t offs1_pos = offs0_pos + sizeof(uint64_t);
+    const uint64_t offs2_pos = offs1_pos + sizeof(uint64_t);
+
+    // offs[0] is fixed at 0 by construction (the first block starts at the
+    // beginning of the payload), so a decreasing pair can't be built by
+    // pushing offs[1] below offs[0] -- that would require an offset less than
+    // zero, which doesn't exist for uint64_t. Instead read the real offs[2]
+    // and set offs[1] just above it: offs[1] > offs[2] is exactly the
+    // violation `offs[i] <= offs[i+1]` exists to catch, and it stays within
+    // the payload (<= offs[nb]) so this isolates the monotonicity check from
+    // the final-bound check exercised by the previous test.
+    uint64_t offs2;
+    {
+        std::ifstream in(path, std::ios::binary);
+        REQUIRE(in.is_open());
+        in.seekg(static_cast<std::streamoff>(offs2_pos));
+        in.read(reinterpret_cast<char*>(&offs2), sizeof(offs2));
+        REQUIRE(in.good());
+    }
+    patch_u64_at(path, offs1_pos, offs2 + 1);
+
+    TableReader::OpenError err = TableReader::OpenError::None;
+    auto z = TableReader::open(path, &err);
+    CHECK_FALSE(z.has_value());
+    CHECK(err == TableReader::OpenError::Unreadable);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("block_count is overflow-free by construction") {
+    // The case Task 2 documented as wrapping under the old
+    // (logical_size + block_size - 1) / block_size formulation: with the old
+    // formula, UINT64_MAX + 65536 - 1 wraps mod 2^64 and yields 0. The
+    // division-based formulation below has no such term.
+    CHECK(block_count(UINT64_MAX, 65536) == 281474976710656ull);
+    // Ordinary cases, unchanged behavior: zero, exact multiple, one over.
+    CHECK(block_count(0, 65536) == 0ull);
+    CHECK(block_count(65536, 65536) == 1ull);
+    CHECK(block_count(65537, 65536) == 2ull);
 }

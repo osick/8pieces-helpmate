@@ -19,7 +19,10 @@ using ZstdCCtxPtr = std::unique_ptr<ZSTD_CCtx, ZstdCCtxDeleter>;
 
 uint64_t block_count(uint64_t logical_size, uint32_t block_size) {
     if (block_size == 0) throw std::runtime_error("block_count: block_size is zero");
-    return (logical_size + block_size - 1) / block_size;
+    // Deliberately not (logical_size + block_size - 1) / block_size: that
+    // addition wraps for a logical_size near UINT64_MAX, and this is called on
+    // a value derived from an untrusted mmap'd header.
+    return logical_size / block_size + (logical_size % block_size != 0 ? 1 : 0);
 }
 
 size_t max_compressed_size(size_t n) { return ZSTD_compressBound(n); }
