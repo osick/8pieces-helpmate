@@ -136,3 +136,31 @@ set_tests_properties(cli_compact_future_fixture_write PROPERTIES DEPENDS cli_com
 set_tests_properties(cli_compact_future PROPERTIES
     PASS_REGULAR_EXPRESSION "error:.*newer helpmate"
     DEPENDS cli_compact_future_fixture_write)
+
+# v0.7.5: `gen --compress` writes block-compressed tables directly, and
+# `compact --compress` rewrites already-raw tables in place. cli_probe_compressed
+# is the one that matters: it proves the golden position gives the same answer
+# through a compressed table as cli_probe gets through a raw one.
+set(COMPRESS_TT ${CMAKE_BINARY_DIR}/compress_tables)
+add_test(NAME cli_gen_compressed COMMAND helpmate gen KQvk --tables ${COMPRESS_TT} --compress)
+add_test(NAME cli_probe_compressed COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables ${COMPRESS_TT})
+add_test(NAME cli_compact_compress_noop COMMAND helpmate compact ${COMPRESS_TT} --compress)
+set_tests_properties(cli_probe_compressed PROPERTIES
+    PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_gen_compressed)
+set_tests_properties(cli_compact_compress_noop PROPERTIES
+    PASS_REGULAR_EXPRESSION "already compressed|0 rewritten" DEPENDS cli_gen_compressed)
+
+# The one-hour skip is the load-bearing part of `compact --compress`: a long
+# generation run may be writing into the target directory right now, and
+# rewriting a table mid-write would corrupt it. Prove both halves -- a
+# fresh-mtime table is skipped and left byte-for-byte untouched, and a
+# 2-hour-old one is actually converted and shrinks -- with a real mtime
+# (`touch -d`), not just inspection of the code.
+set(COMPRESS_SKIP_TT ${CMAKE_BINARY_DIR}/compress_skip_tables)
+add_test(NAME cli_compact_compress_skip_recent COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         -DMK_LEGACY_TABLE=$<TARGET_FILE:mk_legacy_table>
+         -DDIR=${COMPRESS_SKIP_TT}
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_compress_skip_recent.cmake)
+set_tests_properties(cli_compact_compress_skip_recent PROPERTIES
+    PASS_REGULAR_EXPRESSION "one-hour skip verified")

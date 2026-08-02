@@ -6,6 +6,7 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -18,6 +19,122 @@
 namespace hm {
 
 constexpr uint8_t kFlagAllUnsolvable = 0x01;
+
+namespace {
+// compress_existing streams sequentially through a read-only mmap of the
+// source table and never revisits a byte. Left alone, the pages it has
+// already read stay resident (clean page-cache pages have no reason to be
+// reclaimed until something else needs the memory), so on a box with plenty
+// of free RAM -- exactly where this would go unnoticed -- the OS-reported
+// RSS climbs to the whole file's size even though no buffer proportional to
+// plane_size was ever allocated. MADV_DONTNEED tells the kernel those pages
+// really are done with: they drop from this process's resident set now,
+// unconditionally, not only under memory pressure. That is what keeps a
+// six-piece conversion's actual footprint bounded rather than merely
+// hoping the machine happens to be tight on memory when it runs.
+class SequentialPageReleaser {
+public:
+    SequentialPageReleaser(const uint8_t* base, uint64_t total) : base_(base), total_(total) {
+        madvise(const_cast<uint8_t*>(base_), static_cast<size_t>(total_), MADV_SEQUENTIAL);
+        // madvise() requires a page-aligned address. `base` is the payload
+        // pointer -- an arbitrary byte offset into the mapping, right after
+        // the header and JSON, not the mapping's own page-aligned start -- so
+        // aligning `released_` (a byte count from `base`) to a multiple of
+        // the page size would still leave `base + released_` misaligned in
+        // absolute terms whenever that header+JSON prefix isn't itself a
+        // multiple of the page size. Round the first release point up to the
+        // next page boundary in ABSOLUTE address terms instead; every
+        // `advance()` after that stays on an absolute page boundary too,
+        // since it only ever adds page-sized increments.
+        const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+        const uintptr_t addr = reinterpret_cast<uintptr_t>(base_);
+        const uintptr_t aligned_addr = ((addr + page - 1) / page) * page;
+        released_ = aligned_addr - addr;
+    }
+    // Releases whole pages fully before `consumed_end` (exclusive), in chunks
+    // -- not one madvise() per block -- so the syscall overhead stays
+    // negligible against zstd's per-block work.
+    void advance(uint64_t consumed_end) {
+        static constexpr uint64_t kChunk = 8 * 1024 * 1024;  // release in 8 MiB steps
+        const uintptr_t page = static_cast<uintptr_t>(sysconf(_SC_PAGESIZE));
+        const uintptr_t base_addr = reinterpret_cast<uintptr_t>(base_);
+        const uintptr_t consumed_addr = base_addr + consumed_end;
+        const uintptr_t aligned_end_addr = (consumed_addr / page) * page;  // floor: never a partial page
+        if (aligned_end_addr <= base_addr + released_) return;
+        const uint64_t aligned_end = aligned_end_addr - base_addr;
+        if (aligned_end - released_ < kChunk) return;
+        madvise(const_cast<uint8_t*>(base_) + released_, static_cast<size_t>(aligned_end - released_),
+                MADV_DONTNEED);
+        released_ = aligned_end;
+    }
+
+private:
+    const uint8_t* base_;
+    uint64_t total_;
+    uint64_t released_ = 0;
+};
+}  // namespace
+
+namespace {
+// Shared by write_compressed and compress_existing: writes the header, JSON,
+// block index and compressed payload to "<path>.tmp", then atomic-renames it
+// over `path`. `block_at(begin, len)` must return a pointer to `len` valid
+// bytes for the block starting at logical offset `begin`, valid until the
+// call returns.
+//
+// write_compressed's four planes are separate buffers, so its block_at
+// gathers each block into a small reusable scratch buffer (block_size
+// bytes) -- unchanged from before this refactor. compress_existing's source
+// table is a raw file's mmap, where the four planes already sit contiguous
+// in the mapping; its block_at hands back a pointer straight into that
+// mapping, so no plane is ever buffered and memory stays O(block_size), not
+// O(plane_size).
+template <class BlockAt>
+void write_block_compressed(const std::string& path, const TableHeader& hdr, const std::string& meta_json,
+                            uint64_t logical_size, uint32_t block_size, int level, BlockAt block_at) {
+    if (block_size == 0) throw std::runtime_error("write_block_compressed: block_size is zero");
+    const uint64_t nblocks = block_count(logical_size, block_size);
+
+    std::string tmp_path = path + ".tmp";
+    try {
+        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
+        if (!out) throw std::runtime_error("write_block_compressed: cannot open " + tmp_path);
+        out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
+        out.write(meta_json.data(), static_cast<std::streamsize>(meta_json.size()));
+
+        // Reserve the index, then rewrite it once the offsets are known: a
+        // one-pass writer would have to buffer the whole compressed payload.
+        const std::streampos index_pos = out.tellp();
+        std::vector<uint64_t> offsets(nblocks + 1, 0);
+        out.write(reinterpret_cast<const char*>(&nblocks), sizeof(nblocks));
+        out.write(reinterpret_cast<const char*>(offsets.data()),
+                  static_cast<std::streamsize>(offsets.size() * sizeof(uint64_t)));
+
+        uint64_t written = 0;
+        for (uint64_t b = 0; b < nblocks; ++b) {
+            const uint64_t begin = b * block_size;
+            const size_t len = static_cast<size_t>(std::min<uint64_t>(block_size, logical_size - begin));
+            const uint8_t* src = block_at(begin, len);
+            auto packed = compress_block(src, len, level);
+            offsets[b] = written;
+            out.write(reinterpret_cast<const char*>(packed.data()),
+                      static_cast<std::streamsize>(packed.size()));
+            written += packed.size();
+        }
+        offsets[nblocks] = written;
+
+        out.seekp(index_pos + static_cast<std::streamoff>(sizeof(uint64_t)));
+        out.write(reinterpret_cast<const char*>(offsets.data()),
+                  static_cast<std::streamsize>(offsets.size() * sizeof(uint64_t)));
+        if (!out) throw std::runtime_error("write_block_compressed: write failed for " + tmp_path);
+    } catch (...) {
+        std::error_code ec;
+        std::filesystem::remove(tmp_path, ec);  // best-effort cleanup; ignore removal errors
+        throw;
+    }
+    std::filesystem::rename(tmp_path, path);
+}
+}  // namespace
 
 void TableWriter::write(const std::string& path, const Material& mat, uint64_t plane_size, uint8_t max_dtm,
                         const std::string& meta_json, const uint8_t* dtm_w, const uint8_t* dtm_b,
@@ -109,54 +226,62 @@ void TableWriter::write_compressed(const std::string& path, const Material& mat,
     hdr.json_len = static_cast<uint32_t>(meta_json.size());
 
     // The four planes are one logical byte range, in the same order the raw
-    // layout uses: dtm_w, dtm_b, cnt_w, cnt_b.
+    // layout uses: dtm_w, dtm_b, cnt_w, cnt_b. They are four separate
+    // buffers, so each block is gathered into a small reusable scratch
+    // buffer -- unlike compress_existing below, whose source planes are
+    // already contiguous in its mmap and need no gathering at all.
     const uint8_t* planes[4] = {dtm_w, dtm_b, cnt_w, cnt_b};
     const uint64_t logical = 4 * plane_size;
-    const uint64_t nblocks = block_count(logical, block_size);
+    std::vector<uint8_t> scratch(block_size);
+    write_block_compressed(path, hdr, meta_json, logical, block_size, level,
+                           [&](uint64_t begin, size_t len) -> const uint8_t* {
+                               for (size_t i = 0; i < len; ++i) {
+                                   const uint64_t o = begin + i;
+                                   scratch[i] = planes[o / plane_size][o % plane_size];
+                               }
+                               return scratch.data();
+                           });
+}
 
-    std::string tmp_path = path + ".tmp";
-    try {
-        std::ofstream out(tmp_path, std::ios::binary | std::ios::trunc);
-        if (!out) throw std::runtime_error("write_compressed: cannot open " + tmp_path);
-        out.write(reinterpret_cast<const char*>(&hdr), sizeof(hdr));
-        out.write(meta_json.data(), static_cast<std::streamsize>(meta_json.size()));
+void TableWriter::compress_existing(const std::string& path, const TableReader& src, uint32_t block_size,
+                                    int level) {
+    const uint8_t* payload = src.raw_payload();
+    if (!payload)
+        throw std::runtime_error(
+            "compress_existing: source table has no raw payload to stream "
+            "(it is already compressed, or a marker with no payload at all)");
+    auto mat = Material::parse(src.material_name());
+    if (!mat)
+        throw std::runtime_error("compress_existing: unparseable material in source table: " +
+                                 src.material_name());
 
-        // Reserve the index, then rewrite it once the offsets are known: a
-        // one-pass writer would have to buffer the whole compressed payload.
-        const std::streampos index_pos = out.tellp();
-        std::vector<uint64_t> offsets(nblocks + 1, 0);
-        out.write(reinterpret_cast<const char*>(&nblocks), sizeof(nblocks));
-        out.write(reinterpret_cast<const char*>(offsets.data()),
-                  static_cast<std::streamsize>(offsets.size() * sizeof(uint64_t)));
+    TableHeader hdr{};
+    std::memcpy(hdr.magic, "HM8P", 4);
+    hdr.version = 3;
+    hdr.encoding = kEncodingBlocks;
+    hdr.symmetry = mat->has_pawns() ? 0 : 1;
+    std::memset(hdr.material, 0, sizeof(hdr.material));
+    std::string name = mat->name();
+    std::memcpy(hdr.material, name.data(), std::min(name.size(), sizeof(hdr.material)));
+    hdr.plane_size = src.plane_size();
+    hdr.max_dtm = src.max_dtm();
+    hdr.block_size = block_size;
+    hdr.codec = kCodecZstd;
+    std::memset(hdr.reserved, 0, sizeof(hdr.reserved));
+    std::string meta_json = src.meta_json();
+    hdr.json_len = static_cast<uint32_t>(meta_json.size());
 
-        std::vector<uint8_t> scratch(block_size);
-        uint64_t written = 0;
-        for (uint64_t b = 0; b < nblocks; ++b) {
-            const uint64_t begin = b * block_size;
-            const size_t len = static_cast<size_t>(std::min<uint64_t>(block_size, logical - begin));
-            // Gather the block, which may straddle a plane boundary.
-            for (size_t i = 0; i < len; ++i) {
-                const uint64_t o = begin + i;
-                scratch[i] = planes[o / plane_size][o % plane_size];
-            }
-            auto packed = compress_block(scratch.data(), len, level);
-            offsets[b] = written;
-            out.write(reinterpret_cast<const char*>(packed.data()),
-                      static_cast<std::streamsize>(packed.size()));
-            written += packed.size();
-        }
-        offsets[nblocks] = written;
-
-        out.seekp(index_pos + static_cast<std::streamoff>(sizeof(uint64_t)));
-        out.write(reinterpret_cast<const char*>(offsets.data()),
-                  static_cast<std::streamsize>(offsets.size() * sizeof(uint64_t)));
-        if (!out) throw std::runtime_error("write_compressed: write failed for " + tmp_path);
-    } catch (...) {
-        std::error_code ec;
-        std::filesystem::remove(tmp_path, ec);
-        throw;
-    }
-    std::filesystem::rename(tmp_path, path);
+    // The source mapping stays valid for the whole call (TableReader is
+    // borrowed, not moved), so `payload` is safe to read from throughout --
+    // including after the temp file is renamed over `path`, since the
+    // source and destination are different files until that rename.
+    const uint64_t logical = 4 * src.plane_size();
+    SequentialPageReleaser releaser(payload, logical);
+    write_block_compressed(path, hdr, meta_json, logical, block_size, level,
+                           [&](uint64_t begin, size_t /*len*/) -> const uint8_t* {
+                               releaser.advance(begin);  // drop pages fully behind us
+                               return payload + begin;   // straight into the source mmap; no copy
+                           });
 }
 
 TableReader::TableReader(TableReader&& other) noexcept
@@ -387,5 +512,11 @@ bool TableReader::all_unsolvable() const {
 }
 
 bool TableReader::is_compressed() const { return block_size_ != 0; }
+
+const uint8_t* TableReader::raw_payload() const {
+    if (block_size_ != 0) return nullptr;  // compressed: not a flat byte range
+    if (all_unsolvable()) return nullptr;  // marker: no payload follows the header/JSON at all
+    return base_ + sizeof(TableHeader) + json_len_;
+}
 
 }  // namespace hm

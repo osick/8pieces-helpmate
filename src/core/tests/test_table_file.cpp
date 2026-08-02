@@ -443,3 +443,97 @@ TEST_CASE("block_count is overflow-free by construction") {
     CHECK(block_count(65536, 65536) == 1ull);
     CHECK(block_count(65537, 65536) == 2ull);
 }
+
+TEST_CASE("a table from a newer helpmate reports UnsupportedVersion, not Unreadable") {
+    // The reason compressed tables carry version 3 as well as encoding 2:
+    // older binaries validate `encoding` but only `version` produces the
+    // actionable "upgrade this build" message.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_blockfmt_future";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 512;
+    std::vector<uint8_t> v(ps, 1);
+    std::string p = (dir / "t.hm").string();
+    TableWriter::write_compressed(p, mat, ps, 1, "{}", v.data(), v.data(), v.data(), v.data());
+
+    // Bump the on-disk version past what this build knows.
+    std::fstream f(p, std::ios::binary | std::ios::in | std::ios::out);
+    uint32_t future = 99;
+    f.seekp(4);
+    f.write(reinterpret_cast<const char*>(&future), sizeof(future));
+    f.close();
+
+    TableReader::OpenError err = TableReader::OpenError::None;
+    auto r = TableReader::open(p, &err);
+    CHECK_FALSE(r.has_value());
+    CHECK(err == TableReader::OpenError::UnsupportedVersion);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("compress_existing streams a raw table's payload without buffering the planes") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_compress_existing";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 3000;
+    std::vector<uint8_t> dw(ps), db(ps), cw(ps), cb(ps);
+    for (uint64_t i = 0; i < ps; ++i) {
+        dw[i] = static_cast<uint8_t>(i % 200);
+        db[i] = static_cast<uint8_t>((i * 3) % 200);
+        cw[i] = static_cast<uint8_t>(i % 5);
+        cb[i] = static_cast<uint8_t>((i + 1) % 5);
+    }
+    std::string raw = (dir / "raw.hm").string();
+    TableWriter::write(raw, mat, ps, 17, "{\"k\":1}", dw.data(), db.data(), cw.data(), cb.data());
+
+    auto src = TableReader::open(raw);
+    REQUIRE(src.has_value());
+    CHECK(src->raw_payload() != nullptr);
+
+    std::string out = (dir / "out.hm").string();
+    TableWriter::compress_existing(out, *src);
+
+    auto z = TableReader::open(out);
+    REQUIRE(z.has_value());
+    CHECK(z->is_compressed());
+    CHECK(z->raw_payload() == nullptr);  // compressed: not a flat byte range
+    CHECK(z->material_name() == "KQvk");
+    CHECK(z->plane_size() == ps);
+    CHECK(z->max_dtm() == 17);
+    CHECK(z->meta_json() == "{\"k\":1}");
+    for (uint64_t i = 0; i < ps; ++i)
+        for (Color stm : {Color::White, Color::Black}) {
+            ValuePair a = src->get(stm, i), b = z->get(stm, i);
+            CHECK(a.dtm == b.dtm);
+            CHECK(a.count == b.count);
+        }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("compress_existing refuses a compressed table and a marker table") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_compress_existing_refuse";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 100;
+    std::vector<uint8_t> v(ps, 1);
+
+    std::string zip = (dir / "zip.hm").string();
+    TableWriter::write_compressed(zip, mat, ps, 1, "{}", v.data(), v.data(), v.data(), v.data());
+    auto z = TableReader::open(zip);
+    REQUIRE(z.has_value());
+    CHECK(z->raw_payload() == nullptr);
+    CHECK_THROWS_AS(TableWriter::compress_existing((dir / "zip2.hm").string(), *z), std::runtime_error);
+
+    std::string marker = (dir / "marker.hm").string();
+    TableWriter::write_unsolvable(marker, mat, ps, "{}");
+    auto m = TableReader::open(marker);
+    REQUIRE(m.has_value());
+    CHECK(m->raw_payload() == nullptr);
+    CHECK_THROWS_AS(TableWriter::compress_existing((dir / "marker2.hm").string(), *m), std::runtime_error);
+    fs::remove_all(dir);
+}

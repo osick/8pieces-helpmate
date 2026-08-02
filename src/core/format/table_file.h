@@ -36,6 +36,8 @@ struct TableHeader {
 static_assert(sizeof(TableHeader) == 64);
 // payload after JSON: 4 planes of plane_size bytes each: dtm_wtm, dtm_btm, cnt_wtm, cnt_btm
 
+class TableReader;  // defined below; TableWriter::compress_existing takes one by reference
+
 struct TableWriter {  // writes "<path>.tmp" then atomic-renames to path
     static void write(const std::string& path, const Material&, uint64_t plane_size, uint8_t max_dtm,
                       const std::string& meta_json, const uint8_t* dtm_w, const uint8_t* dtm_b,
@@ -52,6 +54,12 @@ struct TableWriter {  // writes "<path>.tmp" then atomic-renames to path
                                  uint8_t max_dtm, const std::string& meta_json, const uint8_t* dtm_w,
                                  const uint8_t* dtm_b, const uint8_t* cnt_w, const uint8_t* cnt_b,
                                  uint32_t block_size = kDefaultBlockSize, int level = kDefaultZstdLevel);
+
+    // Rewrites a RAW table as block-compressed, streaming off its mapping at
+    // constant memory. Buffering the planes would need 4 * plane_size bytes,
+    // which is 31 GB for a six-piece table.
+    static void compress_existing(const std::string& path, const TableReader& src,
+                                  uint32_t block_size = kDefaultBlockSize, int level = kDefaultZstdLevel);
 };
 
 class TableReader {  // mmap; movable, not copyable
@@ -75,6 +83,12 @@ public:
     std::string meta_json() const;
     bool all_unsolvable() const;
     bool is_compressed() const;
+
+    // Pointer to the first of the 4 contiguous plane_size-byte planes (dtm_w,
+    // dtm_b, cnt_w, cnt_b), for streaming a raw table's payload without
+    // copying it. nullptr for a compressed table (its payload isn't a flat
+    // byte range) and for a marker (it has no payload at all).
+    const uint8_t* raw_payload() const;
 
 private:
     TableReader() = default;
