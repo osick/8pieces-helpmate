@@ -313,11 +313,9 @@ void TableWriter::write_compressed(const std::string& path, const Material& mat,
 
 void TableWriter::compress_existing(const std::string& path, const TableReader& src, uint32_t block_size,
                                     int level) {
-    const uint8_t* payload = src.raw_payload();
-    if (!payload)
+    if (src.all_unsolvable())
         throw std::runtime_error(
-            "compress_existing: source table has no raw payload to stream "
-            "(it is already compressed, or a marker with no payload at all)");
+            "compress_existing: source table is a marker with no payload to stream at all");
     auto mat = Material::parse(src.material_name());
     if (!mat)
         throw std::runtime_error("compress_existing: unparseable material in source table: " +
@@ -339,17 +337,32 @@ void TableWriter::compress_existing(const std::string& path, const TableReader& 
     std::string meta_json = src.meta_json();
     hdr.json_len = static_cast<uint32_t>(meta_json.size());
 
-    // The source mapping stays valid for the whole call (TableReader is
-    // borrowed, not moved), so `payload` is safe to read from throughout --
-    // including after the temp file is renamed over `path`, since the
-    // source and destination are different files until that rename.
     const uint64_t logical = 4 * src.plane_size();
-    SequentialPageReleaser releaser(payload, logical);
-    write_block_compressed(path, hdr, meta_json, logical, block_size, level,
-                           [&](uint64_t begin, size_t /*len*/) -> const uint8_t* {
-                               releaser.advance(begin);  // drop pages fully behind us
-                               return payload + begin;   // straight into the source mmap; no copy
-                           });
+    const uint8_t* payload = src.raw_payload();  // non-null only for a raw (uncompressed) source
+    if (payload) {
+        // The source mapping stays valid for the whole call (TableReader is
+        // borrowed, not moved), so `payload` is safe to read from throughout
+        // -- including after the temp file is renamed over `path`, since the
+        // source and destination are different files until that rename.
+        SequentialPageReleaser releaser(payload, logical);
+        write_block_compressed(path, hdr, meta_json, logical, block_size, level,
+                               [&](uint64_t begin, size_t /*len*/) -> const uint8_t* {
+                                   releaser.advance(begin);  // drop pages fully behind us
+                                   return payload + begin;   // straight into the source mmap; no copy
+                               });
+    } else {
+        // Re-blocking an already-compressed source: no flat payload to point
+        // into, so stream through read_range instead, which decompresses
+        // each covering source block through the reader's own bounded cache
+        // (a few MB) rather than a decompress-to-disk round trip or
+        // buffering the whole table.
+        std::vector<uint8_t> scratch(block_size);
+        write_block_compressed(path, hdr, meta_json, logical, block_size, level,
+                               [&](uint64_t begin, size_t len) -> const uint8_t* {
+                                   src.read_range(begin, len, scratch.data());
+                                   return scratch.data();
+                               });
+    }
 }
 
 TableReader::TableReader(TableReader&& other) noexcept
@@ -580,6 +593,48 @@ uint8_t TableReader::byte_at(uint64_t logical) const {
                            [&](uint8_t* dst, size_t n) { decompress_block(src, clen, dst, n); });
 }
 
+void TableReader::read_range(uint64_t logical_offset, size_t len, uint8_t* dst) const {
+    if (len == 0) return;
+    const uint64_t total = 4 * ps_;
+    // Same discipline as get()'s bounds check: `logical_offset`/`len` come
+    // from a caller's own arithmetic (e.g. compress_existing streaming block
+    // by block), and reading past the logical payload would otherwise read
+    // off the end of the mapping or, since the addition can wrap, anywhere.
+    if (logical_offset > total || len > total - logical_offset)
+        throw std::out_of_range("TableReader::read_range: [" + std::to_string(logical_offset) + ", " +
+                                std::to_string(logical_offset + len) + ") out of range (logical size " +
+                                std::to_string(total) + ")");
+    if (block_size_ == 0) {  // raw: one memcpy straight off the mapping
+        const uint8_t* pay = base_ + sizeof(TableHeader) + json_len_;
+        std::memcpy(dst, pay + logical_offset, len);
+        return;
+    }
+    // Compressed: walk the blocks the range overlaps, decompressing each one
+    // exactly once (per call) through this reader's own cache and copying
+    // out only the overlapping span -- never a byte-at-a-time loop, which
+    // would take the cache mutex len times instead of (at most) once per
+    // block touched.
+    uint64_t pos = logical_offset;
+    size_t remaining = len;
+    uint8_t* out = dst;
+    while (remaining > 0) {
+        const uint64_t b = pos / block_size_;
+        const uint64_t begin = b * block_size_;
+        const size_t block_len = static_cast<size_t>(std::min<uint64_t>(block_size_, total - begin));
+        const size_t offset_in_block = static_cast<size_t>(pos - begin);
+        const size_t take = std::min(remaining, block_len - offset_in_block);
+        const uint64_t off_b = load_u64(offsets_ + b * sizeof(uint64_t));
+        const uint64_t off_b1 = load_u64(offsets_ + (b + 1) * sizeof(uint64_t));
+        const uint8_t* src = blocks_ + off_b;
+        const size_t clen = static_cast<size_t>(off_b1 - off_b);
+        cache_->read_range(b, offset_in_block, take, block_len, out,
+                           [&](uint8_t* d, size_t n) { decompress_block(src, clen, d, n); });
+        out += take;
+        pos += take;
+        remaining -= take;
+    }
+}
+
 uint64_t TableReader::plane_size() const { return ps_; }
 
 uint8_t TableReader::max_dtm() const { return reinterpret_cast<const TableHeader*>(base_)->max_dtm; }
@@ -598,6 +653,8 @@ bool TableReader::all_unsolvable() const {
 }
 
 bool TableReader::is_compressed() const { return block_size_ != 0; }
+
+uint32_t TableReader::block_size() const { return block_size_; }
 
 const uint8_t* TableReader::raw_payload() const {
     if (block_size_ != 0) return nullptr;  // compressed: not a flat byte range

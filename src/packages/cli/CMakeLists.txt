@@ -164,3 +164,44 @@ add_test(NAME cli_compact_compress_skip_recent COMMAND ${CMAKE_COMMAND}
          -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_compress_skip_recent.cmake)
 set_tests_properties(cli_compact_compress_skip_recent PROPERTIES
     PASS_REGULAR_EXPRESSION "one-hour skip verified")
+
+# --block-size validation: below the 4 KiB floor and above kMaxBlockSize (16
+# MiB = 16384 KiB) must both be rejected before anything is generated.
+add_test(NAME cli_block_size_too_small COMMAND helpmate gen KQvk --tables ${CLI_TT} --compress --block-size 1)
+add_test(NAME cli_block_size_too_big COMMAND helpmate gen KQvk --tables ${CLI_TT} --compress --block-size 20000)
+add_test(NAME cli_block_size_zero COMMAND helpmate gen KQvk --tables ${CLI_TT} --compress --block-size 0)
+set_tests_properties(cli_block_size_too_small PROPERTIES PASS_REGULAR_EXPRESSION "error.*--block-size")
+set_tests_properties(cli_block_size_too_big PROPERTIES PASS_REGULAR_EXPRESSION "error.*--block-size")
+set_tests_properties(cli_block_size_zero PROPERTIES PASS_REGULAR_EXPRESSION "error.*--block-size")
+
+# Re-blocking: compact --compress must convert an already-compressed table to
+# a DIFFERENT block size in place (the trap this whole task closes -- a
+# tunable block size must not become a "regenerate from scratch" trap), stay
+# a true no-op at the SAME block size, and the reader must answer identically
+# after the conversion.
+set(REBLOCK_TT ${CMAKE_BINARY_DIR}/reblock_tables)
+# `gen` leaves existing files alone (tested deliberately elsewhere), so a
+# re-run of this suite against a build dir left over from a previous run
+# would find KQvk.hm already at the target block size and never exercise the
+# re-block path at all. Force a clean directory every time instead of relying
+# on ctest being run exactly once per build.
+add_test(NAME cli_gen_reblock_fixture_clean COMMAND ${CMAKE_COMMAND} -E rm -rf ${REBLOCK_TT})
+add_test(NAME cli_gen_reblock_source COMMAND helpmate gen KQvk --tables ${REBLOCK_TT} --compress --block-size 4)
+set_tests_properties(cli_gen_reblock_source PROPERTIES DEPENDS cli_gen_reblock_fixture_clean)
+# compact --compress skips anything written in the last hour (see
+# verify_compress_skip_recent.cmake above) -- gen just wrote these, so
+# back-date their mtimes past that window before exercising the re-block
+# path, same idiom as the skip-recent test.
+add_test(NAME cli_gen_reblock_source_age COMMAND touch -d "2 hours ago" ${REBLOCK_TT}/KQvk.hm ${REBLOCK_TT}/Kvk.hm)
+add_test(NAME cli_compact_reblock COMMAND helpmate compact ${REBLOCK_TT} --compress --block-size 8)
+add_test(NAME cli_compact_reblock_noop COMMAND helpmate compact ${REBLOCK_TT} --compress --block-size 8)
+add_test(NAME cli_probe_reblocked COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables ${REBLOCK_TT})
+set_tests_properties(cli_gen_reblock_source_age PROPERTIES DEPENDS cli_gen_reblock_source)
+set_tests_properties(cli_compact_reblock PROPERTIES
+    PASS_REGULAR_EXPRESSION "re-blocked KQvk|1 rewritten \\(0 compressed, 1 re-blocked\\)"
+    DEPENDS cli_gen_reblock_source_age)
+set_tests_properties(cli_compact_reblock_noop PROPERTIES
+    PASS_REGULAR_EXPRESSION "already compressed at this block size|0 rewritten"
+    DEPENDS cli_compact_reblock)
+set_tests_properties(cli_probe_reblocked PROPERTIES
+    PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_compact_reblock_noop)

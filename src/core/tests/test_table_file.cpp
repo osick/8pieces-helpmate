@@ -604,21 +604,15 @@ TEST_CASE("compress_existing spans multiple blocks") {
     fs::remove_all(dir);
 }
 
-TEST_CASE("compress_existing refuses a compressed table and a marker table") {
+TEST_CASE("compress_existing refuses a marker table") {
+    // A marker has no payload at all -- unlike a compressed source (see the
+    // re-blocking test below), there is nothing read_range could stream.
     namespace fs = std::filesystem;
-    fs::path dir = fs::temp_directory_path() / "hm_compress_existing_refuse";
+    fs::path dir = fs::temp_directory_path() / "hm_compress_existing_refuse_marker";
     fs::remove_all(dir);
     fs::create_directories(dir);
     Material mat = Material::parse("KQvk").value();
     const uint64_t ps = 100;
-    std::vector<uint8_t> v(ps, 1);
-
-    std::string zip = (dir / "zip.hm").string();
-    TableWriter::write_compressed(zip, mat, ps, 1, "{}", v.data(), v.data(), v.data(), v.data());
-    auto z = TableReader::open(zip);
-    REQUIRE(z.has_value());
-    CHECK(z->raw_payload() == nullptr);
-    CHECK_THROWS_AS(TableWriter::compress_existing((dir / "zip2.hm").string(), *z), std::runtime_error);
 
     std::string marker = (dir / "marker.hm").string();
     TableWriter::write_unsolvable(marker, mat, ps, "{}");
@@ -626,5 +620,116 @@ TEST_CASE("compress_existing refuses a compressed table and a marker table") {
     REQUIRE(m.has_value());
     CHECK(m->raw_payload() == nullptr);
     CHECK_THROWS_AS(TableWriter::compress_existing((dir / "marker2.hm").string(), *m), std::runtime_error);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("compress_existing re-blocks an already-compressed table to a different block size") {
+    // The trap this closes: before read_range existed, compress_existing
+    // called src.raw_payload(), which is nullptr for a compressed source, so
+    // moving a table from one block size to another required regenerating it
+    // from scratch -- hours for a 5-piece table, over a day for a 6-piece.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_reblock_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 50000;  // 4*ps = 200000 bytes: several blocks at both 65536 and 4096
+    std::vector<uint8_t> dw(ps), db(ps), cw(ps), cb(ps);
+    for (uint64_t i = 0; i < ps; ++i) {
+        dw[i] = static_cast<uint8_t>(i % 200);
+        db[i] = static_cast<uint8_t>((i * 3) % 200);
+        cw[i] = static_cast<uint8_t>(i % 5);
+        cb[i] = static_cast<uint8_t>((i + 1) % 5);
+    }
+    std::string big = (dir / "big.hm").string();
+    TableWriter::write_compressed(big, mat, ps, 17, "{\"k\":1}", dw.data(), db.data(), cw.data(), cb.data(),
+                                  65536);
+
+    auto src = TableReader::open(big);
+    REQUIRE(src.has_value());
+    REQUIRE(src->is_compressed());
+    REQUIRE(src->block_size() == 65536u);
+    REQUIRE(src->raw_payload() == nullptr);  // confirms this path cannot use raw_payload
+
+    std::string small = (dir / "small.hm").string();
+    TableWriter::compress_existing(small, *src, 4096);  // a genuinely different block size
+
+    auto dst = TableReader::open(small);
+    REQUIRE(dst.has_value());
+    CHECK(dst->is_compressed());
+    CHECK(dst->block_size() == 4096u);
+    CHECK(dst->material_name() == "KQvk");
+    CHECK(dst->plane_size() == ps);
+    CHECK(dst->max_dtm() == 17);
+    CHECK(dst->meta_json() == "{\"k\":1}");
+    // Byte-identical DECOMPRESSED content at both block sizes -- re-blocking
+    // must never change what a probe reads, only how it is stored.
+    for (uint64_t i = 0; i < ps; ++i)
+        for (Color stm : {Color::White, Color::Black}) {
+            ValuePair a = src->get(stm, i), b = dst->get(stm, i);
+            CHECK(a.dtm == b.dtm);
+            CHECK(a.count == b.count);
+        }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("TableReader::read_range agrees with get() for both raw and compressed tables") {
+    // read_range must never be a byte-at-a-time loop over the cache (that
+    // would take the cache mutex once per byte); this pins the actual
+    // contract -- an arbitrary [offset, offset+len) span, straddling block
+    // boundaries, matches what get() reports cell by cell.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_read_range_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 20000;  // 4*ps = 80000 bytes: multiple blocks at a small block size
+    std::vector<uint8_t> dw(ps), db(ps), cw(ps), cb(ps);
+    for (uint64_t i = 0; i < ps; ++i) {
+        dw[i] = static_cast<uint8_t>((i * 7) % 251);
+        db[i] = static_cast<uint8_t>((i * 11) % 251);
+        cw[i] = static_cast<uint8_t>(i % 5);
+        cb[i] = static_cast<uint8_t>((i + 2) % 5);
+    }
+    std::string raw = (dir / "raw.hm").string();
+    TableWriter::write(raw, mat, ps, 9, "{}", dw.data(), db.data(), cw.data(), cb.data());
+    std::string zip = (dir / "zip.hm").string();
+    TableWriter::write_compressed(zip, mat, ps, 9, "{}", dw.data(), db.data(), cw.data(), cb.data(), 4096);
+
+    auto r = TableReader::open(raw);
+    auto z = TableReader::open(zip);
+    REQUIRE(r.has_value());
+    REQUIRE(z.has_value());
+    REQUIRE_FALSE(r->is_compressed());
+    REQUIRE(z->is_compressed());
+
+    const uint64_t total = 4 * ps;
+    // A handful of ranges: from the start, straddling a block boundary
+    // (4096), a large span crossing many blocks, and right up to the end.
+    struct Range {
+        uint64_t begin;
+        size_t len;
+    };
+    std::vector<Range> ranges = {{0, 10}, {4090, 20}, {0, total}, {total - 5, 5}, {12345, 9000}};
+    for (auto& rg : ranges) {
+        std::vector<uint8_t> from_raw(rg.len), from_zip(rg.len);
+        r->read_range(rg.begin, rg.len, from_raw.data());
+        z->read_range(rg.begin, rg.len, from_zip.data());
+        CHECK(from_raw == from_zip);
+        // Cross-check a few bytes in the span directly against get()'s own
+        // indexing (dtm_w, dtm_b, cnt_w, cnt_b planes in that order).
+        for (uint64_t off : {uint64_t(0), rg.len / 2, rg.len - 1}) {
+            uint64_t logical = rg.begin + off;
+            uint64_t plane = logical / ps, cell = logical % ps;
+            uint8_t expected;
+            if (plane == 0) expected = r->get(Color::White, cell).dtm;
+            else if (plane == 1) expected = r->get(Color::Black, cell).dtm;
+            else if (plane == 2) expected = r->get(Color::White, cell).count;
+            else expected = r->get(Color::Black, cell).count;
+            CHECK(from_raw[off] == expected);
+        }
+    }
+    CHECK_THROWS_AS(r->read_range(total - 1, 5, nullptr), std::out_of_range);
+    CHECK_THROWS_AS(z->read_range(total - 1, 5, nullptr), std::out_of_range);
     fs::remove_all(dir);
 }

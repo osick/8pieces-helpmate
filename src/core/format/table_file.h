@@ -14,7 +14,18 @@ constexpr uint8_t kEncodingRaw = 1;     // 4 contiguous byte planes
 constexpr uint8_t kEncodingBlocks = 2;  // block index + compressed blocks
 constexpr uint8_t kCodecNone = 0;
 constexpr uint8_t kCodecZstd = 1;
-constexpr uint32_t kDefaultBlockSize = 65536;  // 14.5x at zstd level 3; see the spec
+// 16 KiB/level 3: measured 11.4x ratio at ~11us/block miss cost, chosen over
+// the format's original 64 KiB/14.5x default because `helpmate mine`'s
+// --count/--starts path probes child positions effectively at random, so on
+// a real table nearly every probe misses the reader's decompressed-block
+// cache and pays a full block decompress for one byte -- measured 5x slower
+// end to end at 64 KiB on a 477 MB table. Smaller blocks shrink that miss
+// cost at some ratio cost; see docs/USAGE.md's Table format section for the
+// full measured trade-off (16 KiB vs 64 KiB) and tools/bench_compression.py
+// to reproduce it. A plain sequential scan or a single probe barely notices
+// block size (measured 9-14% either way) -- this default is chosen for the
+// random-access mining workload specifically.
+constexpr uint32_t kDefaultBlockSize = 16384;
 // Ceiling enforced at open(): block_size is retunable per file with no
 // version bump, so a crafted header can otherwise claim an arbitrary value.
 // The reader sizes its decompressed-block cache from block_size (see
@@ -62,9 +73,16 @@ struct TableWriter {  // writes "<path>.tmp" then atomic-renames to path
                                  const uint8_t* dtm_b, const uint8_t* cnt_w, const uint8_t* cnt_b,
                                  uint32_t block_size = kDefaultBlockSize, int level = kDefaultZstdLevel);
 
-    // Rewrites a RAW table as block-compressed, streaming off its mapping at
-    // constant memory. Buffering the planes would need 4 * plane_size bytes,
-    // which is 31 GB for a six-piece table.
+    // Rewrites a table (raw OR already block-compressed) as block-compressed
+    // at `block_size`, streaming rather than buffering the four planes --
+    // buffering would need 4 * plane_size bytes, which is 31 GB for a
+    // six-piece table. A raw source streams straight off its mmap at
+    // constant memory (SequentialPageReleaser drops consumed pages as it
+    // goes). A compressed source (re-blocking, e.g. moving a table from 64
+    // KiB to 16 KiB blocks without regenerating it) streams through
+    // TableReader::read_range instead, bounded by that reader's own
+    // decompressed-block cache (a few MB), never the whole table. Throws
+    // only for a marker table (no payload to stream at all).
     static void compress_existing(const std::string& path, const TableReader& src,
                                   uint32_t block_size = kDefaultBlockSize, int level = kDefaultZstdLevel);
 };
@@ -90,12 +108,27 @@ public:
     std::string meta_json() const;
     bool all_unsolvable() const;
     bool is_compressed() const;
+    // UNCOMPRESSED bytes per block for a compressed table; 0 for raw (there
+    // are no blocks) or a marker.
+    uint32_t block_size() const;
 
     // Pointer to the first of the 4 contiguous plane_size-byte planes (dtm_w,
     // dtm_b, cnt_w, cnt_b), for streaming a raw table's payload without
     // copying it. nullptr for a compressed table (its payload isn't a flat
     // byte range) and for a marker (it has no payload at all).
     const uint8_t* raw_payload() const;
+
+    // Copies `len` logical bytes starting at `logical_offset` into `dst`.
+    // Works for raw and block-compressed tables alike, so a converter can
+    // re-block a compressed table without a decompress-to-disk round trip.
+    // For a raw table this is a memcpy straight off the mapping; for a
+    // compressed one it decompresses each block the range overlaps -- once
+    // per block per call, through this reader's own bounded block cache, not
+    // once per byte -- and copies out the overlapping span. Sequential
+    // callers (e.g. compress_existing re-blocking) therefore decompress each
+    // source block exactly once as they stream forward, as long as the
+    // cache's capacity keeps up with how far ahead a caller reads.
+    void read_range(uint64_t logical_offset, size_t len, uint8_t* dst) const;
 
 private:
     TableReader() = default;

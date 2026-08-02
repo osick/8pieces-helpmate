@@ -11,22 +11,43 @@ bumps may change behavior).
 ### Added
 
 - **Block-compressed tables** (`version 3`, `encoding 2`): the four planes are
-  addressed as one logical byte range, cut into 64 KB blocks compressed
+  addressed as one logical byte range, cut into fixed-size blocks compressed
   independently with zstd, with a `uint64` offset index and a bounded cache of
   decompressed blocks. Random access is preserved — a probe decompresses one
-  block. Measured 14.5× on a 128 MB sample of a real 6-piece plane at the
-  default 64 KB/level 3. Realized whole-table numbers vary with table size:
-  a real 5-piece table (`KBvkbn`) went from 462 MiB to 50 MiB end to end
-  (9.22×), while a 146 KB `KQvk` only reaches 2.0× — small tables compress
-  poorly because fixed per-file overhead (header, JSON, a block index
-  covering just a couple of blocks) dominates a file too small to give zstd
-  much to work with.
+  block. Measured 14.5× on a 128 MB sample of a real 6-piece plane at 64
+  KB/level 3. Realized whole-table numbers vary with table size and block
+  size: a real 5-piece table (`KBvkbn`) went from 462 MiB to 50 MiB end to end
+  (9.22×) at 64 KB, while a 146 KB `KQvk` only reaches 2.0× — small tables
+  compress poorly because fixed per-file overhead (header, JSON, a block
+  index covering just a couple of blocks) dominates a file too small to give
+  zstd much to work with.
 - **`helpmate gen --compress`** and **`helpmate compact --compress`**. The
   converter rewrites tables already on disk one at a time via a temp file and
   atomic rename, and skips markers, already-compressed tables, and anything
   written in the last hour, so a running generation is never disturbed.
 - **libzstd** is now a build prerequisite (`libzstd-devel` on openSUSE,
   `libzstd-dev` on Debian/Ubuntu).
+- **`--block-size N`** on `gen --compress` and `compact --compress` (KiB;
+  4-16384, i.e. 4 KiB-16 MiB). Real-world use found `helpmate mine
+  --count`/`--starts` — which probes child positions effectively at random —
+  5× slower on a 64 KB-block compressed table than raw, so the default
+  (`kDefaultBlockSize`) is now **16 KiB**, down from 64 KiB. Reproducing the
+  regression on a real 462 MiB `KRvkbn` table measured raw 0.05s vs. ~0.32s
+  compressed at *both* 64 KiB and 16 KiB (~6.5×, no measurable improvement
+  from the smaller default in this reproduction — see docs/USAGE.md's Table
+  format section for the full numbers and an open question about why, plus
+  the isolated per-block-miss measurements, 16 KiB/level 3 = 11.4×/~11µs vs.
+  64 KiB/level 3 = 14.5×/~38µs, that motivated trying it).
+- **`compact --compress` can now re-block an already-compressed table** to a
+  different `--block-size` in place, streaming through the reader's own
+  bounded block cache rather than a decompress-to-disk round trip or
+  regenerating from scratch (`TableReader::read_range`, works for raw and
+  compressed sources alike). At the same block size it stays a true no-op.
+  Verified byte-identical to a direct raw→target-size compression (`md5sum`
+  match on a real table).
+- `helpmate.generate()` (Python bindings) gained `compress` and `block_size`
+  keyword arguments, matching the CLI's `--compress`/`--block-size` (in raw
+  bytes, not KiB — see docs/USAGE.md's Python API reference).
 
 ### Changed
 
@@ -35,6 +56,9 @@ bumps may change behavior).
 - Compressed tables carry `version = 3` as well as `encoding = 2`, so binaries
   released before this format report "written by a newer helpmate … upgrade
   this build" rather than "unreadable table".
+- The default block size for `gen --compress`/`compact --compress` is now 16
+  KiB (was 64 KiB); the golden fixture committed at 64 KiB is unaffected —
+  block size is read from each file's own header, not the build's default.
 
 ## [0.7.2] - 2026-08-01
 

@@ -37,6 +37,7 @@ struct GenOptions {
     bool force_ram = false;  // skip the pre-allocation RAM guard
     bool prune = true;       // skip slices that provably contain no helpmate
     bool compress = false;   // write block-compressed tables (v0.7.5+ readers only)
+    uint32_t block_size = kDefaultBlockSize;  // only used when compress is set
 };
 
 // ---- RAM guard --------------------------------------------------------------
