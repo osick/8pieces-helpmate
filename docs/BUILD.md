@@ -150,8 +150,8 @@ repeatedly runs the oversubscribed `KNvkqr` root-slice generation via
 `docs/ROADMAP.md` makes v0.7.5's block-compressed table format conditional on
 three measured numbers (compression ratio, warm-probe latency, generation
 wall-clock — see `docs/superpowers/specs/2026-08-02-block-compression-design.md`
-and `.superpowers/sdd/task-6-report.md` for the numbers that cleared the
-gate). Re-run it with:
+and the [Table format](USAGE.md#table-format) section of `docs/USAGE.md` for
+the numbers that cleared the gate). Re-run it with:
 
 ```bash
 taskset -c 0-3 python3 tools/bench_compression.py --material KQvk

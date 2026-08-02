@@ -14,7 +14,13 @@ bumps may change behavior).
   addressed as one logical byte range, cut into 64 KB blocks compressed
   independently with zstd, with a `uint64` offset index and a bounded cache of
   decompressed blocks. Random access is preserved — a probe decompresses one
-  block. Measured 14.5× on a real 6-piece plane.
+  block. Measured 14.5× on a 128 MB sample of a real 6-piece plane at the
+  default 64 KB/level 3. Realized whole-table numbers vary with table size:
+  a real 5-piece table (`KBvkbn`) went from 462 MiB to 50 MiB end to end
+  (9.22×), while a 146 KB `KQvk` only reaches 2.0× — small tables compress
+  poorly because fixed per-file overhead (header, JSON, a block index
+  covering just a couple of blocks) dominates a file too small to give zstd
+  much to work with.
 - **`helpmate gen --compress`** and **`helpmate compact --compress`**. The
   converter rewrites tables already on disk one at a time via a temp file and
   atomic rename, and skips markers, already-compressed tables, and anything

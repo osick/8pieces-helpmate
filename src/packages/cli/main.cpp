@@ -340,9 +340,20 @@ int cmd_compact_compress(const std::string& dir, bool dry) {
     std::cout << rewritten << " rewritten, " << would_rewrite << " would-rewrite (dry-run), " << already
               << " already compressed, " << markers << " marker(s) skipped, " << skipped_recent
               << " skipped (recently written)\n";
-    if (bytes_before)
-        std::cout << bytes_before / (1024 * 1024) << " MiB before -> " << bytes_after / (1024 * 1024)
-                  << " MiB after\n";
+    // bytes_after is only ever accumulated on an actual rewrite -- under
+    // --dry-run nothing is compressed, so it stays 0 regardless of how much
+    // would be reclaimed, and printing it as "0 MiB after" on a real corpus
+    // reads as "everything vanishes" rather than "not measured". Report only
+    // the "before" total in dry-run; the real "before -> after" line appears
+    // once files are actually rewritten.
+    if (bytes_before) {
+        if (dry) {
+            std::cout << bytes_before / (1024 * 1024) << " MiB before (after size unknown until rewritten)\n";
+        } else {
+            std::cout << bytes_before / (1024 * 1024) << " MiB before -> " << bytes_after / (1024 * 1024)
+                      << " MiB after\n";
+        }
+    }
     return 0;
 }
 

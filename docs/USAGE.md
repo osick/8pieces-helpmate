@@ -410,6 +410,12 @@ never disturbed. See [Table format](#table-format) above for the mechanics
 and the measured numbers; `--compress` and the marker-compaction mode above
 are mutually exclusive.
 
+Do not run `compact --compress` inside a Hugging Face dataset cache
+directory: rewriting a table's bytes in place changes its size and sha256
+without updating the local `manifest.json`, so every entry it touches goes
+stale and the next `pull` silently re-downloads those files instead of
+recognizing them as already present.
+
 This exists for tables generated **before v0.6.1**, when `gen` had no pruning
 and wrote a full-size table even for slices like `Kvk` where every cell is
 unsolvable. Since v0.6.1, `gen` already prunes such slices to markers at

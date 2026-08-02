@@ -513,6 +513,97 @@ TEST_CASE("compress_existing streams a raw table's payload without buffering the
     fs::remove_all(dir);
 }
 
+TEST_CASE("a header with an oversized block_size is rejected at open()") {
+    // A crafted header claiming an absurd block_size must not reach get():
+    // the reader sizes its decompressed-block cache off block_size (see
+    // kBlockCacheBytes in table_file.cpp), so an unbounded value is a memory
+    // exhaustion vector on the first probe if it were allowed through.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_block_size_huge_" + std::to_string(::getpid()));
+    fs::create_directories(dir);
+    std::string path = (dir / "t.hm").string();
+
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 100;
+    std::vector<uint8_t> v(ps, 1);
+    TableWriter::write_compressed(path, mat, ps, 1, "{}", v.data(), v.data(), v.data(), v.data());
+
+    // Sanity: readable before tampering.
+    {
+        auto z = TableReader::open(path);
+        REQUIRE(z.has_value());
+    }
+
+    {
+        std::fstream f(path, std::ios::in | std::ios::out | std::ios::binary);
+        REQUIRE(f.is_open());
+        uint32_t huge_block_size = (1u << 31);
+        f.seekp(offsetof(TableHeader, block_size));
+        f.write(reinterpret_cast<const char*>(&huge_block_size), sizeof(huge_block_size));
+        REQUIRE(f.good());
+    }
+
+    TableReader::OpenError err = TableReader::OpenError::None;
+    auto z = TableReader::open(path, &err);
+    CHECK_FALSE(z.has_value());
+    CHECK(err == TableReader::OpenError::Unreadable);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("compress_existing spans multiple blocks") {
+    // The other compress_existing test uses ps = 3000 (4 * 3000 = 12000
+    // bytes: one block, well under kDefaultBlockSize). The ctest skip-recent
+    // case elsewhere in this suite uses Kvk, also one block. That left the
+    // block loop over the mmap in write_block_compressed -- and the offset
+    // bookkeeping across a block boundary -- with zero coverage from
+    // compress_existing specifically (write_compressed's multi-block case is
+    // covered separately). ps >= 50000 makes 4 * ps span several 64 KB
+    // blocks.
+    //
+    // Note: this does NOT exercise SequentialPageReleaser::advance() firing a
+    // real madvise(MADV_DONTNEED) -- advance() only releases once 8 MiB of
+    // pages have been fully consumed (see its kChunk comment), and this
+    // table's logical size is far smaller than that. Covering the release
+    // path itself needs a table on the order of tens of MB, which is out of
+    // scope for a fast unit test.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_compress_existing_multiblock";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 50000;  // 4 * ps = 200000 bytes -> more than 3 blocks at 64 KB
+    std::vector<uint8_t> dw(ps), db(ps), cw(ps), cb(ps);
+    for (uint64_t i = 0; i < ps; ++i) {
+        dw[i] = static_cast<uint8_t>(i % 200);
+        db[i] = static_cast<uint8_t>((i * 3) % 200);
+        cw[i] = static_cast<uint8_t>(i % 5);
+        cb[i] = static_cast<uint8_t>((i + 1) % 5);
+    }
+    std::string raw = (dir / "raw.hm").string();
+    TableWriter::write(raw, mat, ps, 17, "{\"k\":1}", dw.data(), db.data(), cw.data(), cb.data());
+
+    auto src = TableReader::open(raw);
+    REQUIRE(src.has_value());
+    CHECK(src->raw_payload() != nullptr);
+
+    std::string out = (dir / "out.hm").string();
+    TableWriter::compress_existing(out, *src);
+
+    auto z = TableReader::open(out);
+    REQUIRE(z.has_value());
+    CHECK(z->is_compressed());
+    CHECK(block_count(4 * ps, kDefaultBlockSize) > 1);
+    CHECK(z->plane_size() == ps);
+    CHECK(z->max_dtm() == 17);
+    for (uint64_t i = 0; i < ps; ++i)
+        for (Color stm : {Color::White, Color::Black}) {
+            ValuePair a = src->get(stm, i), b = z->get(stm, i);
+            CHECK(a.dtm == b.dtm);
+            CHECK(a.count == b.count);
+        }
+    fs::remove_all(dir);
+}
+
 TEST_CASE("compress_existing refuses a compressed table and a marker table") {
     namespace fs = std::filesystem;
     fs::path dir = fs::temp_directory_path() / "hm_compress_existing_refuse";

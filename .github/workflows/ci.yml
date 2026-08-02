@@ -41,6 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
+
       - name: Cache FetchContent dependencies
         uses: actions/cache@v4
         with:
@@ -93,6 +96,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
 
       # scikit-build-core runs its own CMake configure (with -DHELPMATE_PYTHON=ON)
       # inside the pip build; FetchContent fetches the pinned deps over HTTPS.
@@ -221,6 +227,9 @@ jobs:
       CXX: g++-13
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
 
       - name: Cache FetchContent dependencies
         uses: actions/cache@v4

@@ -15,6 +15,13 @@ constexpr uint8_t kEncodingBlocks = 2;  // block index + compressed blocks
 constexpr uint8_t kCodecNone = 0;
 constexpr uint8_t kCodecZstd = 1;
 constexpr uint32_t kDefaultBlockSize = 65536;  // 14.5x at zstd level 3; see the spec
+// Ceiling enforced at open(): block_size is retunable per file with no
+// version bump, so a crafted header can otherwise claim an arbitrary value.
+// The reader sizes its decompressed-block cache from block_size (see
+// kBlockCacheBytes in table_file.cpp), so an unbounded value is a memory
+// exhaustion vector on the very first get() -- reject it before that point
+// instead.
+constexpr uint32_t kMaxBlockSize = 16 * 1024 * 1024;
 constexpr int kDefaultZstdLevel = 3;
 
 #pragma pack(push, 1)
@@ -102,8 +109,13 @@ private:
 
     uint32_t block_size_ = 0;  // 0 => raw
     uint64_t nblocks_ = 0;
-    const uint64_t* offsets_ = nullptr;  // nblocks_+1 entries, into the mapping
-    const uint8_t* blocks_ = nullptr;    // first compressed byte
+    // nblocks_+1 raw uint64 entries, into the mapping. `const uint8_t*`, not
+    // `const uint64_t*`: the offset from the start of the mapping depends on
+    // json_len, an arbitrary value from the file, so this is not generally
+    // 8-byte aligned. Read entries with load_u64() in table_file.cpp, never
+    // by dereferencing a uint64_t* cast of this pointer.
+    const uint8_t* offsets_ = nullptr;
+    const uint8_t* blocks_ = nullptr;  // first compressed byte
     mutable std::unique_ptr<BlockCache> cache_;
 };
 

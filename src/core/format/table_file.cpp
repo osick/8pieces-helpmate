@@ -6,7 +6,9 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <cerrno>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -19,6 +21,21 @@
 namespace hm {
 
 constexpr uint8_t kFlagAllUnsolvable = 0x01;
+
+namespace {
+// The block index sits at a byte offset that depends on `json_len`, an
+// arbitrary value read from the file, so index entries are not generally
+// aligned to uint64_t's 8-byte requirement. A `reinterpret_cast<const
+// uint64_t*>` followed by a direct dereference is undefined behavior on a
+// misaligned pointer -- UBSan reports it against the committed golden
+// fixture. Read through memcpy instead, exactly like the block count itself
+// (`stated`, just above every call site below) already does.
+inline uint64_t load_u64(const uint8_t* p) {
+    uint64_t v;
+    std::memcpy(&v, p, sizeof(v));
+    return v;
+}
+}  // namespace
 
 namespace {
 // compress_existing streams sequentially through a read-only mmap of the
@@ -35,7 +52,6 @@ namespace {
 class SequentialPageReleaser {
 public:
     SequentialPageReleaser(const uint8_t* base, uint64_t total) : base_(base), total_(total) {
-        madvise(const_cast<uint8_t*>(base_), static_cast<size_t>(total_), MADV_SEQUENTIAL);
         // madvise() requires a page-aligned address. `base` is the payload
         // pointer -- an arbitrary byte offset into the mapping, right after
         // the header and JSON, not the mapping's own page-aligned start -- so
@@ -50,6 +66,25 @@ public:
         const uintptr_t addr = reinterpret_cast<uintptr_t>(base_);
         const uintptr_t aligned_addr = ((addr + page - 1) / page) * page;
         released_ = aligned_addr - addr;
+
+        // MADV_SEQUENTIAL is a hint too, and must be given the same
+        // page-aligned address/length the kernel requires for any madvise()
+        // call -- `base_` itself is not page-aligned (see above), so advise
+        // starting at the same aligned address, covering what remains from
+        // there. Both this call and MADV_DONTNEED below are best-effort
+        // performance hints, not correctness requirements: a failure (e.g.
+        // EINVAL from a still-misaligned length) only means the kernel
+        // readahead/reclaim behavior degrades to its default, never a
+        // conversion failure. The return is deliberately not fatal, but it
+        // IS logged -- so a future regression here (like the one this fix
+        // corrects) is visible in stderr instead of silently costing
+        // performance forever.
+        if (released_ < total_) {
+            if (madvise(const_cast<uint8_t*>(base_) + released_, static_cast<size_t>(total_ - released_),
+                        MADV_SEQUENTIAL) != 0) {
+                std::fprintf(stderr, "warning: madvise(MADV_SEQUENTIAL) failed: %s\n", std::strerror(errno));
+            }
+        }
     }
     // Releases whole pages fully before `consumed_end` (exclusive), in chunks
     // -- not one madvise() per block -- so the syscall overhead stays
@@ -63,8 +98,15 @@ public:
         if (aligned_end_addr <= base_addr + released_) return;
         const uint64_t aligned_end = aligned_end_addr - base_addr;
         if (aligned_end - released_ < kChunk) return;
-        madvise(const_cast<uint8_t*>(base_) + released_, static_cast<size_t>(aligned_end - released_),
-                MADV_DONTNEED);
+        // Best-effort, same as MADV_SEQUENTIAL above: on failure the pages
+        // simply stay resident longer (worse RSS, not incorrect results), so
+        // this does not throw -- but it does log, so a regression here is
+        // visible rather than silently degrading a six-piece conversion's
+        // memory footprint.
+        if (madvise(const_cast<uint8_t*>(base_) + released_, static_cast<size_t>(aligned_end - released_),
+                    MADV_DONTNEED) != 0) {
+            std::fprintf(stderr, "warning: madvise(MADV_DONTNEED) failed: %s\n", std::strerror(errno));
+        }
         released_ = aligned_end;
     }
 
@@ -127,6 +169,32 @@ void write_block_compressed(const std::string& path, const TableHeader& hdr, con
         out.write(reinterpret_cast<const char*>(offsets.data()),
                   static_cast<std::streamsize>(offsets.size() * sizeof(uint64_t)));
         if (!out) throw std::runtime_error("write_block_compressed: write failed for " + tmp_path);
+
+        // Close explicitly and check the result: the final index rewrite
+        // above is exactly the write most likely to still be buffered when
+        // the destructor's implicit close runs, and an implicit close does
+        // not report failure to anyone. For compress_existing, `path` is the
+        // user's only copy of a table -- flushing this without checking, then
+        // renaming over that copy regardless, would silently replace it with
+        // a truncated index that still passes open()'s structural checks
+        // (an all-zero offsets array is monotone and offs[0]==0) and only
+        // fails on the first probe.
+        out.close();
+        if (!out) throw std::runtime_error("write_block_compressed: close failed for " + tmp_path);
+
+        // Cheap end-to-end integrity check before the atomic rename
+        // overwrites the source: open() already validates the whole block
+        // index (stated count, monotone in-bounds offsets), so reopening the
+        // freshly written file here catches a corrupt flush that the OS
+        // reported success for -- a near-free guard on data that may be
+        // irreplaceable (89.7 GB in the six-piece case).
+        {
+            TableReader::OpenError verify_err = TableReader::OpenError::None;
+            auto verify = TableReader::open(tmp_path, &verify_err);
+            if (!verify)
+                throw std::runtime_error("write_block_compressed: " + tmp_path +
+                                         " failed to reopen for verification after writing");
+        }
     } catch (...) {
         std::error_code ec;
         std::filesystem::remove(tmp_path, ec);  // best-effort cleanup; ignore removal errors
@@ -390,7 +458,12 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
     bool compressed = (hdr->version == 3);
     bool ok;
     if (compressed) {
-        ok = !marker && hdr->encoding == kEncodingBlocks && hdr->codec == kCodecZstd && hdr->block_size > 0;
+        // block_size is retunable per file with no version bump, and the
+        // reader sizes its decompressed-block cache off it (see
+        // kBlockCacheBytes below) -- an absurd value from a crafted header
+        // must be rejected here, not left to allocate on the first get().
+        ok = !marker && hdr->encoding == kEncodingBlocks && hdr->codec == kCodecZstd && hdr->block_size > 0 &&
+             hdr->block_size <= kMaxBlockSize;
     } else {
         ok = (hdr->version == 1 || (hdr->version == 2 && marker)) && hdr->encoding == kEncodingRaw;
     }
@@ -422,10 +495,12 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
                             std::memcpy(&stated, idx, sizeof(stated));
                             ok = (stated == nb);
                             if (ok) {
-                                const uint64_t* offs =
-                                    reinterpret_cast<const uint64_t*>(idx + sizeof(uint64_t));
+                                // Raw bytes, not `const uint64_t*`: see load_u64's comment --
+                                // this offset (idx + 8) depends on json_len and is not
+                                // generally 8-byte aligned.
+                                const uint8_t* offs = idx + sizeof(uint64_t);
                                 const uint64_t payload_bytes = remaining - index_bytes;
-                                ok = offs[nb] <= payload_bytes;
+                                ok = load_u64(offs + nb * sizeof(uint64_t)) <= payload_bytes;
                                 // Interior offsets are untrusted too: get()/byte_at() index
                                 // blocks_ + offs[b] .. blocks_ + offs[b+1] without further
                                 // checking, so a single out-of-bounds or decreasing entry
@@ -433,9 +508,12 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
                                 // scan at open time -- one sequential pass over the whole index,
                                 // once per open, against a file that can be tens of GB; do not
                                 // "optimise" it away by trusting the final offset alone.
-                                if (ok && offs[0] != 0) ok = false;
+                                if (ok && load_u64(offs) != 0) ok = false;
                                 if (ok) {
-                                    for (uint64_t i = 0; ok && i < nb; ++i) { ok = offs[i] <= offs[i + 1]; }
+                                    for (uint64_t i = 0; ok && i < nb; ++i) {
+                                        ok = load_u64(offs + i * sizeof(uint64_t)) <=
+                                             load_u64(offs + (i + 1) * sizeof(uint64_t));
+                                    }
                                 }
                             }
                         }
@@ -460,10 +538,16 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
     if (compressed) {
         const uint8_t* idx = base + sizeof(TableHeader) + hdr->json_len;
         std::memcpy(&r.nblocks_, idx, sizeof(r.nblocks_));
-        r.offsets_ = reinterpret_cast<const uint64_t*>(idx + sizeof(uint64_t));
+        r.offsets_ = idx + sizeof(uint64_t);  // raw bytes; see load_u64
         r.blocks_ = idx + sizeof(uint64_t) * (r.nblocks_ + 2);
         r.block_size_ = hdr->block_size;
-        r.cache_ = std::make_unique<BlockCache>(64, hdr->block_size);  // 64 blocks = 4 MB
+        // Sized by a byte budget, not a fixed block count: block_size is
+        // retunable per file (up to kMaxBlockSize, enforced above), so "64
+        // blocks" is only 4 MB at the default 64 KB block_size -- at a
+        // larger, still-legal block_size it would be tens or hundreds of MB.
+        constexpr size_t kBlockCacheBytes = 4 * 1024 * 1024;
+        size_t capacity = std::max<size_t>(1, kBlockCacheBytes / hdr->block_size);
+        r.cache_ = std::make_unique<BlockCache>(capacity, hdr->block_size);
     }
     return r;
 }
@@ -488,8 +572,10 @@ uint8_t TableReader::byte_at(uint64_t logical) const {
     const uint64_t b = logical / block_size_;
     const uint64_t begin = b * block_size_;
     const size_t len = static_cast<size_t>(std::min<uint64_t>(block_size_, 4 * ps_ - begin));
-    const uint8_t* src = blocks_ + offsets_[b];
-    const size_t clen = static_cast<size_t>(offsets_[b + 1] - offsets_[b]);
+    const uint64_t off_b = load_u64(offsets_ + b * sizeof(uint64_t));
+    const uint64_t off_b1 = load_u64(offsets_ + (b + 1) * sizeof(uint64_t));
+    const uint8_t* src = blocks_ + off_b;
+    const size_t clen = static_cast<size_t>(off_b1 - off_b);
     return cache_->byte_at(b, static_cast<size_t>(logical - begin), len,
                            [&](uint8_t* dst, size_t n) { decompress_block(src, clen, dst, n); });
 }
