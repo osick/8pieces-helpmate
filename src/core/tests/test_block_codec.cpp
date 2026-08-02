@@ -1,11 +1,12 @@
 #include <catch2/catch_test_macros.hpp>
-#include "format/block_codec.h"
-#include "format/table_file.h"
-#include "chess/types.h"
 #include <numeric>
 #include <random>
 #include <stdexcept>
 #include <vector>
+
+#include "chess/types.h"
+#include "format/block_codec.h"
+#include "format/table_file.h"
 
 using namespace hm;
 
@@ -56,7 +57,7 @@ TEST_CASE("a corrupt block throws instead of returning garbage") {
     std::vector<uint8_t> src(4096, 7);
     auto packed = compress_block(src.data(), src.size(), kDefaultZstdLevel);
     REQUIRE(packed.size() > 8);
-    packed[packed.size() / 2] ^= 0xFF;          // flip a bit in the middle
+    packed[packed.size() / 2] ^= 0xFF;  // flip a bit in the middle
     std::vector<uint8_t> back(src.size());
     CHECK_THROWS_AS(decompress_block(packed.data(), packed.size(), back.data(), back.size()),
                     std::runtime_error);
@@ -65,7 +66,35 @@ TEST_CASE("a corrupt block throws instead of returning garbage") {
 TEST_CASE("a block that decompresses to the wrong size throws") {
     std::vector<uint8_t> src(4096, 7);
     auto packed = compress_block(src.data(), src.size(), kDefaultZstdLevel);
-    std::vector<uint8_t> back(2048);            // caller expects half
+    std::vector<uint8_t> back(2048);  // caller expects half
     CHECK_THROWS_AS(decompress_block(packed.data(), packed.size(), back.data(), back.size()),
                     std::runtime_error);
+}
+
+TEST_CASE("block_count throws on a zero block_size") {
+    CHECK_THROWS_AS(block_count(1024, 0), std::runtime_error);
+}
+
+TEST_CASE("every single-bit corruption in a compressed block is detected") {
+    // Not one flip in a degenerate fixture: sweep a realistic block so this
+    // fails if the frame checksum is ever turned off again.
+    std::vector<uint8_t> src(4096);
+    std::mt19937 rng(4242);
+    for (auto& b : src) b = static_cast<uint8_t>(rng() % 7);  // compressible but not constant
+    auto packed = compress_block(src.data(), src.size(), kDefaultZstdLevel);
+    std::vector<uint8_t> back(src.size());
+    size_t undetected = 0;
+    for (size_t byte = 0; byte < packed.size(); ++byte) {
+        for (int bit = 0; bit < 8; ++bit) {
+            auto bad = packed;
+            bad[byte] ^= static_cast<uint8_t>(1u << bit);
+            try {
+                decompress_block(bad.data(), bad.size(), back.data(), back.size());
+                if (back != src) ++undetected;  // decoded, but to the wrong bytes
+            } catch (const std::runtime_error&) {
+                // detected, which is the point
+            }
+        }
+    }
+    CHECK(undetected == 0);
 }
