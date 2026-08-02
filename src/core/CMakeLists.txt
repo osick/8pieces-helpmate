@@ -1,7 +1,7 @@
 # The helpmate core: board representation, symmetry-reduced indexing, the
 # table format, the generator and the probe library. Everything else in the
 # repo is a client of this.
-set(HELPMATE_SOURCES chess/board.cpp chess/san.cpp indexing/material.cpp indexing/kk.cpp indexing/slice_index.cpp format/table_file.cpp format/block_codec.cpp generator/oracle.cpp generator/generator.cpp probe/tablebase.cpp)  # tasks append here
+set(HELPMATE_SOURCES chess/board.cpp chess/san.cpp indexing/material.cpp indexing/kk.cpp indexing/slice_index.cpp format/table_file.cpp format/block_codec.cpp format/block_cache.cpp generator/oracle.cpp generator/generator.cpp probe/tablebase.cpp)  # tasks append here
 add_library(helpmate_core STATIC ${HELPMATE_SOURCES})
 
 configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in

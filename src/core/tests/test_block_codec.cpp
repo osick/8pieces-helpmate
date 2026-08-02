@@ -1,10 +1,14 @@
+#include <atomic>
 #include <catch2/catch_test_macros.hpp>
+#include <functional>
 #include <numeric>
 #include <random>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 #include "chess/types.h"
+#include "format/block_cache.h"
 #include "format/block_codec.h"
 #include "format/table_file.h"
 
@@ -97,4 +101,78 @@ TEST_CASE("every single-bit corruption in a compressed block is detected") {
         }
     }
     CHECK(undetected == 0);
+}
+
+TEST_CASE("the cache fills once and serves the second read from memory") {
+    BlockCache c(4, 1024);
+    size_t calls = 0;
+    auto fill = [&](uint8_t* dst, size_t len) {
+        ++calls;
+        std::fill(dst, dst + len, 0xAB);
+    };
+    const uint8_t* a = c.get_or_fill(7, fill, 1024);
+    CHECK(a[0] == 0xAB);
+    CHECK(calls == 1);
+    const uint8_t* b = c.get_or_fill(7, fill, 1024);
+    CHECK(b[0] == 0xAB);
+    CHECK(calls == 1);  // served from cache, not refilled
+    CHECK(c.fills() == 1);
+}
+
+TEST_CASE("evicting past capacity still returns correct bytes") {
+    BlockCache c(2, 16);  // deliberately tiny
+    auto fill_with = [](uint8_t v) {
+        return [v](uint8_t* dst, size_t len) { std::fill(dst, dst + len, v); };
+    };
+    CHECK(c.get_or_fill(1, fill_with(1), 16)[0] == 1);
+    CHECK(c.get_or_fill(2, fill_with(2), 16)[0] == 2);
+    CHECK(c.get_or_fill(3, fill_with(3), 16)[0] == 3);  // evicts block 1
+    CHECK(c.get_or_fill(1, fill_with(1), 16)[0] == 1);  // refilled, still correct
+    CHECK(c.fills() == 4);
+}
+
+TEST_CASE("a short final block is cached at its own length") {
+    BlockCache c(2, 1024);
+    auto fill = [](uint8_t* dst, size_t len) { std::fill(dst, dst + len, 0x5A); };
+    const uint8_t* p = c.get_or_fill(0, fill, 300);  // shorter than block_size
+    CHECK(p[299] == 0x5A);
+    CHECK(c.get_or_fill(0, fill, 300)[0] == 0x5A);
+    CHECK(c.fills() == 1);
+}
+
+TEST_CASE("the cache is safe under concurrent get_or_fill from two threads") {
+    // Capacity is chosen to cover every index either thread ever touches
+    // (12 distinct indices total), so no eviction happens during the test.
+    // That means every pointer get_or_fill returns stays valid for the whole
+    // test, so it is safe to dereference right after the call -- this test
+    // deliberately does NOT exercise the "pointer invalidated by a
+    // concurrent evicting call" scenario (that is a real, documented
+    // lifetime hazard of get_or_fill's contract, not something a
+    // deterministic test can safely provoke without itself risking a
+    // use-after-free). What this test does exercise, under real concurrent
+    // pressure from two threads racing on the same cache: the internal
+    // map/list bookkeeping (insert, promote-to-front on hit, splice) stays
+    // consistent, and every byte read back matches what was filled.
+    constexpr size_t kIters = 2000;
+    BlockCache c(12, 32);
+    std::atomic<bool> mismatch{false};
+
+    auto worker = [&](uint64_t base) {
+        for (size_t i = 0; i < kIters; ++i) {
+            uint64_t idx = base + (i % 8);  // overlaps with the other thread's range
+            auto fill = [idx](uint8_t* dst, size_t len) {
+                std::fill(dst, dst + len, static_cast<uint8_t>(idx));
+            };
+            const uint8_t* p = c.get_or_fill(idx, fill, 32);
+            if (p[0] != static_cast<uint8_t>(idx)) mismatch = true;
+        }
+    };
+
+    std::thread t1([&] { worker(0); });  // touches indices 0..7
+    std::thread t2([&] { worker(4); });  // touches indices 4..11 (overlap: 4..7)
+    t1.join();
+    t2.join();
+
+    CHECK_FALSE(mismatch.load());
+    CHECK(c.fills() <= 12);  // never more fills than distinct indices touched
 }
