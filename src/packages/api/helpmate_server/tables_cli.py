@@ -23,7 +23,7 @@ def _default_hub(repo_id: str):
             # No manifest.json yet (or the dataset repo itself doesn't exist
             # yet): treat as "remote has no manifest", not an error.
             return None
-    hub.fetch_manifest = fetch_manifest  # type: ignore[attr-defined]
+    hub.fetch_manifest = fetch_manifest  # type: ignore[method-assign]
     return hub
 
 def main(argv: list[str] | None = None, hub_factory=_default_hub) -> int:

@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from helpmate_server.storage import LocalDir, ChainSource, SliceInfo
+from helpmate_server.storage import LocalDir, ChainSource
 
 def make_slice(d: Path, name: str, max_dtm=4, cells=100):
     (d / f"{name}.hm").write_bytes(b"\x00" * 16)

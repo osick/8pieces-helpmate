@@ -5,7 +5,7 @@ package exists only to give them an importable, layout-independent address.
 """
 from pathlib import Path
 
-__version__ = "0.7.1"
+__version__ = "0.7.2"
 
 
 def static_dir() -> Path:

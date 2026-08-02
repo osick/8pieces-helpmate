@@ -86,7 +86,8 @@ def test_exhaustive_kqvk(tmp_path):
     count = {}
     fens = list(positions())
     boards = {f: chess.Board(f) for f in fens}
-    key = lambda b: b.epd()
+    def key(b):
+        return b.epd()
     for f, b in boards.items():
         if b.turn == chess.BLACK and b.is_checkmate():
             k = key(b)

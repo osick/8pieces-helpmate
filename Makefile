@@ -6,7 +6,8 @@ COVBUILD ?= build-cov
 # `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
 GCOV ?= gcov-13
 .PHONY: configure build test slowtest stress coverage clean jstest \
-	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all
+	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all \
+	lint typecheck format-check format
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
@@ -51,6 +52,70 @@ test-bindings:
 test-repo:
 	python -m pytest tests/repo -v
 test-all: test test-api test-web test-bindings test-repo
+
+# `node --check` on a plain `.js` file does automatic CommonJS/ESM detection:
+# it tries a CJS parse first, and as soon as it hits the file's first
+# `import`/`export` it concludes "this is a module" and stops validating --
+# it does NOT then fully parse the rest of the file as ESM. Every dashboard
+# JS file has its first import/export within the first ~9 lines, so a syntax
+# error anywhere after that point is silently accepted (verified: an
+# unterminated string appended to a copy of each file still exits 0 as
+# `.js`, but exits 1 -- correctly -- once the same content is checked as
+# `.mjs`, which forces unambiguous ESM parsing). So each file is copied to a
+# temp `.mjs` path and checked there. Names are flattened (not just
+# basename) so js/foo.js and js/lib/foo.js can't collide, and node's error
+# output -- which names the temp path, not the real one -- has the temp path
+# substituted back to the real source path before printing.
+lint:
+	ruff check .
+	@tmp="$$(mktemp -d)" || { echo "lint: cannot create a temp dir"; exit 2; }; \
+	status=0; \
+	for f in $$(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js'); do \
+	  copy="$$tmp/$$(echo "$$f" | tr '/' '_').mjs"; \
+	  cp "$$f" "$$copy"; \
+	  if ! err="$$(node --check "$$copy" 2>&1)"; then \
+	    echo "lint: JS syntax error in $$f"; \
+	    echo "$$err" | sed "s#$$copy#$$f#g" >&2; \
+	    status=1; \
+	  fi; \
+	done; \
+	rm -rf "$$tmp"; \
+	exit $$status
+typecheck:
+	python -m mypy
+
+# Formatting is enforced on the lines a change touches, not on the whole tree
+# (see docs/BUILD.md for the measurement). Every condition that prevents the
+# check from doing its job must exit non-zero: a gate that silently passes is
+# worse than no gate.
+#
+# git-clang-format's --diff follows the `git diff --exit-code` convention:
+# 0 = no differences, 1 = differences found (it ran fine either way), and
+# only its own die() helper (bad BASE, missing clang-format binary, a failed
+# internal git call, ...) exits >= 2 -- verified against the installed
+# implementation (~/.local/lib/python3*/site-packages/clang_format/
+# git_clang_format.py: print_diff() returns `git diff --exit-code`'s
+# returncode; die() is sys.exit(2)). So status 0/1 both mean "ran
+# successfully"; only >= 2 means "could not run".
+BASE ?= $(shell git merge-base origin/main HEAD 2>/dev/null || echo HEAD~1)
+format-check:
+	@command -v clang-format >/dev/null 2>&1 || { \
+	  echo "format-check: clang-format is not installed (pip install clang-format)"; exit 2; }
+	@git rev-parse --verify -q "$(BASE)^{commit}" >/dev/null || { \
+	  echo "format-check: BASE '$(BASE)' does not resolve to a commit"; exit 2; }
+	@out="$$(mktemp)" || { echo "format-check: cannot create a temp file"; exit 2; }; \
+	git clang-format -q --diff "$(BASE)" -- '*.cpp' '*.h' >"$$out" 2>"$$out.err"; st=$$?; \
+	if [ $$st -ge 2 ]; then \
+	  echo "format-check: git clang-format failed (exit $$st):"; cat "$$out.err" >&2; \
+	  rm -f "$$out" "$$out.err"; exit 2; \
+	fi; \
+	if [ -s "$$out" ]; then \
+	  cat "$$out"; rm -f "$$out" "$$out.err"; \
+	  echo "C++ formatting: run 'make format' and commit"; exit 1; \
+	fi; \
+	rm -f "$$out" "$$out.err"
+format:
+	git clang-format $(BASE) -- '*.cpp' '*.h'
 
 # Pure JS helpers (helpmate_web/static/js/lib) via Node's built-in test
 # runner. No npm packages. A bare directory arg isn't recursed by `node

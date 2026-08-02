@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "helpmate"
-version = "0.7.1"
+version = "0.7.2"
 description = "Helpmate tablebases: cooperative mate distances and solution counts"
 requires-python = ">=3.9"
 license = {text = "MIT"}
@@ -16,3 +16,28 @@ dev = ["pytest", "chess>=1.10"]
 cmake.version = ">=3.24"
 wheel.packages = ["src/packages/bindings/helpmate"]
 cmake.define.HELPMATE_PYTHON = "ON"
+
+[tool.mypy]
+python_version = "3.9"
+ignore_missing_imports = true          # helpmate is a compiled extension
+files = ["src/packages/api/helpmate_server"]
+
+# Third-party packages increasingly ship `match`, a 3.10+ syntax feature that
+# mypy's parser rejects under the 3.9 floor this project declares -- so mypy
+# crashes while descending into them, before checking any of our own files.
+# `ignore_missing_imports` does not help: the modules ARE found, just
+# unparsable at py39.
+#
+# This is safe, and that was measured rather than assumed: our own modules are
+# listed in `files` above, so they are checked regardless of how imports are
+# followed. Injecting `chain.status(123)` into app.py under exactly this
+# setting still produces `Argument 1 ... has incompatible type "int"; expected
+# "str"`. The blast radius is third-party symbols only.
+#
+# A narrower per-module override was tried and abandoned. It listed
+# huggingface_hub, mcp, anyio, starlette and fastapi -- and then CI found a
+# sixth (`click`, via uvicorn) and went red. The set of third-party packages
+# using modern syntax only grows, so the list was a treadmill that bought no
+# coverage. Do not re-narrow this without first reproducing the injected-error
+# check above and confirming the narrower form catches something this does not.
+follow_imports = "skip"

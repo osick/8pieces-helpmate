@@ -92,6 +92,7 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         if kind in ("local", "cached"):
             return val, None
         if kind == "remote":
+            assert chain.remote is not None   # status() returns "remote" only when it is set
             chain.remote.start_fetch(material)
             return None, JSONResponse(status_code=202, content={
                 "status": "fetching", "material": material,

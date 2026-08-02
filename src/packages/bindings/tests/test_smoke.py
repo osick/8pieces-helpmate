@@ -1,4 +1,4 @@
-import json, pathlib, pytest
+import pytest
 import helpmate
 
 @pytest.fixture(scope="session")
@@ -47,7 +47,7 @@ def test_mine_shape_filters(tables):
     assert tb.mine("KQvk", dtm=2, count=4, max=5) == tb.mine("KQvk", dtm=2, count=4, max=5)
     for f in tb.mine("KQvk", dtm=4, starts=1, ends=1, max=20):
         ls = tb.lines(f)
-        assert len({l[0] for l in ls}) == 1 and len({l[-1] for l in ls}) == 1
+        assert len({line[0] for line in ls}) == 1 and len({line[-1] for line in ls}) == 1
 
 def test_mine_with_stats_returns_pair(tables):
     tb = helpmate.Tablebase(tables)

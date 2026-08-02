@@ -1,5 +1,5 @@
 import hashlib, json
-from helpmate_server.manifest import sha256_file, build_manifest, write_manifest, verify_file
+from helpmate_server.manifest import build_manifest, write_manifest, verify_file
 
 def test_build_and_verify(tmp_path):
     (tmp_path / "KQvk.hm").write_bytes(b"abc")

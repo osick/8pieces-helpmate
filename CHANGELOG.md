@@ -6,6 +6,59 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.7.2] - 2026-08-01
+
+### Added
+
+- **Every pull request is gated.** `ruff`, `mypy`, `node --check`,
+  `clang-format` on changed lines, and the full C++/Python/browser suites run
+  on each PR, and `main` requires them to pass before a merge is allowed.
+- **`make lint`, `make typecheck`, `make format-check`** reproduce every gate
+  locally; `make format` fixes the C++ ones.
+- **The release workflow verifies that a pushed `v*` tag matches `VERSION`**,
+  closing the last place the version could drift unguarded.
+- **`docs/CONTRIBUTING.md`** — the required checks, how to run each locally,
+  and the reasoning behind the linter configuration.
+
+### Changed
+
+- Ruff's E701/E702/E401 are disabled project-wide, with the reasoning
+  recorded: all 55 findings under them are deliberate paired statements and
+  combined imports, not defects. Every other default rule is enabled and
+  passes on the whole tree, with no grandfathered violations.
+- C++ formatting is enforced on changed lines only. A stock style would
+  rewrite 3715 lines of the 4365-line core; the tuned config still 971. The
+  tree converges as it is edited rather than in one unreviewable commit.
+
+### Fixed
+
+- **`ctest` could pass while testing a stale binary.** The v0.7.1 CMake split
+  moved the built executables into subdirectories. `ctest` resolves target
+  paths itself, so it kept passing, but a pre-split build had left stale
+  binaries at the old top-level paths, and `./build/helpmate_tests
+  "~[slow]"` kept answering — from a binary built before the change it was
+  meant to verify. Five tasks' worth of that gate were therefore meaningless.
+  Fixed in v0.7.1 by `CMAKE_RUNTIME_OUTPUT_DIRECTORY`; this release adds the
+  CI step that asserts the binaries exist at their documented paths, so a
+  future layout change fails loudly in one place instead of silently
+  everywhere.
+- **`make format-check` reported success whenever it could not run.**
+  `git clang-format` writes errors to stderr, `tee` captured only stdout, and
+  with no `pipefail` the recipe's exit status was `tee`'s — always 0. An
+  unresolvable base ref, a missing `clang-format`, or an unwritable temp path
+  all produced a green check. On a shallow CI checkout this would have made
+  the formatting gate a permanent no-op. Every condition that prevents the
+  check from running now exits non-zero.
+- **`node --check` does not validate ES modules.** Node's CommonJS-first
+  auto-detection short-circuits at the first `import`/`export`, so any syntax
+  error after that line was silently accepted. Every dashboard module has an
+  import within its first nine lines, so the JS gate was validating almost
+  nothing. Each file is now checked through a temporary `.mjs` copy, which
+  forces unambiguous ESM parsing.
+- Four unused imports, two ambiguous `l` variable names, one lambda bound to
+  a name, and two mypy findings — one of which was a `# type: ignore` naming
+  the wrong error code, so it had been silencing nothing.
+
 ## [0.7.1] - 2026-08-01
 
 ### Changed
