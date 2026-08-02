@@ -70,6 +70,35 @@ file every declared version is checked against.
 - Depends on: v0.7 (splits the dashboard and API that already existed)
 - No release: a repo-layout rung, not a user-facing one.
 
+## v0.7.2 — PR gate
+
+**Goal:** every pull request gated by linting, type checking, C++ formatting
+on changed lines, and the full test suite, with `main` branch-protected so a
+red check disables the merge button.
+
+- Plan: `docs/superpowers/plans/2026-08-01-pr-gate.md`
+- Depends on: v0.7.1 (the per-package layout the jobs run against)
+- No release: a process rung.
+
+## v0.7.5 — Block-compressed tables
+
+**Goal:** cut the on-disk size of the table corpus, which is the binding
+constraint on publishing 6-piece sets, without giving up the random access
+probing depends on. Fixed-size blocks compressed independently with zstd,
+plus a block-offset index and a small decompressed-block cache.
+
+Promoted here from the Backlog once measured: **14.5×** on a real 6-piece
+plane at 64 KB / level 3, against the Backlog's ≥5× ship condition. The same
+measurement pass demoted combinatorial indexing, which returns only 3.5% on
+this corpus — helpmate materials are mostly one-of-each, unlike the Syzygy
+case that motivates it.
+
+- Design: **approved** — `docs/superpowers/specs/2026-08-02-block-compression-design.md`
+- Depends on: v0.6.1 (whole-slice elimination first — strictly cheaper than
+  compressing a file that need not exist)
+- Ships only if the Backlog's performance conditions hold; see the spec.
+- No release.
+
 ## v0.8 — Pattern / theme search
 
 **Goal:** search by theme and pattern, the capability the original notes asked
@@ -130,52 +159,20 @@ workloads) vs extending ChessMG — outcome decides everything downstream.
 
 ## Backlog (unscheduled)
 
-### Compression (conditional: performance first)
+### Compression — promoted to v0.7.5
 
-**Goal:** cut on-disk size, which is the binding constraint on publishing
-6-piece sets. **This rung ships only if it does not meaningfully slow
-generation or probing** — that condition is the point of the rung, not a
-footnote, and the measurements below decide it before any format work starts.
+Moved out of the Backlog on 2026-08-02 after the decision spike this entry
+demanded was run: block-independent zstd measured **11.4x-17.9x** on a real
+6-piece plane, against the >=5x ship condition recorded here. See the v0.7.5
+rung above and
+`docs/superpowers/specs/2026-08-02-block-compression-design.md`, which carries
+the full measurement table, the parameter choice and the performance gate
+this entry defined.
 
-**Why it matters.** Our tables store four uncompressed bytes per cell (DTM and
-optimal-line count, both sides to move), over the same position space a
-conventional tablebase covers. A 6-piece pawnless slice is 31 GB, one with a
-pawn ~91 GB (a pawn breaks the 8-fold symmetry to 2-fold, which outweighs its
-48-vs-64 squares), and a 7-piece pawnless slice ~2 TB. Measured on real data:
-`zstd -1` — the cheapest setting — compresses a solvable 5-piece slice
-(`KBvkrb.hm`, 484.5 MB) to 49.8 MB, a **10.3x** reduction. Higher levels and a
-layout-aware encoding would do better, because most cells in a solvable slice
-are still unsolvable.
-
-**The hard part is random access, not ratio.** Probing mmaps the file and reads
-one byte at a known offset; a plain compressed stream destroys that. So the
-candidate design is block-compressed planes (fixed-size blocks plus a block
-offset index in the header) with a small decompressed-block cache — random
-access preserved, one block decompressed per cold probe.
-
-**Decision spike, before any implementation** — measure on representative
-slices (a solvable 5-piece, an unsolvable one, a pawnful one):
-
-1. compression ratio per block size (16/64/256 KB) and level;
-2. probe latency, cold and warm, against the uncompressed baseline;
-3. sequential-scan throughput (what `mine` and `stats` depend on);
-4. generation wall-clock delta — compression happens once at finalize, outside
-   the hot loop, so this should be small, but it must be shown, not assumed.
-
-**Ship only if** the ratio is at least ~5x on representative slices, warm probe
-latency stays within roughly 2x of uncompressed, and generation slows by no
-more than a few percent. **If those thresholds are not met**, fall back to
-transport-and-archive compression only: `helpmate-tables push/pull` compresses
-for the Hugging Face dataset and decompresses on arrival, so distribution and
-cold storage get the full benefit at exactly zero runtime cost. That fallback
-is a good outcome, not a failure.
-
-- Depends on: v0.6.1 (whole-slice elimination first — it is strictly cheaper
-  than compressing a file that need not exist)
-- Open questions: block size and codec (zstd vs lz4 for the latency/ratio
-  trade-off); whether the count planes deserve a different encoding from the
-  DTM planes; whether a sparse bitmap layout beats generic block compression
-  for slices where solvable cells are a small fraction.
+The fallback this entry named -- compress for transport in
+`helpmate-tables push/pull` only, at zero runtime cost -- remains the
+documented outcome if the warm-probe or generation-slowdown conditions fail
+in implementation.
 
 ## Standing constraints (apply to every rung)
 
