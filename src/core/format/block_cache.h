@@ -12,21 +12,26 @@ namespace hm {
 // A bounded LRU of decompressed blocks. Mutex-guarded because generation is
 // multi-threaded and a TableReader may be probed concurrently.
 //
-// Lifetime rule: the pointer returned by get_or_fill is valid only until the
-// next call to get_or_fill on the SAME cache (from any thread) that could
-// evict the entry it points into. Copy the bytes you need out before making
-// another call -- do not hold the pointer across it. This is safe in
-// TableReader::get because the byte is copied out immediately after the
-// call returns.
+// The cache never hands out a pointer into its storage. An entry can be
+// evicted by another thread the moment the lock is released, so any pointer
+// returned to a caller would be a use-after-free waiting to happen. There is
+// therefore no lifetime rule to document: every access copies the byte it
+// needs out while holding the lock.
 class BlockCache {
 public:
     BlockCache(size_t capacity_blocks, uint32_t block_size);
 
-    // Returns a pointer to `len` decompressed bytes for `index`, calling
-    // `fill(dst, len)` only on a miss.
-    const uint8_t* get_or_fill(uint64_t index, const std::function<void(uint8_t*, size_t)>& fill, size_t len);
+    // Returns one byte from block `index` at `offset`, calling `fill(dst,
+    // len)` to decompress the block only on a miss. `fill` is invoked without
+    // the lock held, so multiple threads may decompress the same block
+    // concurrently on a racing miss; that is deliberate -- it trades a rare
+    // duplicated decompression for never blocking one thread on another's
+    // (potentially slow) fill.
+    uint8_t byte_at(uint64_t index, size_t offset, size_t len,
+                    const std::function<void(uint8_t*, size_t)>& fill);
 
     size_t fills() const;
+    size_t hits() const;
     size_t capacity() const { return cap_; }
 
 private:
@@ -41,6 +46,7 @@ private:
     std::list<Entry> lru_;  // front = most recent
     std::unordered_map<uint64_t, std::list<Entry>::iterator> map_;
     size_t fills_ = 0;
+    size_t hits_ = 0;
 };
 
 }  // namespace hm

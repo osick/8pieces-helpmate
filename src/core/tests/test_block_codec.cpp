@@ -110,13 +110,14 @@ TEST_CASE("the cache fills once and serves the second read from memory") {
         ++calls;
         std::fill(dst, dst + len, 0xAB);
     };
-    const uint8_t* a = c.get_or_fill(7, fill, 1024);
-    CHECK(a[0] == 0xAB);
+    uint8_t a = c.byte_at(7, 0, 1024, fill);
+    CHECK(a == 0xAB);
     CHECK(calls == 1);
-    const uint8_t* b = c.get_or_fill(7, fill, 1024);
-    CHECK(b[0] == 0xAB);
+    uint8_t b = c.byte_at(7, 0, 1024, fill);
+    CHECK(b == 0xAB);
     CHECK(calls == 1);  // served from cache, not refilled
     CHECK(c.fills() == 1);
+    CHECK(c.hits() == 1);
 }
 
 TEST_CASE("evicting past capacity still returns correct bytes") {
@@ -124,55 +125,59 @@ TEST_CASE("evicting past capacity still returns correct bytes") {
     auto fill_with = [](uint8_t v) {
         return [v](uint8_t* dst, size_t len) { std::fill(dst, dst + len, v); };
     };
-    CHECK(c.get_or_fill(1, fill_with(1), 16)[0] == 1);
-    CHECK(c.get_or_fill(2, fill_with(2), 16)[0] == 2);
-    CHECK(c.get_or_fill(3, fill_with(3), 16)[0] == 3);  // evicts block 1
-    CHECK(c.get_or_fill(1, fill_with(1), 16)[0] == 1);  // refilled, still correct
+    CHECK(c.byte_at(1, 0, 16, fill_with(1)) == 1);
+    CHECK(c.byte_at(2, 0, 16, fill_with(2)) == 2);
+    CHECK(c.byte_at(3, 0, 16, fill_with(3)) == 3);  // evicts block 1
+    CHECK(c.byte_at(1, 0, 16, fill_with(1)) == 1);  // refilled, still correct
     CHECK(c.fills() == 4);
 }
 
 TEST_CASE("a short final block is cached at its own length") {
     BlockCache c(2, 1024);
     auto fill = [](uint8_t* dst, size_t len) { std::fill(dst, dst + len, 0x5A); };
-    const uint8_t* p = c.get_or_fill(0, fill, 300);  // shorter than block_size
-    CHECK(p[299] == 0x5A);
-    CHECK(c.get_or_fill(0, fill, 300)[0] == 0x5A);
+    uint8_t p = c.byte_at(0, 299, 300, fill);  // shorter than block_size
+    CHECK(p == 0x5A);
+    CHECK(c.byte_at(0, 0, 300, fill) == 0x5A);
     CHECK(c.fills() == 1);
 }
 
-TEST_CASE("the cache is safe under concurrent get_or_fill from two threads") {
-    // Capacity is chosen to cover every index either thread ever touches
-    // (12 distinct indices total), so no eviction happens during the test.
-    // That means every pointer get_or_fill returns stays valid for the whole
-    // test, so it is safe to dereference right after the call -- this test
-    // deliberately does NOT exercise the "pointer invalidated by a
-    // concurrent evicting call" scenario (that is a real, documented
-    // lifetime hazard of get_or_fill's contract, not something a
-    // deterministic test can safely provoke without itself risking a
-    // use-after-free). What this test does exercise, under real concurrent
-    // pressure from two threads racing on the same cache: the internal
-    // map/list bookkeeping (insert, promote-to-front on hit, splice) stays
-    // consistent, and every byte read back matches what was filled.
-    constexpr size_t kIters = 2000;
-    BlockCache c(12, 32);
+TEST_CASE("the cache is safe under concurrent byte_at from multiple threads, with forced eviction") {
+    // Capacity (4) is deliberately smaller than the working set (32 distinct
+    // indices), so eviction is constant while threads race on the same
+    // cache. byte_at never hands out a pointer, so there is nothing to
+    // dangle -- this is exactly the scenario a pointer-returning cache API
+    // could not survive. Each block's contents are a deterministic function of its
+    // index (every byte == index & 0xFF), so a byte read back from the wrong
+    // entry (cross-contamination between a fresh insert and a stale one, or
+    // between two threads' concurrent fills of the same index) is caught.
+    constexpr size_t kIters = 5000;
+    constexpr uint64_t kNumIndices = 32;
+    BlockCache c(4, 32);
     std::atomic<bool> mismatch{false};
 
-    auto worker = [&](uint64_t base) {
+    auto worker = [&](unsigned seed) {
+        std::mt19937 rng(seed);
+        std::uniform_int_distribution<uint64_t> dist(0, kNumIndices - 1);
         for (size_t i = 0; i < kIters; ++i) {
-            uint64_t idx = base + (i % 8);  // overlaps with the other thread's range
+            uint64_t idx = dist(rng);
             auto fill = [idx](uint8_t* dst, size_t len) {
-                std::fill(dst, dst + len, static_cast<uint8_t>(idx));
+                std::fill(dst, dst + len, static_cast<uint8_t>(idx & 0xFF));
             };
-            const uint8_t* p = c.get_or_fill(idx, fill, 32);
-            if (p[0] != static_cast<uint8_t>(idx)) mismatch = true;
+            size_t offset = static_cast<size_t>(idx % 32);
+            uint8_t b = c.byte_at(idx, offset, 32, fill);
+            if (b != static_cast<uint8_t>(idx & 0xFF)) mismatch = true;
         }
     };
 
-    std::thread t1([&] { worker(0); });  // touches indices 0..7
-    std::thread t2([&] { worker(4); });  // touches indices 4..11 (overlap: 4..7)
+    std::thread t1([&] { worker(1); });
+    std::thread t2([&] { worker(2); });
+    std::thread t3([&] { worker(3); });
+    std::thread t4([&] { worker(4); });
     t1.join();
     t2.join();
+    t3.join();
+    t4.join();
 
     CHECK_FALSE(mismatch.load());
-    CHECK(c.fills() <= 12);  // never more fills than distinct indices touched
+    CHECK(c.fills() > kNumIndices);  // capacity < working set forces repeated refills
 }
