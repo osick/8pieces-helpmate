@@ -11,9 +11,16 @@ local tool disagrees with the pin.
 
 Versions are parsed from the workflow file rather than duplicated here, so
 there is exactly one place to bump them.
+
+The comparison is against the installed pip DISTRIBUTION, not against
+whatever binary is first on PATH. CI's Ubuntu runner ships a system
+clang-format 18.1.3 from apt while the cppformat job pip-installs the
+pinned 22.1.8, so a PATH-based check failed in a job that installs no
+clang-format at all. What is pinned is the pip distribution, so that is
+what is asserted; a job without it installed skips.
 """
 import re
-import subprocess
+from importlib.metadata import PackageNotFoundError, version as dist_version
 from pathlib import Path
 
 import pytest
@@ -46,49 +53,14 @@ def test_workflow_pins_all_three_tool_versions():
         assert re.fullmatch(r"\d+(\.\d+){1,3}", version), (tool, version)
 
 
-def test_ruff_version_matches_pin():
-    exe = "ruff"
-    import shutil
-    if shutil.which(exe) is None:
-        pytest.skip(f"{exe} is not installed")
-    out = subprocess.run([exe, "--version"], capture_output=True, text=True, check=False).stdout
-    m = re.search(r"ruff (\S+)", out)
-    assert m, out
-    assert m.group(1) == PINNED["ruff"], (
-        f"local ruff is {m.group(1)}, but .github/workflows/ci.yml pins "
-        f"{PINNED['ruff']} -- reinstall with "
-        f"`pip install ruff=={PINNED['ruff']}` or bump the pin deliberately"
-    )
-
-
-def test_mypy_version_matches_pin():
-    import shutil
-    if shutil.which("mypy") is None:
-        pytest.skip("mypy is not installed")
-    out = subprocess.run(
-        ["python3", "-m", "mypy", "--version"], capture_output=True, text=True, check=False
-    ).stdout
-    m = re.search(r"mypy (\S+)", out)
-    assert m, out
-    assert m.group(1) == PINNED["mypy"], (
-        f"local mypy is {m.group(1)}, but .github/workflows/ci.yml pins "
-        f"{PINNED['mypy']} -- reinstall with "
-        f"`pip install mypy=={PINNED['mypy']}` or bump the pin deliberately"
-    )
-
-
-def test_clang_format_version_matches_pin():
-    import shutil
-    if shutil.which("clang-format") is None:
-        pytest.skip("clang-format is not installed")
-    out = subprocess.run(
-        ["clang-format", "--version"], capture_output=True, text=True, check=False
-    ).stdout
-    m = re.search(r"clang-format version (\S+)", out)
-    assert m, out
-    assert m.group(1) == PINNED["clang-format"], (
-        f"local clang-format is {m.group(1)}, but .github/workflows/ci.yml pins "
-        f"{PINNED['clang-format']} -- reinstall with "
-        f"`pip install clang-format=={PINNED['clang-format']}` or bump the pin "
-        f"deliberately"
+@pytest.mark.parametrize("tool", sorted(PINNED))
+def test_installed_version_matches_pin(tool):
+    try:
+        installed = dist_version(tool)
+    except PackageNotFoundError:
+        pytest.skip(f"{tool} is not installed in this environment")
+    assert installed == PINNED[tool], (
+        f"installed {tool} is {installed}, but .github/workflows/ci.yml pins "
+        f"{PINNED[tool]} -- reinstall with `pip install {tool}=={PINNED[tool]}` "
+        f"or bump the pin deliberately"
     )
