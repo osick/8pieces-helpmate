@@ -27,6 +27,9 @@ jobs:
           test "$TAG" = "$FILE" || {
             echo "tag $GITHUB_REF_NAME does not match VERSION ($FILE)"; exit 1; }
 
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
+
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 

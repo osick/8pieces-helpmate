@@ -41,6 +41,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
+
       - name: Cache FetchContent dependencies
         uses: actions/cache@v4
         with:
@@ -94,6 +97,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
+
       # scikit-build-core runs its own CMake configure (with -DHELPMATE_PYTHON=ON)
       # inside the pip build; FetchContent fetches the pinned deps over HTTPS.
       # helpmate-api requires helpmate, so the three distributions install in
@@ -122,6 +128,12 @@ jobs:
 
       # helpmate-api requires helpmate, so the three distributions install in
       # dependency order.
+      # `pip install .[dev]` below runs the CMake configure, which hard-fails
+      # without zstd headers. The runner image ships the zstd CLI but not the
+      # dev package.
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
+
       - name: Install all three distributions
         run: |
           python -m pip install .[dev]
@@ -221,6 +233,9 @@ jobs:
       CXX: g++-13
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install libzstd
+        run: sudo apt-get update && sudo apt-get install -y libzstd-dev
 
       - name: Cache FetchContent dependencies
         uses: actions/cache@v4

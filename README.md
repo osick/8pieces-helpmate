@@ -378,6 +378,21 @@ unsolvable/invalid cells. `TableReader`/`TableWriter` (mmap-backed, atomic
 write-then-rename) are the whole implementation; see
 [`src/core/format/table_file.h`](src/core/format/table_file.h) for the exact layout.
 
+Since v0.7.5 there's a third table shape alongside the raw layout above and
+the all-unsolvable marker: a **block-compressed** table (`version = 3`,
+`encoding = 2`) that cuts the four planes into fixed-size blocks (64 KiB by
+default, tunable per run with `--block-size`) compressed independently with
+zstd, keeping random-access probing cheap while shrinking real multi-piece
+tables by 9-14x on disk. Compressing a table you actively mine with
+`helpmate mine --count`/`--starts` costs ~6.5x on that path, regardless of
+block size (a 16 KiB default was tried and measured to help nothing there
+while compressing worse) — see [docs/USAGE.md's Table format
+section](docs/USAGE.md#table-format) for the measured trade-off. It's opt-in
+(`gen --compress`, `compact --compress`), requires a v0.7.5+ reader, and an
+already-compressed table can be re-blocked to a new `--block-size` in place
+without regenerating it — see USAGE.md for the full format, the measured
+numbers, and the `compact --compress` conversion mechanics.
+
 ## Architecture
 
 - **Indexing** (`src/core/indexing/`): each position maps to a dense integer index within

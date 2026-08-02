@@ -1,8 +1,5 @@
 #include "generator/generator.h"
-#include "generator/eval.h"
-#include "generator/parallel.h"
-#include "chess/board.h"
-#include "version.h"
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -14,17 +11,24 @@
 #include <iostream>
 #include <map>
 
+#include "chess/board.h"
+#include "generator/eval.h"
+#include "generator/parallel.h"
+#include "version.h"
+
 namespace hm {
 
 std::string describe_position(const std::vector<PlacedPiece>& pp, Color stm) {
-    try { return Board::from_pieces(pp, stm).fen(); } catch (...) { return "<unavailable>"; }
+    try {
+        return Board::from_pieces(pp, stm).fen();
+    } catch (...) { return "<unavailable>"; }
 }
 
 namespace {
 // Names the cell a failed lookup came from. Built only on the throwing path.
 std::string cell_context(const Material& mat, uint64_t cell, int stm, int depth) {
-    return "slice " + mat.name() + ", cell " + std::to_string(cell) +
-           ", stm " + (stm ? "black" : "white") + ", scan depth " + std::to_string(depth);
+    return "slice " + mat.name() + ", cell " + std::to_string(cell) + ", stm " + (stm ? "black" : "white") +
+           ", scan depth " + std::to_string(depth);
 }
 
 std::string gib(uint64_t bytes) {
@@ -57,8 +61,8 @@ std::optional<uint64_t> mem_available_bytes() {
     return std::nullopt;
 }
 
-std::optional<std::string> ram_guard_error(const std::string& slice,
-                                           uint64_t required_bytes, uint64_t available_bytes) {
+std::optional<std::string> ram_guard_error(const std::string& slice, uint64_t required_bytes,
+                                           uint64_t available_bytes) {
     if (required_bytes <= available_bytes) return std::nullopt;
     return "not enough memory to generate slice " + slice + ": its four value planes need ~" +
            gib(required_bytes) + " GiB but only " + gib(available_bytes) +
@@ -73,17 +77,19 @@ bool slice_has_any_mate(const Material& m) {
     for (uint64_t c = 0; c < n; ++c) {
         if (!idx.decode(c, pp)) continue;
         auto e = idx.encode(pp);
-        if (!e || *e != c) continue;                    // non-canonical duplicate
-        b.reset(pp, Color::Black);                       // mates are black-to-move
-        if (b.opponent_in_check()) continue;             // illegal for this stm
+        if (!e || *e != c) continue;          // non-canonical duplicate
+        b.reset(pp, Color::Black);            // mates are black-to-move
+        if (b.opponent_in_check()) continue;  // illegal for this stm
         if (b.state() == PosState::Checkmate) return true;
     }
     return false;
 }
 
-SliceGen::SliceGen(const Material& m, const GenOptions& opt)
-    : mat_(m), opt_(opt), idx_(m), ps_(idx_.size()) {
-    for (int s = 0; s < 2; ++s) { dtm_[s].assign(ps_, DTM_UNSET); cnt_[s].assign(ps_, 0); }
+SliceGen::SliceGen(const Material& m, const GenOptions& opt) : mat_(m), opt_(opt), idx_(m), ps_(idx_.size()) {
+    for (int s = 0; s < 2; ++s) {
+        dtm_[s].assign(ps_, DTM_UNSET);
+        cnt_[s].assign(ps_, 0);
+    }
 }
 
 void SliceGen::init_pass() {
@@ -93,20 +99,29 @@ void SliceGen::init_pass() {
     // so a disjoint [begin,end) range per worker is race-free; each worker
     // gets its own Board/pp (Board is stateful, not shareable across threads).
     parallel_for(ps_, opt_.threads, [this](uint64_t begin, uint64_t end) {
-        std::vector<PlacedPiece> pp; Board b;
+        std::vector<PlacedPiece> pp;
+        Board b;
         for (uint64_t c = begin; c < end; ++c) {
-            if (!idx_.decode(c, pp)) { dtm_[0][c] = dtm_[1][c] = DTM_INVALID; continue; }
+            if (!idx_.decode(c, pp)) {
+                dtm_[0][c] = dtm_[1][c] = DTM_INVALID;
+                continue;
+            }
             auto e = idx_.encode(pp);
-            if (!e || *e != c)       { dtm_[0][c] = dtm_[1][c] = DTM_INVALID; continue; }  // non-canonical duplicate
+            if (!e || *e != c) {
+                dtm_[0][c] = dtm_[1][c] = DTM_INVALID;
+                continue;
+            }  // non-canonical duplicate
             for (int s = 0; s < 2; ++s) {
                 b.reset(pp, (Color)s);
-                if (b.opponent_in_check()) { dtm_[s][c] = DTM_INVALID; continue; }
+                if (b.opponent_in_check()) {
+                    dtm_[s][c] = DTM_INVALID;
+                    continue;
+                }
                 if (s == 1 && b.state() == PosState::Checkmate) dtm_[1][c] = 0;
             }
         }
     });
-    if (opt_.progress)
-        std::cerr << "  " << mat_.name() << ": init pass done (" << secs_since(t0) << " s)\n";
+    if (opt_.progress) std::cerr << "  " << mat_.name() << ": init pass done (" << secs_since(t0) << " s)\n";
 }
 
 void SliceGen::count_sweep() {
@@ -118,13 +133,15 @@ void SliceGen::count_sweep() {
     // independent of each other and safe to split across worker threads;
     // the d loop itself stays sequential since depth d depends on depth d-1.
     parallel_for(ps_, opt_.threads, [this](uint64_t begin, uint64_t end) {
-        for (uint64_t c = begin; c < end; ++c) if (dtm_[1][c] == 0) cnt_[1][c] = 1;
+        for (uint64_t c = begin; c < end; ++c)
+            if (dtm_[1][c] == 0) cnt_[1][c] = 1;
     });
     for (int d = 1; d <= max_dtm_; ++d) {
         auto t0 = std::chrono::steady_clock::now();
         int s = (d % 2) ? 0 : 1;
         parallel_for(ps_, opt_.threads, [this, s, d](uint64_t begin, uint64_t end) {
-            std::vector<PlacedPiece> pp; Board b;
+            std::vector<PlacedPiece> pp;
+            Board b;
             for (uint64_t c = begin; c < end; ++c) {
                 if (dtm_[s][c] != d) continue;
                 if (!idx_.decode(c, pp))
@@ -140,17 +157,17 @@ void SliceGen::count_sweep() {
                     }
                 } catch (const GeneratorLookupError& e) {
                     throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
-                } catch (const std::out_of_range& e) {    // TableReader::get bounds guard
+                } catch (const std::out_of_range& e) {  // TableReader::get bounds guard
                     throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
                 }
-                cnt_[s][c] = (uint8_t)total;              // >= 1 by construction of dtm
+                cnt_[s][c] = (uint8_t)total;  // >= 1 by construction of dtm
             }
         });
         // Reported from the coordinating thread at a pass boundary only --
         // the worker loop above is untouched by any progress bookkeeping.
         if (opt_.progress)
-            std::cerr << "  " << mat_.name() << ": count sweep d=" << d << "/" << max_dtm_
-                      << " done (" << secs_since(t0) << " s)\n";
+            std::cerr << "  " << mat_.name() << ": count sweep d=" << d << "/" << max_dtm_ << " done ("
+                      << secs_since(t0) << " s)\n";
     }
 }
 
@@ -173,10 +190,10 @@ ValuePair SliceGen::lookup_epless(Board& b) {
             throw GeneratorLookupError("position not encodable in own slice " + m.name() +
                                        "; position after move " + describe_position(pp, b.stm()));
         if (*e >= ps_)
-            throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for slice " +
-                                       m.name() + " (plane size " + std::to_string(ps_) +
-                                       "); position after move " + describe_position(pp, b.stm()));
-        return { dtm_[s][*e], cnt_[s][*e] };
+            throw GeneratorLookupError("cell " + std::to_string(*e) + " out of range for slice " + m.name() +
+                                       " (plane size " + std::to_string(ps_) + "); position after move " +
+                                       describe_position(pp, b.stm()));
+        return {dtm_[s][*e], cnt_[s][*e]};
     }
     return subs_.lookup(m, pp, b.stm());
 }
@@ -200,11 +217,12 @@ bool SliceGen::scan_pass(int d) {
     int s = (int)mover;
     std::atomic<uint64_t> resolved{0};
     parallel_for(ps_, opt_.threads, [this, s, mover, d, &resolved](uint64_t begin, uint64_t end) {
-        std::vector<PlacedPiece> pp; Board b;
+        std::vector<PlacedPiece> pp;
+        Board b;
         uint64_t local = 0;
         for (uint64_t c = begin; c < end; ++c) {
             if (dtm_[s][c] != DTM_UNSET) continue;
-            if (!idx_.decode(c, pp))                       // UNSET cells always decode
+            if (!idx_.decode(c, pp))  // UNSET cells always decode
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": UNSET cell does not decode");
             b.reset(pp, mover);
             // Catch here rather than tracking the current cell in a variable: zero-cost EH puts
@@ -215,11 +233,15 @@ bool SliceGen::scan_pass(int d) {
                     b.make(m);
                     ValuePair v = eval_board(b, [this](Board& x) { return lookup_epless(x); });
                     b.unmake(m);
-                    if (v.dtm == d - 1) { dtm_[s][c] = (uint8_t)d; ++local; break; }
+                    if (v.dtm == d - 1) {
+                        dtm_[s][c] = (uint8_t)d;
+                        ++local;
+                        break;
+                    }
                 }
             } catch (const GeneratorLookupError& e) {
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
-            } catch (const std::out_of_range& e) {         // TableReader::get bounds guard
+            } catch (const std::out_of_range& e) {  // TableReader::get bounds guard
                 throw GeneratorLookupError(cell_context(mat_, c, s, d) + ": " + e.what());
             }
         }
@@ -228,8 +250,8 @@ bool SliceGen::scan_pass(int d) {
     uint64_t n = resolved.load();
     // Reported from the coordinating thread at the pass boundary only.
     if (opt_.progress)
-        std::cerr << "  " << mat_.name() << ": pass d=" << d << " resolved " << n
-                  << " cells (" << secs_since(t0) << " s)\n";
+        std::cerr << "  " << mat_.name() << ": pass d=" << d << " resolved " << n << " cells ("
+                  << secs_since(t0) << " s)\n";
     return n > 0;
 }
 
@@ -237,11 +259,21 @@ void SliceGen::run_all_passes() {
     subs_.load_for(mat_, opt_.tables_dir);
     init_pass();
     max_dtm_ = -1;
-    { bool any0 = false; for (uint64_t c = 0; c < ps_; ++c) if (dtm_[1][c] == 0) { any0 = true; break; }
-      if (any0) max_dtm_ = 0; }
+    {
+        bool any0 = false;
+        for (uint64_t c = 0; c < ps_; ++c)
+            if (dtm_[1][c] == 0) {
+                any0 = true;
+                break;
+            }
+        if (any0) max_dtm_ = 0;
+    }
     int misses = 0;
     for (int d = 1; d <= DTM_MAX && misses < 2; ++d) {
-        if (scan_pass(d)) { max_dtm_ = d; misses = 0; } else misses++;
+        if (scan_pass(d)) {
+            max_dtm_ = d;
+            misses = 0;
+        } else misses++;
     }
 }
 
@@ -256,8 +288,14 @@ nlohmann::json SliceGen::stats_json() const {
         std::map<int, std::map<int, uint64_t>> uniq;
         for (uint64_t c = 0; c < ps_; ++c) {
             uint8_t d = dtm_[s][c];
-            if (d == DTM_INVALID) { ++invalid; continue; }
-            if (d == DTM_UNSOLVABLE) { ++unsolvable; continue; }
+            if (d == DTM_INVALID) {
+                ++invalid;
+                continue;
+            }
+            if (d == DTM_UNSOLVABLE) {
+                ++unsolvable;
+                continue;
+            }
             ++hist[d];
             ++uniq[d][cnt_[s][c]];
         }
@@ -280,7 +318,7 @@ nlohmann::json SliceGen::stats_json() const {
     json deepest = json::array(), deepest_unique = json::array();
     if (max_dtm_ >= 0) {
         std::vector<PlacedPiece> pp;
-        int s = (max_dtm_ % 2) ? 0 : 1;                 // parity: odd depths are wtm, even are btm
+        int s = (max_dtm_ % 2) ? 0 : 1;  // parity: odd depths are wtm, even are btm
         for (uint64_t c = 0; c < ps_ && deepest.size() < 5; ++c) {
             if (dtm_[s][c] != (uint8_t)max_dtm_) continue;
             if (!idx_.decode(c, pp)) continue;
@@ -317,16 +355,21 @@ void SliceGen::finalize_and_write() {
     std::string meta = j.dump(2);
     std::filesystem::create_directories(opt_.tables_dir);
     std::string base = opt_.tables_dir + "/" + mat_.name();
-    TableWriter::write(base + ".hm", mat_, ps_,
-                       max_dtm_ < 0 ? DTM_UNSOLVABLE : (uint8_t)max_dtm_, meta,
-                       dtm_[0].data(), dtm_[1].data(), cnt_[0].data(), cnt_[1].data());
+    uint8_t max_dtm_byte = max_dtm_ < 0 ? DTM_UNSOLVABLE : (uint8_t)max_dtm_;
+    if (opt_.compress) {
+        TableWriter::write_compressed(base + ".hm", mat_, ps_, max_dtm_byte, meta, dtm_[0].data(),
+                                      dtm_[1].data(), cnt_[0].data(), cnt_[1].data(), opt_.block_size);
+    } else {
+        TableWriter::write(base + ".hm", mat_, ps_, max_dtm_byte, meta, dtm_[0].data(), dtm_[1].data(),
+                           cnt_[0].data(), cnt_[1].data());
+    }
     std::ofstream out(base + ".stats.json", std::ios::trunc);
     out << meta;
 }
 
 std::vector<std::string> generate(const Material& root, const GenOptions& opt_in) {
     GenOptions opt = opt_in;
-    if (opt.verbose) opt.progress = true;             // --verbose implies --progress
+    if (opt.verbose) opt.progress = true;  // --verbose implies --progress
 
     auto closure = Material::closure_topo(root);
 
@@ -334,7 +377,10 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
     // can be costed before a single byte is allocated. An impossible run
     // (typically the root slice of a 7-8 piece material) must fail *now*, not
     // after days of sub-slice generation.
-    struct Todo { const Material* m; uint64_t cells; };
+    struct Todo {
+        const Material* m;
+        uint64_t cells;
+    };
     std::vector<Todo> missing;
     for (auto& m : closure)
         if (!std::filesystem::exists(opt.tables_dir + "/" + m.name() + ".hm"))
@@ -347,18 +393,16 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
     auto avail = mem_available_bytes();
     if (!missing.empty()) {
         auto largest = std::max_element(missing.begin(), missing.end(),
-            [](const Todo& a, const Todo& b) { return a.cells < b.cells; });
+                                        [](const Todo& a, const Todo& b) { return a.cells < b.cells; });
         if (opt.verbose) {
-            std::cerr << "gen " << root.name() << ": " << missing.size()
-                      << " slice(s) to build; largest " << largest->m->name() << " ("
-                      << largest->cells << " cells, ~" << gib(plane_ram_bytes(largest->cells))
-                      << " GiB RAM";
+            std::cerr << "gen " << root.name() << ": " << missing.size() << " slice(s) to build; largest "
+                      << largest->m->name() << " (" << largest->cells << " cells, ~"
+                      << gib(plane_ram_bytes(largest->cells)) << " GiB RAM";
             if (avail) std::cerr << "; " << gib(*avail) << " GiB available";
             std::cerr << ")\n";
         }
         if (!opt.force_ram && avail)
-            if (auto err = ram_guard_error(largest->m->name(),
-                                           plane_ram_bytes(largest->cells), *avail))
+            if (auto err = ram_guard_error(largest->m->name(), plane_ram_bytes(largest->cells), *avail))
                 throw std::runtime_error(*err);
     }
 
@@ -379,9 +423,13 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
                 TableReader::OpenError oerr = TableReader::OpenError::None;
                 auto r = TableReader::open(spath, &oerr);
                 if (!r && oerr == TableReader::OpenError::UnsupportedVersion)
-                    throw std::runtime_error("table " + spath + " was written by a newer helpmate"
+                    throw std::runtime_error("table " + spath +
+                                             " was written by a newer helpmate"
                                              " (unsupported table format version); upgrade this build");
-                if (!r) { successors_dead = false; break; }
+                if (!r) {
+                    successors_dead = false;
+                    break;
+                }
                 // Identity check: the file must actually be the table its name promises,
                 // or a misnamed/misplaced/stale table would silently feed a wrong prune
                 // verdict -- the one correctness-critical decision in the whole prune path.
@@ -393,10 +441,12 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
                     throw std::runtime_error("sub-table " + spath + " has plane size " +
                                              std::to_string(r->plane_size()) + ", expected " +
                                              std::to_string(si.size()) + " for " + s.name());
-                if (!r->all_unsolvable()) { successors_dead = false; break; }
+                if (!r->all_unsolvable()) {
+                    successors_dead = false;
+                    break;
+                }
             }
-            bool unsolvable = m.mating_side_is_bare_king() ||
-                              (successors_dead && !slice_has_any_mate(m));
+            bool unsolvable = m.mating_side_is_bare_king() || (successors_dead && !slice_has_any_mate(m));
             if (unsolvable) {
                 uint64_t ps = SliceIndex(m).size();
                 // Same shape as SliceGen::stats_json(): a marker table's reader
@@ -418,11 +468,9 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
                 std::string meta = j.dump(2);
                 std::filesystem::create_directories(opt.tables_dir);
                 TableWriter::write_unsolvable(path, m, ps, meta);
-                std::ofstream(opt.tables_dir + "/" + m.name() + ".stats.json",
-                              std::ios::trunc) << meta;
+                std::ofstream(opt.tables_dir + "/" + m.name() + ".stats.json", std::ios::trunc) << meta;
                 if (opt.verbose)
-                    std::cerr << "pruned " << m.name()
-                              << " (provably no helpmate; marker table written)\n";
+                    std::cerr << "pruned " << m.name() << " (provably no helpmate; marker table written)\n";
                 written.push_back(path);
                 continue;
             }
@@ -436,8 +484,7 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
             if (auto now_avail = mem_available_bytes())
                 if (auto err = ram_guard_error(m.name(), plane_ram_bytes(cells), *now_avail))
                     throw std::runtime_error(*err);
-        if (opt.verbose)
-            std::cerr << "generating " << m.name() << " (" << cells << " cells)...\n";
+        if (opt.verbose) std::cerr << "generating " << m.name() << " (" << cells << " cells)...\n";
         auto t0 = std::chrono::steady_clock::now();
         SliceGen g(m, opt);
         g.run_all_passes();
@@ -445,8 +492,7 @@ std::vector<std::string> generate(const Material& root, const GenOptions& opt_in
         g.finalize_and_write();
         if (opt.verbose) {
             int md = g.max_dtm() < 0 ? (int)DTM_UNSOLVABLE : g.max_dtm();
-            std::cerr << "done " << m.name() << " (max_dtm=" << md << ", "
-                      << secs_since(t0) << " seconds)\n";
+            std::cerr << "done " << m.name() << " (max_dtm=" << md << ", " << secs_since(t0) << " seconds)\n";
         }
         written.push_back(path);
     }

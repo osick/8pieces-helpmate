@@ -1,9 +1,5 @@
-#include "format/table_file.h"
-#include "generator/generator.h"
-#include "indexing/material.h"
-#include "probe/tablebase.h"
-#include "version.h"
 #include <algorithm>
+#include <chrono>
 #include <climits>
 #include <filesystem>
 #include <fstream>
@@ -12,82 +8,98 @@
 #include <string>
 #include <vector>
 
+#include "format/table_file.h"
+#include "generator/generator.h"
+#include "indexing/material.h"
+#include "probe/tablebase.h"
+#include "version.h"
+
 using namespace hm;
 
 namespace {
 
 void usage() {
-    std::cerr <<
-        "helpmate - build and query helpmate chess tablebases\n"
-        "\n"
-        "Usage:\n"
-        "  helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose]\n"
-        "               [--progress] [--force-ram]\n"
-        "  helpmate probe <FEN> [--tables DIR]\n"
-        "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
-        "  helpmate stats <MATERIAL> [--tables DIR]\n"
-        "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
-        "               [--max N] [--tables DIR]\n"
-        "  helpmate compact <DIR> [--dry-run]\n"
-        "  helpmate --version\n"
-        "\n"
-        "MATERIAL is a canonical piece string, e.g. \"KQvk\" (White king+queen vs\n"
-        "black king) or \"KBNvkq\". FEN is standard 6-field notation; castling\n"
-        "rights must be \"-\" (this engine has no castling).\n"
-        "\n"
-        "Commands:\n"
-        "  gen    Generate every table needed to answer queries about MATERIAL\n"
-        "         (including sub-slices reached by captures/promotions), writing\n"
-        "         one <name>.hm file plus a <name>.stats.json sidecar per slice\n"
-        "         into --tables DIR. Existing files are left alone (re-run is\n"
-        "         cheap after adding a new root material).\n"
-        "  probe  Look up one position: distance-to-mate (dtm), helpmate notation\n"
-        "         (h#N / h#N.5), and how many optimal replies tie for best.\n"
-        "  line   Print one optimal mating line from FEN as SAN moves. With\n"
-        "         --all, print every optimal line (one per output line), capped\n"
-        "         at --max.\n"
-        "  stats  Print the generation-time statistics JSON for MATERIAL (cell\n"
-        "         counts, dtm histogram, deepest positions, ...).\n"
-        "  mine   Print FENs of positions in MATERIAL matching --dtm exactly (and,\n"
-        "         if given, --count exactly), up to --max, one per line.\n"
-        "  compact Rewrite every .hm table in DIR whose cells are all\n"
-        "         unsolvable (or invalid) as a tiny marker file, reclaiming\n"
-        "         disk space. Tables with any solvable cell are left\n"
-        "         untouched. --dry-run reports what would be rewritten\n"
-        "         without writing anything.\n"
-        "\n"
-        "Options:\n"
-        "  --tables DIR   table directory (default: \"tables\")\n"
-        "  --threads N    worker threads for gen (default: 1)\n"
-        "  --verbose      gen: per-slice lifecycle lines on stderr (closure\n"
-        "                 summary, generating/cached/done per slice); implies\n"
-        "                 --progress. stdout stays scriptable.\n"
-        "  --progress     gen: per-pass progress lines on stderr while a slice\n"
-        "                 is being generated (init pass, each scan pass with\n"
-        "                 cells resolved, each count-sweep depth, with timings)\n"
-        "  --force-ram    gen: skip the RAM guard (which refuses to start a\n"
-        "                 slice whose planes exceed available memory)\n"
-        "  --all          line: print every optimal line, not just one\n"
-        "  --max N        cap on lines/FENs printed (default: 10)\n"
-        "  --dtm D        mine: required, exact distance-to-mate to match\n"
-        "  --count C      mine: optional, exact optimal-reply count to match\n"
-        "  --starts N     mine: optional, exact number of distinct first moves across\n"
-        "                 the optimal solutions (must be >= 1, and <= --count if given)\n"
-        "  --ends N       mine: optional, exact number of distinct mating moves\n"
-        "  --dry-run      compact: report what would be rewritten, write nothing\n"
-        "  --version      print version (\"helpmate " << HELPMATE_VERSION << "\") and exit\n"
-        "\n"
-        "Examples:\n"
-        "  helpmate gen KQvk --tables tt\n"
-        "  helpmate probe \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt\n"
-        "  helpmate line  \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt --all\n"
-        "  helpmate stats KQvk --tables tt\n"
-        "  helpmate mine KQvk --dtm 2 --count 1 --max 5 --tables tt\n"
-        "  helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --tables tt\n"
-        "\n"
-        "Exit codes: 0 success (an \"unsolvable\" answer is still success), 2 a\n"
-        "table needed to answer the query is missing (message says which one and\n"
-        "how to build it), 3 bad usage or unparseable input.\n";
+    std::cerr << "helpmate - build and query helpmate chess tablebases\n"
+                 "\n"
+                 "Usage:\n"
+                 "  helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose]\n"
+                 "               [--progress] [--force-ram] [--compress] [--block-size N]\n"
+                 "  helpmate probe <FEN> [--tables DIR]\n"
+                 "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
+                 "  helpmate stats <MATERIAL> [--tables DIR]\n"
+                 "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
+                 "               [--max N] [--tables DIR]\n"
+                 "  helpmate compact <DIR> [--dry-run] [--compress] [--block-size N]\n"
+                 "  helpmate --version\n"
+                 "\n"
+                 "MATERIAL is a canonical piece string, e.g. \"KQvk\" (White king+queen vs\n"
+                 "black king) or \"KBNvkq\". FEN is standard 6-field notation; castling\n"
+                 "rights must be \"-\" (this engine has no castling).\n"
+                 "\n"
+                 "Commands:\n"
+                 "  gen    Generate every table needed to answer queries about MATERIAL\n"
+                 "         (including sub-slices reached by captures/promotions), writing\n"
+                 "         one <name>.hm file plus a <name>.stats.json sidecar per slice\n"
+                 "         into --tables DIR. Existing files are left alone (re-run is\n"
+                 "         cheap after adding a new root material).\n"
+                 "  probe  Look up one position: distance-to-mate (dtm), helpmate notation\n"
+                 "         (h#N / h#N.5), and how many optimal replies tie for best.\n"
+                 "  line   Print one optimal mating line from FEN as SAN moves. With\n"
+                 "         --all, print every optimal line (one per output line), capped\n"
+                 "         at --max.\n"
+                 "  stats  Print the generation-time statistics JSON for MATERIAL (cell\n"
+                 "         counts, dtm histogram, deepest positions, ...).\n"
+                 "  mine   Print FENs of positions in MATERIAL matching --dtm exactly (and,\n"
+                 "         if given, --count exactly), up to --max, one per line.\n"
+                 "  compact Rewrite every .hm table in DIR whose cells are all\n"
+                 "         unsolvable (or invalid) as a tiny marker file, reclaiming\n"
+                 "         disk space. Tables with any solvable cell are left\n"
+                 "         untouched. --dry-run reports what would be rewritten\n"
+                 "         without writing anything. --compress instead rewrites\n"
+                 "         raw tables as block-compressed (see --compress below).\n"
+                 "\n"
+                 "Options:\n"
+                 "  --tables DIR   table directory (default: \"tables\")\n"
+                 "  --threads N    worker threads for gen (default: 1)\n"
+                 "  --verbose      gen: per-slice lifecycle lines on stderr (closure\n"
+                 "                 summary, generating/cached/done per slice); implies\n"
+                 "                 --progress. stdout stays scriptable.\n"
+                 "  --progress     gen: per-pass progress lines on stderr while a slice\n"
+                 "                 is being generated (init pass, each scan pass with\n"
+                 "                 cells resolved, each count-sweep depth, with timings)\n"
+                 "  --force-ram    gen: skip the RAM guard (which refuses to start a\n"
+                 "                 slice whose planes exceed available memory)\n"
+                 "  --compress     gen: write block-compressed tables (v0.7.5+ readers only)\n"
+                 "                 compact: rewrite existing tables as block-compressed\n"
+                 "  --block-size N gen/compact --compress: block size in KiB (default 64,\n"
+                 "                 i.e. 64 KiB -- mine --count/--starts runs ~6.5x slower on a\n"
+                 "                 compressed table at any block size; see docs/USAGE.md).\n"
+                 "                 Must be >= 4 (4 KiB) and <= 16384 (16 MiB). compact\n"
+                 "                 --compress can re-block an already-compressed table to a\n"
+                 "                 new size in place, without regenerating it.\n"
+                 "  --all          line: print every optimal line, not just one\n"
+                 "  --max N        cap on lines/FENs printed (default: 10)\n"
+                 "  --dtm D        mine: required, exact distance-to-mate to match\n"
+                 "  --count C      mine: optional, exact optimal-reply count to match\n"
+                 "  --starts N     mine: optional, exact number of distinct first moves across\n"
+                 "                 the optimal solutions (must be >= 1, and <= --count if given)\n"
+                 "  --ends N       mine: optional, exact number of distinct mating moves\n"
+                 "  --dry-run      compact: report what would be rewritten, write nothing\n"
+                 "  --version      print version (\"helpmate "
+              << HELPMATE_VERSION
+              << "\") and exit\n"
+                 "\n"
+                 "Examples:\n"
+                 "  helpmate gen KQvk --tables tt\n"
+                 "  helpmate probe \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt\n"
+                 "  helpmate line  \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt --all\n"
+                 "  helpmate stats KQvk --tables tt\n"
+                 "  helpmate mine KQvk --dtm 2 --count 1 --max 5 --tables tt\n"
+                 "  helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --tables tt\n"
+                 "\n"
+                 "Exit codes: 0 success (an \"unsolvable\" answer is still success), 2 a\n"
+                 "table needed to answer the query is missing (message says which one and\n"
+                 "how to build it), 3 bad usage or unparseable input.\n";
 }
 
 // Side to move, read straight from the FEN's 2nd field ("w"/"b"); only called
@@ -114,18 +126,29 @@ bool parse_int(const std::string& value, int& out) {
         if (used != value.size() || v < INT_MIN || v > INT_MAX) return false;
         out = (int)v;
         return true;
-    } catch (const std::exception&) {
-        return false;
-    }
+    } catch (const std::exception&) { return false; }
 }
 
-int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int threads,
-            bool verbose, bool progress, bool force_ram) {
-    if (pos.empty()) { std::cerr << "error: gen needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
+int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int threads, bool verbose,
+            bool progress, bool force_ram, bool compress, uint32_t block_size) {
+    if (pos.empty()) {
+        std::cerr << "error: gen needs a MATERIAL argument (e.g. KQvk)\n\n";
+        usage();
+        return 3;
+    }
     auto m = Material::parse(pos[0]);
-    if (!m) { std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n"; return 3; }
-    GenOptions opt; opt.tables_dir = tables; opt.threads = threads;
-    opt.verbose = verbose; opt.progress = progress; opt.force_ram = force_ram;
+    if (!m) {
+        std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n";
+        return 3;
+    }
+    GenOptions opt;
+    opt.tables_dir = tables;
+    opt.threads = threads;
+    opt.verbose = verbose;
+    opt.progress = progress;
+    opt.force_ram = force_ram;
+    opt.compress = compress;
+    opt.block_size = block_size;
     auto written = generate(*m, opt);
     if (written.empty())
         std::cout << "nothing to do: all tables for " << m->name() << " already exist in " << tables << "\n";
@@ -138,17 +161,28 @@ int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int 
 }
 
 int cmd_probe(const std::vector<std::string>& pos, const std::string& tables) {
-    if (pos.empty()) { std::cerr << "error: probe needs a FEN argument\n\n"; usage(); return 3; }
+    if (pos.empty()) {
+        std::cerr << "error: probe needs a FEN argument\n\n";
+        usage();
+        return 3;
+    }
     Tablebase tb(tables);
     auto p = tb.probe(pos[0]);
-    if (!p) { std::cout << "unsolvable\n"; return 0; }
+    if (!p) {
+        std::cout << "unsolvable\n";
+        return 0;
+    }
     std::cout << "dtm=" << p->dtm << " (" << Tablebase::h_notation(p->dtm, stm_of(pos[0]))
-               << (p->flipped ? ", colors flipped" : "") << ") count=" << p->count << "\n";
+              << (p->flipped ? ", colors flipped" : "") << ") count=" << p->count << "\n";
     return 0;
 }
 
 int cmd_line(const std::vector<std::string>& pos, const std::string& tables, bool all, int maxn) {
-    if (pos.empty()) { std::cerr << "error: line needs a FEN argument\n\n"; usage(); return 3; }
+    if (pos.empty()) {
+        std::cerr << "error: line needs a FEN argument\n\n";
+        usage();
+        return 3;
+    }
     Tablebase tb(tables);
     if (all) {
         auto ls = tb.lines(pos[0], maxn);
@@ -156,56 +190,84 @@ int cmd_line(const std::vector<std::string>& pos, const std::string& tables, boo
         // position is already checkmate (dtm==0) -- both print nothing
         // useful move-wise, so give the same message the non---all branch
         // gives instead of silently printing a blank line.
-        if (ls.empty() || ls[0].empty()) { std::cout << "unsolvable (or already mate: no line to print)\n"; return 0; }
+        if (ls.empty() || ls[0].empty()) {
+            std::cout << "unsolvable (or already mate: no line to print)\n";
+            return 0;
+        }
         for (auto& l : ls) print_line(l);
     } else {
         auto l = tb.line(pos[0]);
-        if (l.empty()) { std::cout << "unsolvable (or already mate: no line to print)\n"; return 0; }
+        if (l.empty()) {
+            std::cout << "unsolvable (or already mate: no line to print)\n";
+            return 0;
+        }
         print_line(l);
     }
     return 0;
 }
 
 int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
-    if (pos.empty()) { std::cerr << "error: stats needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
+    if (pos.empty()) {
+        std::cerr << "error: stats needs a MATERIAL argument (e.g. KQvk)\n\n";
+        usage();
+        return 3;
+    }
     auto m = Material::parse(pos[0]);
-    if (!m) { std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n"; return 3; }
+    if (!m) {
+        std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n";
+        return 3;
+    }
     Tablebase tb(tables);
     std::cout << tb.stats_json(*m) << "\n";
     return 0;
 }
 
-int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count,
-             int maxn, int starts, int ends, bool starts_given, bool ends_given) {
-    if (pos.empty()) { std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n"; usage(); return 3; }
-    if (dtm < 0) { std::cerr << "error: mine requires --dtm D\n\n"; usage(); return 3; }
-    for (auto [flag, val, given, noun] :
-         {std::tuple{"--starts", starts, starts_given, "first moves"},
-          std::tuple{"--ends", ends, ends_given, "mating moves"}}) {
-        if (!given) continue;                            // not given; -1 is a value the
-                                                           // user CAN type, not the sentinel
+int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count, int maxn,
+             int starts, int ends, bool starts_given, bool ends_given) {
+    if (pos.empty()) {
+        std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n";
+        usage();
+        return 3;
+    }
+    if (dtm < 0) {
+        std::cerr << "error: mine requires --dtm D\n\n";
+        usage();
+        return 3;
+    }
+    for (auto [flag, val, given, noun] : {std::tuple{"--starts", starts, starts_given, "first moves"},
+                                          std::tuple{"--ends", ends, ends_given, "mating moves"}}) {
+        if (!given)
+            continue;  // not given; -1 is a value the
+                       // user CAN type, not the sentinel
         if (val < 1) {
-            std::cerr << "error: " << flag << " must be at least 1\n"; return 3;
+            std::cerr << "error: " << flag << " must be at least 1\n";
+            return 3;
         }
         if (count >= 0 && val > count) {
             std::cerr << "error: " << flag << " " << val << " cannot exceed --count " << count
-                      << " (a position with " << count << " solution(s) has at most "
-                      << count << " distinct " << noun << ")\n";
+                      << " (a position with " << count << " solution(s) has at most " << count << " distinct "
+                      << noun << ")\n";
             return 3;
         }
     }
     auto m = Material::parse(pos[0]);
-    if (!m) { std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n"; return 3; }
+    if (!m) {
+        std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n";
+        return 3;
+    }
     Tablebase tb(tables);
     int printed = 0;
     uint64_t skipped = 0;
-    tb.mine(*m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
-            [&](const std::string& fen) {
-                if (printed >= maxn) return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
-                std::cout << fen << "\n";
-                ++printed;
-                return printed < maxn;
-            }, &skipped);
+    tb.mine(
+        *m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
+        [&](const std::string& fen) {
+            if (printed >= maxn)
+                return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
+            std::cout << fen << "\n";
+            ++printed;
+            return printed < maxn;
+        },
+        &skipped);
     if (skipped)
         std::cerr << "note: skipped " << skipped
                   << " position(s) whose solution count is saturated (255+): their"
@@ -213,34 +275,195 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
     return 0;
 }
 
-// helpmate compact <DIR> [--dry-run]
-// Rewrites every .hm in DIR whose cells are all unsolvable as a marker table.
-int cmd_compact(const std::vector<std::string>& args) {
-    if (args.empty()) { std::cerr << "error: compact needs a tables directory\n"; return 3; }
-    std::string dir = args[0];
-    bool dry = std::find(args.begin(), args.end(), "--dry-run") != args.end();
-    if (!std::filesystem::is_directory(dir)) {
-        std::cerr << "error: not a directory: " << dir << "\n"; return 3;
+// Integer MiB truncates a 146 KB -> 71 KB conversion to "0 MiB -> 0 MiB",
+// which reads as "nothing happened" for work that did happen. Pick a unit
+// that keeps one significant figure for the value at hand.
+static std::string human_bytes(uint64_t n) {
+    char buf[32];
+    if (n >= 1024ull * 1024 * 1024)
+        std::snprintf(buf, sizeof buf, "%.2f GiB", double(n) / (1024.0 * 1024 * 1024));
+    else if (n >= 1024ull * 1024) std::snprintf(buf, sizeof buf, "%.1f MiB", double(n) / (1024.0 * 1024));
+    else if (n >= 1024ull) std::snprintf(buf, sizeof buf, "%.1f KiB", double(n) / 1024.0);
+    else std::snprintf(buf, sizeof buf, "%llu B", (unsigned long long)n);
+    return buf;
+}
+
+// helpmate compact <DIR> --compress [--dry-run] [--block-size N]
+// Rewrites every RAW .hm in DIR as block-compressed, streaming off the
+// source table's mapping at constant memory (TableWriter::compress_existing)
+// rather than buffering the four planes -- see compress_existing's doc
+// comment in table_file.h for why that distinction matters (31 GB for a
+// six-piece table if it were buffered). Also re-blocks an already-compressed
+// table found at a different block size than requested (TableWriter::
+// compress_existing now supports that via TableReader::read_range, which
+// works for compressed sources too -- see its doc comment in table_file.h),
+// so a tunable block size never becomes a "regenerate from scratch" trap.
+int cmd_compact_compress(const std::string& dir, bool dry, uint32_t block_size) {
+    int compressed_new = 0, would_compress_new = 0;
+    int reblocked = 0, would_reblock = 0;
+    int already = 0, markers = 0, skipped_recent = 0;
+    uint64_t bytes_before = 0, bytes_after = 0;
+    for (auto& e : std::filesystem::directory_iterator(dir)) {
+        if (e.path().extension() != ".hm") continue;
+
+        // Skip anything written in the last hour: a long generation run may be
+        // active in this directory, and rewriting a table mid-write would
+        // corrupt it. This check comes before the file is even opened.
+        auto age = std::filesystem::file_time_type::clock::now() - std::filesystem::last_write_time(e.path());
+        if (age < std::chrono::hours(1)) {
+            ++skipped_recent;
+            continue;
+        }
+
+        TableReader::OpenError oe = TableReader::OpenError::None;
+        auto r = TableReader::open(e.path().string(), &oe);
+        if (!r && oe == TableReader::OpenError::UnsupportedVersion) {
+            std::cerr << "error: table " << e.path()
+                      << " was written by a newer helpmate"
+                         " (unsupported table format version); upgrade this build\n";
+            return 3;
+        }
+        if (!r) {
+            std::cerr << "error: unreadable table " << e.path() << "\n";
+            return 3;
+        }
+        if (r->all_unsolvable()) {
+            ++markers;
+            continue;
+        }  // nothing to compress
+
+        // A compressed table already at the requested block size is a true
+        // no-op -- re-writing it would burn a full decompress+recompress
+        // pass to produce byte-for-byte the same blocks. Only a DIFFERENT
+        // block size is worth touching.
+        bool reblock = false;
+        if (r->is_compressed()) {
+            if (r->block_size() == block_size) {
+                ++already;
+                continue;
+            }
+            reblock = true;
+        }
+
+        std::string name = r->material_name();
+        std::string stem = e.path().stem().string();
+        // Same identity check as the marker-compaction path below: keyed off
+        // the file's own name, not the header's self-reported material.
+        if (name != stem) {
+            std::cerr << "error: table " << e.path() << " is for material '" << name << "', expected '"
+                      << stem << "' from filename; refusing to touch it\n";
+            return 3;
+        }
+
+        uint64_t size_before = std::filesystem::file_size(e.path());
+        if (dry) {
+            if (reblock) {
+                std::cout << "would re-block " << name << " (" << human_bytes(size_before) << ", "
+                          << (r->block_size() / 1024) << " KiB -> " << (block_size / 1024) << " KiB)\n";
+                ++would_reblock;
+            } else {
+                std::cout << "would compress " << name << " (" << human_bytes(size_before) << ")\n";
+                ++would_compress_new;
+            }
+            bytes_before += size_before;
+            continue;
+        }
+
+        TableWriter::compress_existing(e.path().string(), *r, block_size);
+        r.reset();  // unmap the source mapping only after the rename completes
+        uint64_t size_after = std::filesystem::file_size(e.path());
+        std::cout << (reblock ? "re-blocked " : "compressed ") << name << " (" << human_bytes(size_before)
+                  << " -> " << human_bytes(size_after) << ")\n";
+        bytes_before += size_before;
+        bytes_after += size_after;
+        if (reblock) ++reblocked;
+        else ++compressed_new;
     }
-    uint64_t reclaimed = 0; int rewritten = 0, skipped = 0;
+    int rewritten = compressed_new + reblocked;
+    int would_rewrite = would_compress_new + would_reblock;
+    std::cout << rewritten << " rewritten (" << compressed_new << " compressed, " << reblocked
+              << " re-blocked), ";
+    if (dry)
+        std::cout << would_rewrite << " would-rewrite (dry-run) (" << would_compress_new << " compress, "
+                  << would_reblock << " re-block), ";
+    std::cout << already << " already compressed at this block size, " << markers << " marker(s) skipped, "
+              << skipped_recent << " skipped (recently written)\n";
+    // A bare "N skipped (recently written)" reads as a malfunction to anyone
+    // who just created the files they are trying to convert -- which is what
+    // happens the first time someone tries this on a test directory. State the
+    // reason and the way forward, not just the count.
+    if (skipped_recent > 0 && rewritten == 0 && would_rewrite == 0) {
+        std::cout << "\nNothing was converted: every table here was written in the last hour.\n"
+                  << "That guard exists because a multi-day generation run writes into the\n"
+                  << "directory it also reads sub-slices from, and rewriting a table mid-write\n"
+                  << "would corrupt it.\n"
+                  << "If nothing is generating into " << dir << ", age the files and re-run:\n"
+                  << "  touch -d '2 hours ago' " << dir << "/*.hm\n";
+    }
+    // bytes_after is only ever accumulated on an actual rewrite -- under
+    // --dry-run nothing is compressed, so it stays 0 regardless of how much
+    // would be reclaimed, and printing it as "0 MiB after" on a real corpus
+    // reads as "everything vanishes" rather than "not measured". Report only
+    // the "before" total in dry-run; the real "before -> after" line appears
+    // once files are actually rewritten.
+    if (bytes_before) {
+        if (dry) {
+            std::cout << human_bytes(bytes_before) << " before (after size unknown until rewritten)\n";
+        } else {
+            std::cout << human_bytes(bytes_before) << " before -> " << human_bytes(bytes_after) << " after\n";
+        }
+    }
+    return 0;
+}
+
+// helpmate compact <DIR> [--dry-run] [--compress] [--block-size N]
+// Rewrites every .hm in DIR whose cells are all unsolvable as a marker table.
+// With --compress, rewrites raw tables as block-compressed instead (see
+// cmd_compact_compress above); the two modes are mutually exclusive.
+int cmd_compact(const std::vector<std::string>& args, bool compress, bool dry, uint32_t block_size) {
+    if (args.empty()) {
+        std::cerr << "error: compact needs a tables directory\n";
+        return 3;
+    }
+    std::string dir = args[0];
+    if (!std::filesystem::is_directory(dir)) {
+        std::cerr << "error: not a directory: " << dir << "\n";
+        return 3;
+    }
+    if (compress) return cmd_compact_compress(dir, dry, block_size);
+    uint64_t reclaimed = 0;
+    int rewritten = 0, skipped = 0;
     for (auto& e : std::filesystem::directory_iterator(dir)) {
         if (e.path().extension() != ".hm") continue;
         TableReader::OpenError oerr = TableReader::OpenError::None;
         auto r = TableReader::open(e.path().string(), &oerr);
         if (!r && oerr == TableReader::OpenError::UnsupportedVersion) {
-            std::cerr << "error: table " << e.path() << " was written by a newer helpmate"
+            std::cerr << "error: table " << e.path()
+                      << " was written by a newer helpmate"
                          " (unsupported table format version); upgrade this build\n";
             return 3;
         }
-        if (!r) { std::cerr << "error: unreadable table " << e.path() << "\n"; return 3; }
-        if (r->all_unsolvable()) { ++skipped; continue; }          // already compact
+        if (!r) {
+            std::cerr << "error: unreadable table " << e.path() << "\n";
+            return 3;
+        }
+        if (r->all_unsolvable()) {
+            ++skipped;
+            continue;
+        }  // already compact
         bool any_solvable = false;
         for (uint64_t c = 0; c < r->plane_size() && !any_solvable; ++c)
             for (Color stm : {Color::White, Color::Black}) {
                 uint8_t d = r->get(stm, c).dtm;
-                if (d != DTM_UNSOLVABLE && d != DTM_INVALID) { any_solvable = true; break; }
+                if (d != DTM_UNSOLVABLE && d != DTM_INVALID) {
+                    any_solvable = true;
+                    break;
+                }
             }
-        if (any_solvable) { ++skipped; continue; }
+        if (any_solvable) {
+            ++skipped;
+            continue;
+        }
         uint64_t size = std::filesystem::file_size(e.path());
         std::string name = r->material_name();
         std::string stem = e.path().stem().string();
@@ -250,16 +473,19 @@ int cmd_compact(const std::vector<std::string>& args) {
         // mismatch would rewrite the right .hm but clobber a DIFFERENT material's
         // .stats.json (or write a marker table under the wrong identity).
         if (name != stem) {
-            std::cerr << "error: table " << e.path() << " is for material '" << name
-                      << "', expected '" << stem << "' from filename; refusing to touch it\n";
+            std::cerr << "error: table " << e.path() << " is for material '" << name << "', expected '"
+                      << stem << "' from filename; refusing to touch it\n";
             return 3;
         }
-        std::cout << (dry ? "would rewrite " : "rewrote ") << name
-                  << " (" << size / (1024 * 1024) << " MiB)\n";
+        std::cout << (dry ? "would rewrite " : "rewrote ") << name << " (" << size / (1024 * 1024)
+                  << " MiB)\n";
         reclaimed += size;
         if (!dry) {
             auto mat = Material::parse(name);
-            if (!mat) { std::cerr << "error: bad material in header: " << name << "\n"; return 3; }
+            if (!mat) {
+                std::cerr << "error: bad material in header: " << name << "\n";
+                return 3;
+            }
             // Synthesize fresh marker metadata -- same shape as the generator's
             // opt.prune path (generator.cpp), not the original table's stale
             // meta_json -- so tooling that inspects metadata recognises a
@@ -269,8 +495,7 @@ int cmd_compact(const std::vector<std::string>& args) {
             j["material"] = name;
             j["plane_size"] = ps;
             j["max_dtm"] = (int)DTM_UNSOLVABLE;
-            j["cells"] = {{"invalid", {{"wtm", 0}, {"btm", 0}}},
-                          {"unsolvable", {{"wtm", ps}, {"btm", ps}}}};
+            j["cells"] = {{"invalid", {{"wtm", 0}, {"btm", 0}}}, {"unsolvable", {{"wtm", ps}, {"btm", ps}}}};
             j["dtm_histogram"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
             j["uniqueness"] = {{"wtm", nlohmann::json::object()}, {"btm", nlohmann::json::object()}};
             j["deepest"] = nlohmann::json::array();
@@ -278,15 +503,14 @@ int cmd_compact(const std::vector<std::string>& args) {
             j["generator_version"] = HELPMATE_VERSION;
             j["all_unsolvable"] = true;
             std::string meta = j.dump(2);
-            r.reset();                                   // unmap before replacing
+            r.reset();  // unmap before replacing
             TableWriter::write_unsolvable(e.path().string(), *mat, ps, meta);
             std::ofstream(dir + "/" + stem + ".stats.json", std::ios::trunc) << meta;
         }
         ++rewritten;
     }
-    std::cout << (dry ? "would reclaim " : "reclaimed ") << reclaimed / (1024 * 1024)
-              << " MiB from " << rewritten << " table(s); " << skipped
-              << " left unchanged (solvable or already compact)\n";
+    std::cout << (dry ? "would reclaim " : "reclaimed ") << reclaimed / (1024 * 1024) << " MiB from "
+              << rewritten << " table(s); " << skipped << " left unchanged (solvable or already compact)\n";
     if (rewritten == 0) std::cout << "already compact\n";
     return 0;
 }
@@ -295,9 +519,15 @@ int cmd_compact(const std::vector<std::string>& args) {
 
 int main(int argc, char** argv) {
     std::vector<std::string> args(argv + 1, argv + argc);
-    if (args.empty()) { usage(); return 3; }
+    if (args.empty()) {
+        usage();
+        return 3;
+    }
     std::string cmd = args[0];
-    if (cmd == "--help" || cmd == "-h" || cmd == "help") { usage(); return 0; }
+    if (cmd == "--help" || cmd == "-h" || cmd == "help") {
+        usage();
+        return 0;
+    }
     if (cmd == "--version" || cmd == "-V" || cmd == "version") {
         std::cout << "helpmate " << HELPMATE_VERSION << "\n";
         return 0;
@@ -305,7 +535,9 @@ int main(int argc, char** argv) {
 
     std::string tables = "tables";
     int threads = 1, dtm = -1, count = -1, maxn = 10, starts = -1, ends = -1;
-    bool all = false, verbose = false, progress = false, force_ram = false;
+    int block_size_kib = -1;  // -1 = not given: use kDefaultBlockSize
+    bool all = false, verbose = false, progress = false, force_ram = false, compress = false;
+    bool dry_run = false;
     bool starts_given = false, ends_given = false;
     std::vector<std::string> pos;  // positional args
     // Flags below all take a value; if one appears with nothing after it,
@@ -313,8 +545,8 @@ int main(int argc, char** argv) {
     // --tables` with no directory should not silently treat "--tables" as
     // the FEN's replacement).
     auto needs_value = [](const std::string& a) {
-        return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" ||
-               a == "--max" || a == "--starts" || a == "--ends";
+        return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" || a == "--max" ||
+               a == "--starts" || a == "--ends" || a == "--block-size";
     };
     // Consumes the value following flag `a` (already known to exist) into
     // `target`; on malformed/out-of-range input prints one clear message +
@@ -331,30 +563,74 @@ int main(int argc, char** argv) {
     for (size_t i = 1; i < args.size() && !bad_int; ++i) {
         const std::string& a = args[i];
         if (needs_value(a) && i + 1 >= args.size()) {
-            std::cerr << "error: " << a << " requires a value\n\n"; usage(); return 3;
+            std::cerr << "error: " << a << " requires a value\n\n";
+            usage();
+            return 3;
         }
-        if      (a == "--tables")  tables = args[++i];
+        if (a == "--tables") tables = args[++i];
         else if (a == "--threads") set_int(a, i, threads);
-        else if (a == "--dtm")     set_int(a, i, dtm);
-        else if (a == "--count")   set_int(a, i, count);
-        else if (a == "--max")     set_int(a, i, maxn);
-        else if (a == "--starts")  { set_int(a, i, starts); starts_given = true; }
-        else if (a == "--ends")    { set_int(a, i, ends); ends_given = true; }
-        else if (a == "--all") all = true;
-        else if (a == "--verbose")   verbose = true;
-        else if (a == "--progress")  progress = true;
+        else if (a == "--dtm") set_int(a, i, dtm);
+        else if (a == "--count") set_int(a, i, count);
+        else if (a == "--max") set_int(a, i, maxn);
+        else if (a == "--starts") {
+            set_int(a, i, starts);
+            starts_given = true;
+        } else if (a == "--ends") {
+            set_int(a, i, ends);
+            ends_given = true;
+        } else if (a == "--all") all = true;
+        else if (a == "--verbose") verbose = true;
+        else if (a == "--progress") progress = true;
         else if (a == "--force-ram") force_ram = true;
-        else pos.push_back(a);
+        else if (a == "--compress") compress = true;
+        else if (a == "--dry-run") dry_run = true;
+        else if (a == "--block-size") set_int(a, i, block_size_kib);
+        // An unrecognised --flag is a usage error, never a positional argument.
+        // Silently ignoring it is worse than useless here: `mine --end 2` (the
+        // real flag is --ends) used to run to completion with the filter simply
+        // discarded, returning positions that do not match what was asked for,
+        // with nothing to indicate it.
+        else if (a.rfind("--", 0) == 0) {
+            std::cerr << "error: unknown option \"" << a << "\"\n\n";
+            usage();
+            return 3;
+        } else pos.push_back(a);
     }
     if (bad_int) return 3;
+
+    // --block-size is given in KiB (documented in --help): "64" means 64
+    // KiB == 65536 bytes, matching how the size/miss-cost trade-off is
+    // discussed everywhere else (docs/USAGE.md, kDefaultBlockSize's
+    // comment). Bounds mirror what TableReader::open() enforces at the
+    // upper end (kMaxBlockSize, 16 MiB) plus a 4 KiB floor below which a
+    // block's fixed zstd frame overhead dominates the payload.
+    uint32_t block_size = kDefaultBlockSize;
+    if (block_size_kib != -1) {
+        if (block_size_kib <= 0) {
+            std::cerr << "error: --block-size must be a positive number of KiB, got " << block_size_kib
+                      << "\n";
+            return 3;
+        }
+        uint64_t bytes = static_cast<uint64_t>(block_size_kib) * 1024ull;
+        constexpr uint64_t kMinBlockSizeBytes = 4096;  // 4 KiB
+        if (bytes < kMinBlockSizeBytes || bytes > kMaxBlockSize) {
+            std::cerr << "error: --block-size " << block_size_kib << " (" << bytes
+                      << " bytes) is out of range: must be between " << (kMinBlockSizeBytes / 1024)
+                      << " KiB and " << (kMaxBlockSize / 1024) << " KiB\n";
+            return 3;
+        }
+        block_size = static_cast<uint32_t>(bytes);
+    }
+
     try {
-        if (cmd == "gen")   return cmd_gen(pos, tables, threads, verbose, progress, force_ram);
+        if (cmd == "gen")
+            return cmd_gen(pos, tables, threads, verbose, progress, force_ram, compress, block_size);
         if (cmd == "probe") return cmd_probe(pos, tables);
-        if (cmd == "line")  return cmd_line(pos, tables, all, maxn);
+        if (cmd == "line") return cmd_line(pos, tables, all, maxn);
         if (cmd == "stats") return cmd_stats(pos, tables);
-        if (cmd == "mine")  return cmd_mine(pos, tables, dtm, count, maxn, starts, ends,
-                                             starts_given, ends_given);
-        if (cmd == "compact") return cmd_compact(pos);
+        if (cmd == "mine")
+            return cmd_mine(pos, tables, dtm, count, maxn, starts, ends, starts_given, ends_given);
+        if (cmd == "compact") return cmd_compact(pos, compress, dry_run, block_size);
         std::cerr << "error: unknown command \"" << cmd << "\"\n\n";
         usage();
         return 3;

@@ -65,6 +65,135 @@ consequence: the index bakes in "White delivers mate", so probing a position
 where *Black* is the mating side (e.g. `KvkQ` when only `KQvk` was generated)
 is answered through an automatic **color flip** (see `probe` below).
 
+### Table format
+
+Every `.hm` file opens with the same 64-byte header (magic, `version`,
+`encoding`, canonical material name, symmetry kind, plane size, max dtm) plus
+a length-prefixed JSON metadata blob; what follows the header depends on
+`version`:
+
+- **version 1** — an ordinary table: four contiguous byte planes (DTM-white,
+  DTM-black, count-white, count-black), one byte per index cell, `encoding =
+  1` (raw).
+- **version 2** — a **marker** table: header + JSON only, no payload at all.
+  Every cell reads as unsolvable/invalid. Written when a slice's closure
+  computation finds no solvable cell at all (e.g. `Kvk`); see
+  [Pruning and marker tables](#pruning-and-marker-tables) below.
+- **version 3** — a **block-compressed** table (since v0.7.5), `encoding =
+  2`. The four planes are treated as one logical byte range, cut into
+  fixed-size blocks (**64 KiB by default**, tunable via `--block-size`; see
+  below), each compressed independently with zstd (level 3 by default), plus
+  a `uint64` offset index and a small bounded cache of decompressed blocks in
+  the reader (sized off `block_size`, ~4 MB total regardless of the size
+  chosen). Random access is preserved — a probe decompresses at most one
+  block, not the whole table.
+
+  **If you actively mine a table, know this before you compress it.**
+  `helpmate mine --count`/`--starts` — which computes each matching
+  position's full optimal-solution count, not just whether it is solvable —
+  runs **~6.5x slower** on a compressed table than on the raw equivalent
+  (measured on a real 462 MiB `KRvkbn` table, see the numbers below), and
+  this holds at *every* block size measured, 16 KiB through 64 KiB. That
+  path evaluates every legal move from a position to count optimal replies,
+  and most quiet moves stay within the *same* material's table at cell
+  indices that have no relationship to move adjacency — so the access
+  pattern is effectively random across the whole table, and nearly every
+  probe misses the reader's small decompressed-block cache and pays a full
+  block decompression to read one byte. A plain sequential scan (`mine`
+  without `--count`/`--starts`) barely notices (**+14%**), and a single
+  `probe` barely notices either (**+9%**) — the cost is specific to the
+  random-access `--count`/`--starts` path. A single warm probe measured 2.94
+  us -> 3.02 us (1.09x), and the raw `get()` path itself costs 18.3 ns ->
+  19.3 ns (+5.5%) simply from one reader having to support both formats. If
+  your workload is `mine --count`/`--starts` over a compressed corpus,
+  budget for ~6.5x there specifically; everything else is single-digit
+  percent.
+
+  Compression ratio depends heavily on table size and block size: a real
+  6-piece plane measured 14.5x at 64 KiB/level 3, and a real 5-piece table
+  (`KBvkbn`) went from 462 MiB to 50 MiB end to end (9.22x) at 64 KiB. Small
+  materials compress far less well — `KQvk` at 146 KB measures only 2.0x at
+  64 KiB — because the fixed per-file overhead (header, JSON, a block index
+  covering just 2-3 blocks) dominates a file too small to give zstd much to
+  work with. This is expected, not a defect: don't read "only 2x" on a toy
+  table as evidence something is broken.
+
+  **Why the default is 64 KiB, not something smaller — a hypothesis that
+  was tried and rejected.** Smaller blocks are cheaper to decompress per
+  cache miss, so a 16 KiB default was tried on the theory that it would cut
+  the `mine --count`/`--starts` regression above. In isolation the
+  per-block-miss numbers looked promising: 16 KiB/level 3 gives an 11.4x
+  ratio at ~11 us per block miss; 64 KiB/level 3 gives 14.5x at ~38 us —
+  smaller blocks trade ratio for per-miss cost, so 16 KiB became the
+  default for one version.
+
+  **Measured end to end against a real table, the theory did not pan out,
+  and 16 KiB was reverted before release rather than kept on the strength of
+  the isolated numbers.** Reproducing the `mine --count` regression on a
+  real `KRvkbn` table (462 MiB raw; closure `KRvkbn` + `KRvkb` + `KRvkn` +
+  `KRvk` + `Kvk`; `helpmate mine KRvkbn --dtm 8 --count 1 --max 20000`,
+  `/usr/bin/time`, two runs each):
+
+  | table            | size (bytes)  | size    | ratio | elapsed (2 runs) | vs raw |
+  |------------------|---------------|---------|-------|-------------------|--------|
+  | raw               | 484,493,974  | 462.0 MiB | 1x   | 0.05s, 0.05s     | 1x     |
+  | compressed, 64 KiB | 74,243,651  | 70.8 MiB  | 6.53x | 0.32s, 0.33s     | ~6.5x  |
+  | compressed, 16 KiB | 81,545,441  | 77.8 MiB  | 5.94x | 0.32s, 0.33s     | ~6.5x  |
+
+  The 16 KiB run was produced by *re-blocking* the 64 KiB table in place
+  (`compact --compress --block-size 16`, see below) rather than regenerating
+  it, and its bytes were confirmed identical to compressing the same raw
+  table directly at 16 KiB (`md5sum` match, all four non-marker files in the
+  closure). **16 KiB brought no measurable speed improvement over 64 KiB in
+  this reproduction** — both ran the mining workload in ~0.32-0.33s, roughly
+  6.5x the raw baseline, not the ~1.5-2x the isolated per-block-miss numbers
+  predicted — **while compressing 8% worse** (77.8 MiB vs. 70.8 MiB, 5.94x
+  vs. 6.53x). That is a pure loss: less compression and no measured speed
+  benefit. (The original real-world report that motivated trying a smaller
+  block measured 5x at 64 KiB on a slightly different 477 MB table; 6.5x
+  here is the same class of regression, on different hardware/table.)
+
+  So the default was moved back to 64 KiB. A plausible explanation for why
+  decompression cost doesn't drive the regression, not yet confirmed by
+  profiling: `BlockCache`'s miss path (`src/core/format/block_cache.cpp`)
+  heap-allocates a fresh buffer and takes a mutex for every miss regardless
+  of block size, and that fixed per-miss bookkeeping cost may dominate over
+  the shrinking pure-decompress time, masking the benefit the isolated
+  block-level numbers predict. Treat that as an open, unconfirmed
+  hypothesis — the next step is profiling `BlockCache`'s miss path, not
+  guessing at another block size. Re-run `tools/bench_compression.py` (or
+  the `mine --count` reproduction above) against your own tables if this
+  matters for your workload.
+
+**Older binaries and compressed tables.** A version-3 table is readable only
+by v0.7.5+. A pre-0.7.5 binary that encounters one does not report a generic
+"unreadable table" error — the version field is checked before the payload
+is touched, so it reports *"table ... was written by a newer helpmate
+(unsupported table format version); upgrade this build"*, same message a
+future version-4+ format would produce. `gen` and `probe` both surface this
+distinction (`OpenError::UnsupportedVersion` vs. `Unreadable`).
+
+**Opting in.** `helpmate gen --compress` writes new tables directly as
+version 3 instead of version 1; raw stays the default (`gen` without the
+flag behaves exactly as before) — the default flips to compressed in a
+later version, once the performance gate above has been re-run at larger
+scale than a handful of measured materials. `helpmate compact --compress`
+instead rewrites *existing* raw tables on disk to block-compressed, one file
+at a time via a temp file and atomic rename, streaming off the source
+table's mmap at constant memory rather than buffering all four planes (a
+6-piece table's four planes are ~31 GB; the converter's own peak RSS is
+12-14 MiB regardless of table size). It leaves markers and tables that are
+already compressed alone, and — like plain `compact` — skips any `.hm` file
+whose material doesn't match its filename. It also skips any file **written
+in the last hour**, checked before the file is even opened: a multi-hour/
+multi-day generation run may still be writing into the same directory, and
+rewriting a table mid-write would corrupt it, so `compact --compress` simply
+leaves recent files for a later run rather than risking that.
+
+See `tools/bench_compression.py` (documented in [BUILD.md](BUILD.md)) to
+re-measure any of the numbers above against your own hardware or a larger
+table.
+
 ## Getting the binary
 
 Build per [BUILD.md](BUILD.md); the CLI lands at `./build/helpmate`. Running
@@ -77,7 +206,7 @@ Common options (all subcommands): `--tables DIR` — the table directory
 ## `gen` — generate tables
 
 ```
-helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [--force-ram]
+helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [--force-ram] [--compress] [--block-size N]
 ```
 
 - `--threads N`: worker threads for generation (default 1). Multithreaded
@@ -103,6 +232,22 @@ helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [-
   fit, `gen` aborts with the slice name and both sizes in GiB; `--force-ram`
   proceeds anyway (e.g. when you trust swap to absorb it). On systems without
   a readable `/proc/meminfo` the guard is skipped.
+- `--compress`: write every table in this run as block-compressed (version
+  3) instead of raw (version 1). Raw remains the default when the flag is
+  omitted. **If you plan to `mine --count`/`--starts` against these tables,
+  know that path runs ~6.5x slower on a compressed table than raw, at any
+  block size** (plain scans +14%, single probes +9% — see [Table
+  format](#table-format) above for the full measured numbers and why),
+  before deciding whether to compress this corpus.
+- `--block-size N`: only meaningful with `--compress`. Block size **in
+  KiB** — `--block-size 64` means 64 KiB (65536 bytes), matching how the
+  size/miss-cost trade-off is discussed in [Table format](#table-format)
+  above. Default 64 (64 KiB, `kDefaultBlockSize`). Must be at least 4 (4
+  KiB — below that a block's fixed zstd frame overhead swamps the payload)
+  and at most 16384 (16 MiB, `kMaxBlockSize` — the ceiling `TableReader`
+  itself enforces at `open()`, since the reader sizes its decompressed-block
+  cache off this value). Out-of-range or non-positive values are rejected
+  before anything is written.
 
 Example (real output; all reporting lines on stderr, the two `.hm` result
 lines on stdout as before):
@@ -323,7 +468,7 @@ optimal replies can tie.)
 ## `compact` — reclaim disk space in already-unsolvable tables
 
 ```
-helpmate compact <DIR> [--dry-run]
+helpmate compact <DIR> [--dry-run] [--compress] [--block-size N]
 ```
 
 Rewrites every `.hm` table in `DIR` whose cells are **all** unsolvable (or
@@ -334,6 +479,43 @@ rewritten again). When a run rewrites nothing at all — every table was either
 solvable or already a marker — it prints `already compact`. `--dry-run`
 reports what *would* be rewritten and reclaims nothing — it never opens a
 file for writing.
+
+With `--compress` (since v0.7.5), `compact` switches to a different mode
+entirely: instead of hunting for all-unsolvable tables, it rewrites every
+*raw* table in `DIR` as block-compressed at `--block-size` (default 64 KiB;
+see [Table format](#table-format) and [`gen`](#gen--generate-tables) above —
+in particular, if you actively `mine --count`/`--starts` this table, budget
+for ~6.5x slower there regardless of block size), skipping markers and —
+always, not just under `--dry-run` — anything written in the last hour, so a
+generation run still writing into the same directory is never disturbed.
+`--compress` and the marker-compaction mode above are mutually exclusive.
+
+A table that is **already compressed** is handled by comparing its stored
+block size against `--block-size`:
+
+- same block size: a true no-op, reported as "already compressed at this
+  block size" — nothing is read or rewritten.
+- different block size: **re-blocked** in place — decompressed and
+  recompressed at the new block size, streaming through a bounded
+  decompressed-block cache rather than buffering the whole table (same
+  constant-memory approach as a first compression), reported as `re-blocked
+  NAME (before -> after)` and counted separately from a first compression in
+  the summary line (`N rewritten (X compressed, Y re-blocked)`).
+
+This means **a block size chosen at generation time is not permanent**: a
+table compressed at 16 KiB can be moved to 64 KiB (or vice versa) with
+`compact --compress --block-size 64` without regenerating it from scratch —
+hours for a 5-piece table, over a day for a 6-piece. Re-blocking only ever
+changes how a table is *stored*; the decompressed content at every cell is
+unchanged (verified: re-blocking a real 462 MiB `KRvkbn` table's 64 KiB
+compressed form down to 16 KiB produced a file `md5sum`-identical to
+compressing the same raw table directly at 16 KiB).
+
+Do not run `compact --compress` (a first compression or a re-block) inside a
+Hugging Face dataset cache directory: rewriting a table's bytes in place
+changes its size and sha256 without updating the local `manifest.json`, so
+every entry it touches goes stale and the next `pull` silently re-downloads
+those files instead of recognizing them as already present.
 
 This exists for tables generated **before v0.6.1**, when `gen` had no pruning
 and wrote a full-size table even for slices like `Kvk` where every cell is
@@ -498,10 +680,19 @@ tb.stats("KQvk")["max_dtm"]
 Reference:
 
 - `helpmate.generate(material, tables="tables", threads=1, verbose=False,
-  progress=False, force_ram=False)` — generates the closure exactly like the
-  CLI's `gen` (the three keyword flags match `--verbose`, `--progress`,
-  `--force-ram`; reporting goes to the process's stderr); returns the list of
-  `.hm` paths written (empty if everything already existed).
+  progress=False, force_ram=False, compress=False, block_size=64)` —
+  generates the closure exactly like the CLI's `gen` (`verbose`/`progress`/
+  `force_ram` match `--verbose`/`--progress`/`--force-ram`; reporting goes to
+  the process's stderr); returns the list of `.hm` paths written (empty if
+  everything already existed). `compress`/`block_size` mirror `gen
+  --compress`/`--block-size` (see [Table format](#table-format) above) — same
+  unit, too: `block_size` here is **KiB**, exactly like the CLI's
+  `--block-size` (`block_size=64` means 64 KiB), even though it is converted
+  to raw bytes internally before reaching `GenOptions::block_size`. Earlier
+  versions of this binding took raw bytes here while the CLI took KiB; that
+  mismatch was a trap (`--block-size 64` on the CLI and `block_size=64` here
+  used to produce different tables) and has been fixed by converting in the
+  binding, not by documenting around it.
 - `Tablebase(tables_dir)` — lazily mmap-loads and caches whatever slices
   queries touch.
 - `tb.probe(fen)` — returns a `(dtm, count, flipped)` tuple, or **`None`** for

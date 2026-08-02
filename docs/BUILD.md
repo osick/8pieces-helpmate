@@ -10,6 +10,7 @@ URLs to SSH.
 | Requirement | Version | Used for |
 |---|---|---|
 | GCC (`g++`) | ≥ 13 | C++20 compiler for the core, tests and CLI |
+| libzstd | any recent (`libzstd-devel` on openSUSE, `libzstd-dev` on Debian/Ubuntu) | block-compressed tables (v0.7.5+) |
 | CMake | ≥ 3.24 (`cmake_minimum_required` in `CMakeLists.txt`) | build system |
 | GNU make | any recent | convenience targets (`make build`, `make test`, …) |
 | git | any recent | first-configure `FetchContent` clone of the three dependencies |
@@ -143,6 +144,39 @@ repeatedly runs the oversubscribed `KNvkqr` root-slice generation via
 - `taskset` must be available (which is why this cannot be a ctest case);
 - use a **stock Release build** — instrumented/sanitizer builds mask the
   original fault (see the script header).
+
+### `tools/bench_compression.py` — the block-compression performance gate
+
+`docs/ROADMAP.md` makes v0.7.5's block-compressed table format conditional on
+three measured numbers (compression ratio, warm-probe latency, generation
+wall-clock — see `docs/superpowers/specs/2026-08-02-block-compression-design.md`
+and the [Table format](USAGE.md#table-format) section of `docs/USAGE.md` for
+the numbers that cleared the gate). Re-run it with:
+
+```bash
+taskset -c 0-3 python3 tools/bench_compression.py --material KQvk
+taskset -c 0-3 python3 tools/bench_compression.py --material KRvk
+```
+
+For a table large enough to actually exercise the reader's decompressed-block
+cache, point `--tables` at a directory holding an existing real table (copied
+out of `~/tb` first — the script refuses to run with `--tables` under `~/tb`
+directly, see its `--help`) and skip regenerating it:
+
+```bash
+cp ~/tb/KBvkbn.hm ~/tb/KBvkbn.stats.json /path/to/staging/
+taskset -c 0-3 python3 tools/bench_compression.py --material KBvkbn \
+    --tables /path/to/staging --skip-gen
+```
+
+It reports the compressed/raw ratio, median warm- and cold-probe latency
+(raw vs. compressed, via the `helpmate` Python bindings — rebuild the
+extension first if it predates your working tree, the script warns if it
+looks stale), and `helpmate gen` wall-clock with and without `--compress` on
+the same material into fresh `mktemp -d` directories. Every scratch directory
+it creates is removed on exit unless `--keep-scratch` is given, and every
+subprocess it launches (`helpmate gen`/`compact`) runs under `taskset -c
+0-3` regardless of how the script itself was invoked.
 
 ### `make coverage`
 
