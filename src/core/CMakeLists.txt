@@ -27,6 +27,8 @@ add_executable(helpmate_tests
   tests/test_ram_guard.cpp tests/test_slice_index_6piece.cpp
   tests/test_generator_prune.cpp tests/test_block_codec.cpp)
 target_link_libraries(helpmate_tests PRIVATE helpmate_core Catch2::Catch2WithMain)
+target_compile_definitions(helpmate_tests PRIVATE
+  HM_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")
 list(APPEND CMAKE_MODULE_PATH ${catch2_SOURCE_DIR}/extras)
 include(Catch)
 # Slow cases (full KPvkp closure generation) are excluded from ctest here.

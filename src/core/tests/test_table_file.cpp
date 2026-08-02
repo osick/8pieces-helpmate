@@ -1,12 +1,17 @@
+#include <unistd.h>
+
 #include <catch2/catch_test_macros.hpp>
-#include "format/table_file.h"
-#include "indexing/material.h"
 #include <cstddef>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
-#include <unistd.h>
+#include <random>
+#include <vector>
+
+#include "format/table_file.h"
+#include "indexing/material.h"
+#include "probe/tablebase.h"
 using namespace hm;
 TEST_CASE("header is 64 bytes") { CHECK(sizeof(TableHeader) == 64); }
 TEST_CASE("write/read round trip") {
@@ -15,17 +20,25 @@ TEST_CASE("write/read round trip") {
     auto path = (dir / "KQvk.hm").string();
     const uint64_t n = 1000;
     std::vector<uint8_t> dw(n), db(n), cw(n), cb(n);
-    for (uint64_t i = 0; i < n; ++i) { dw[i] = i % 250; db[i] = (i * 7) % 250; cw[i] = i % 3; cb[i] = 1; }
-    TableWriter::write(path, *Material::parse("KQvk"), n, 42, "{\"hello\":1}",
-                       dw.data(), db.data(), cw.data(), cb.data());
+    for (uint64_t i = 0; i < n; ++i) {
+        dw[i] = i % 250;
+        db[i] = (i * 7) % 250;
+        cw[i] = i % 3;
+        cb[i] = 1;
+    }
+    TableWriter::write(path, *Material::parse("KQvk"), n, 42, "{\"hello\":1}", dw.data(), db.data(),
+                       cw.data(), cb.data());
     auto r = TableReader::open(path);
     REQUIRE(r);
-    CHECK(r->plane_size() == n); CHECK(r->max_dtm() == 42);
+    CHECK(r->plane_size() == n);
+    CHECK(r->max_dtm() == 42);
     CHECK(r->material_name() == "KQvk");
     CHECK(r->meta_json() == "{\"hello\":1}");
     for (uint64_t i : {0ull, 1ull, 500ull, 999ull}) {
-        CHECK(r->get(Color::White, i).dtm == dw[i]); CHECK(r->get(Color::White, i).count == cw[i]);
-        CHECK(r->get(Color::Black, i).dtm == db[i]); CHECK(r->get(Color::Black, i).count == cb[i]);
+        CHECK(r->get(Color::White, i).dtm == dw[i]);
+        CHECK(r->get(Color::White, i).count == cw[i]);
+        CHECK(r->get(Color::Black, i).dtm == db[i]);
+        CHECK(r->get(Color::Black, i).count == cb[i]);
     }
     CHECK(!TableReader::open((dir / "missing.hm").string()));
 }
@@ -61,8 +74,7 @@ TEST_CASE("reader rejects a truncated file") {
 }
 TEST_CASE("marker tables expand to DTM_UNSOLVABLE without a payload") {
     namespace fs = std::filesystem;
-    fs::path dir = fs::temp_directory_path() /
-                   ("hm_marker_" + std::to_string(::getpid()));
+    fs::path dir = fs::temp_directory_path() / ("hm_marker_" + std::to_string(::getpid()));
     fs::create_directories(dir);
     std::string path = (dir / "KBvkq.hm").string();
     Material m = *Material::parse("KBvkq");
@@ -92,13 +104,11 @@ TEST_CASE("marker tables expand to DTM_UNSOLVABLE without a payload") {
 
 TEST_CASE("ordinary tables stay format version 1 and keep reading") {
     namespace fs = std::filesystem;
-    fs::path dir = fs::temp_directory_path() /
-                   ("hm_v1_" + std::to_string(::getpid()));
+    fs::path dir = fs::temp_directory_path() / ("hm_v1_" + std::to_string(::getpid()));
     fs::create_directories(dir);
     std::string path = (dir / "Kvk.hm").string();
     std::vector<uint8_t> dw(4, 7), db(4, 8), cw(4, 1), cb(4, 2);
-    TableWriter::write(path, *Material::parse("Kvk"), 4, 7, "{}",
-                       dw.data(), db.data(), cw.data(), cb.data());
+    TableWriter::write(path, *Material::parse("Kvk"), 4, 7, "{}", dw.data(), db.data(), cw.data(), cb.data());
 
     std::ifstream in(path, std::ios::binary);
     TableHeader hdr{};
@@ -116,8 +126,7 @@ TEST_CASE("ordinary tables stay format version 1 and keep reading") {
 
 TEST_CASE("malformed marker headers are rejected") {
     namespace fs = std::filesystem;
-    fs::path dir = fs::temp_directory_path() /
-                   ("hm_marker_bad_" + std::to_string(::getpid()));
+    fs::path dir = fs::temp_directory_path() / ("hm_marker_bad_" + std::to_string(::getpid()));
     fs::create_directories(dir);
     std::string valid_path = (dir / "KBvkq.hm").string();
     Material m = *Material::parse("KBvkq");
@@ -205,4 +214,127 @@ TEST_CASE("header keeps its 64-byte layout after claiming reserved bytes") {
     hm::TableHeader zero{};
     CHECK(zero.codec == hm::kCodecNone);
     CHECK(zero.block_size == 0u);
+}
+
+TEST_CASE("every cell reads identically through raw and compressed tables") {
+    // The central correctness claim of the whole rung, checked exhaustively at
+    // a size where exhaustive is cheap.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_blockfmt_test";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 4096;
+    std::vector<uint8_t> dw(ps), db(ps), cw(ps), cb(ps);
+    std::mt19937 rng(99);
+    for (uint64_t i = 0; i < ps; ++i) {
+        // A realistic mix: mostly the two constants, some real values.
+        uint32_t r = rng() % 100;
+        dw[i] = r < 45 ? DTM_INVALID : (r < 70 ? DTM_UNSOLVABLE : uint8_t(rng() % 30));
+        db[i] = r < 40 ? DTM_INVALID : (r < 65 ? DTM_UNSOLVABLE : uint8_t(rng() % 30));
+        // `count` is the number of distinct optimal lines (docs/USAGE.md): in
+        // real tables it is almost always small, occasionally larger, never
+        // uniform over the full byte range. `uint8_t(rng() % 256)` here would
+        // be literally incompressible noise for half the logical payload,
+        // which makes the ratio assertion below unsatisfiable regardless of
+        // codec quality -- so mirror the real distribution instead.
+        cw[i] = (rng() % 100 < 95) ? uint8_t(rng() % 4) : uint8_t(rng() % 40);
+        cb[i] = (rng() % 100 < 95) ? uint8_t(rng() % 4) : uint8_t(rng() % 40);
+    }
+    std::string meta = R"({"material":"KQvk"})";
+
+    std::string raw = (dir / "raw.hm").string();
+    std::string zip = (dir / "zip.hm").string();
+    TableWriter::write(raw, mat, ps, 30, meta, dw.data(), db.data(), cw.data(), cb.data());
+    TableWriter::write_compressed(zip, mat, ps, 30, meta, dw.data(), db.data(), cw.data(), cb.data());
+
+    auto r = TableReader::open(raw);
+    auto z = TableReader::open(zip);
+    REQUIRE(r.has_value());
+    REQUIRE(z.has_value());
+    CHECK_FALSE(r->is_compressed());
+    CHECK(z->is_compressed());
+    CHECK(z->plane_size() == ps);
+    CHECK(z->max_dtm() == 30);
+    CHECK(z->material_name() == "KQvk");
+    CHECK(z->meta_json() == meta);
+
+    for (uint64_t i = 0; i < ps; ++i) {
+        for (Color stm : {Color::White, Color::Black}) {
+            ValuePair a = r->get(stm, i), b = z->get(stm, i);
+            REQUIRE(a.dtm == b.dtm);
+            REQUIRE(a.count == b.count);
+        }
+    }
+    CHECK(fs::file_size(zip) < fs::file_size(raw) / 2);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("a compressed table whose last block is partial round-trips") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_blockfmt_partial";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    // 4 * 5000 = 20000 bytes: not a multiple of 65536, so there is exactly one
+    // short block and nothing else.
+    const uint64_t ps = 5000;
+    std::vector<uint8_t> dw(ps, 3), db(ps, 4), cw(ps, 5), cb(ps, 6);
+    std::string p = (dir / "t.hm").string();
+    TableWriter::write_compressed(p, mat, ps, 4, "{}", dw.data(), db.data(), cw.data(), cb.data());
+    auto z = TableReader::open(p);
+    REQUIRE(z.has_value());
+    CHECK(z->get(Color::White, ps - 1).dtm == 3);
+    CHECK(z->get(Color::Black, ps - 1).dtm == 4);
+    CHECK(z->get(Color::White, ps - 1).count == 5);
+    CHECK(z->get(Color::Black, ps - 1).count == 6);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("an out-of-range cell throws on a compressed table too") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_blockfmt_range";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 1000;
+    std::vector<uint8_t> v(ps, 1);
+    std::string p = (dir / "t.hm").string();
+    TableWriter::write_compressed(p, mat, ps, 1, "{}", v.data(), v.data(), v.data(), v.data());
+    auto z = TableReader::open(p);
+    REQUIRE(z.has_value());
+    CHECK_THROWS_AS(z->get(Color::White, ps), std::out_of_range);
+    fs::remove_all(dir);
+}
+
+TEST_CASE("the committed golden compressed table still reads correctly") {
+    // Pins the ON-DISK format. Every other compressed test writes and reads
+    // with the same build, so a layout change that breaks compatibility would
+    // pass them all. This one fails.
+    std::string fixture = std::string(HM_TEST_FIXTURES) + "/golden-KQvk-v3.hm";
+    auto z = TableReader::open(fixture);
+    REQUIRE(z.has_value());
+    CHECK(z->is_compressed());
+    CHECK(z->material_name() == "KQvk");
+    CHECK(z->plane_size() == 29568);
+    CHECK(z->max_dtm() == 14);
+
+    // The golden position from the README: dtm 2 (h#1), count 4. Its canonical
+    // cell index is asserted by the existing probe tests, so read through the
+    // Tablebase layer rather than hardcoding a cell number here. Tablebase
+    // resolves "<dir>/<material>.hm", so stage the fixture under that name.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / "hm_golden_probe";
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    fs::copy_file(fixture, dir / "KQvk.hm");
+
+    Tablebase tb(dir.string());
+    auto p = tb.probe("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1");
+    REQUIRE(p.has_value());
+    CHECK(p->dtm == 2);
+    CHECK(p->count == 4);
+    CHECK_FALSE(p->flipped);
+    fs::remove_all(dir);
 }
