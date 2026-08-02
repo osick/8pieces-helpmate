@@ -14,6 +14,28 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 find_package(Threads REQUIRED)
 
+# zstd is a hard requirement, deliberately a system package rather than a
+# fourth FetchContent clone: this machine's gitconfig rewrites GitHub HTTPS to
+# SSH, and a clone that hangs on an invisible passphrase dialog is far worse
+# than a configure-time error that names the package to install.
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+  pkg_check_modules(ZSTD IMPORTED_TARGET libzstd)
+endif()
+if(NOT ZSTD_FOUND)
+  find_path(ZSTD_INCLUDE_DIR zstd.h)
+  find_library(ZSTD_LIBRARY NAMES zstd)
+  if(NOT ZSTD_INCLUDE_DIR OR NOT ZSTD_LIBRARY)
+    message(FATAL_ERROR
+      "libzstd headers not found -- install libzstd-devel (openSUSE) "
+      "or libzstd-dev (Debian/Ubuntu)")
+  endif()
+  add_library(PkgConfig::ZSTD UNKNOWN IMPORTED)
+  set_target_properties(PkgConfig::ZSTD PROPERTIES
+    IMPORTED_LOCATION "${ZSTD_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${ZSTD_INCLUDE_DIR}")
+endif()
+
 # Declared early (before any add_library) so PIC applies to chessmg_core and
 # helpmate_core too: pybind11_add_module below links helpmate_core into a
 # shared object, which requires every static lib in its link chain to be

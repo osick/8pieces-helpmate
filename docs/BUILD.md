@@ -10,6 +10,7 @@ URLs to SSH.
 | Requirement | Version | Used for |
 |---|---|---|
 | GCC (`g++`) | ≥ 13 | C++20 compiler for the core, tests and CLI |
+| libzstd | any recent (`libzstd-devel` on openSUSE, `libzstd-dev` on Debian/Ubuntu) | block-compressed tables (v0.7.5+) |
 | CMake | ≥ 3.24 (`cmake_minimum_required` in `CMakeLists.txt`) | build system |
 | GNU make | any recent | convenience targets (`make build`, `make test`, …) |
 | git | any recent | first-configure `FetchContent` clone of the three dependencies |

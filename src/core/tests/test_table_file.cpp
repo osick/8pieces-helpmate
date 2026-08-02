@@ -190,3 +190,19 @@ TEST_CASE("a future-format table reports UnsupportedVersion, not NotFound") {
 
     fs::remove_all(dir);
 }
+
+TEST_CASE("header keeps its 64-byte layout after claiming reserved bytes") {
+    static_assert(sizeof(hm::TableHeader) == 64);
+    // The two new fields come out of `reserved`, which was 14 bytes.
+    hm::TableHeader h{};
+    h.block_size = 65536;
+    h.codec = hm::kCodecZstd;
+    CHECK(h.block_size == 65536u);
+    CHECK(h.codec == 1);
+    CHECK(sizeof(h.reserved) == 9);
+    // A default-constructed header must still describe a raw table, so any
+    // code path that forgets to set these does not silently claim compression.
+    hm::TableHeader zero{};
+    CHECK(zero.codec == hm::kCodecNone);
+    CHECK(zero.block_size == 0u);
+}

@@ -9,7 +9,7 @@ configure_file(${CMAKE_CURRENT_SOURCE_DIR}/version.h.in
 
 target_include_directories(helpmate_core PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_BINARY_DIR}/generated)
-target_link_libraries(helpmate_core PUBLIC chessmg_core nlohmann_json::nlohmann_json Threads::Threads)
+target_link_libraries(helpmate_core PUBLIC chessmg_core nlohmann_json::nlohmann_json Threads::Threads PkgConfig::ZSTD)
 target_compile_options(helpmate_core PRIVATE -O2 -Wall -Wextra)
 
 if(HELPMATE_COVERAGE)

@@ -7,6 +7,13 @@
 
 namespace hm {
 
+constexpr uint8_t kEncodingRaw = 1;     // 4 contiguous byte planes
+constexpr uint8_t kEncodingBlocks = 2;  // block index + compressed blocks
+constexpr uint8_t kCodecNone = 0;
+constexpr uint8_t kCodecZstd = 1;
+constexpr uint32_t kDefaultBlockSize = 65536;  // 14.5x at zstd level 3; see the spec
+constexpr int kDefaultZstdLevel = 3;
+
 #pragma pack(push, 1)
 struct TableHeader {
     char magic[4];            // "HM8P"
@@ -17,7 +24,9 @@ struct TableHeader {
     uint64_t plane_size;
     uint8_t max_dtm;          // DTM_UNSOLVABLE if no cell solvable
     uint8_t flags;            // bit 0: all-unsolvable marker (no payload follows)
-    uint8_t reserved[14];
+    uint32_t block_size;      // encoding 2: UNCOMPRESSED bytes per block; 0 when raw
+    uint8_t codec;            // encoding 2: kCodecZstd; kCodecNone when raw
+    uint8_t reserved[9];
     uint32_t json_len;        // metadata JSON directly after header
 };
 #pragma pack(pop)
