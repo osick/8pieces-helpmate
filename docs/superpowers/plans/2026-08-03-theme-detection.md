@@ -638,11 +638,9 @@ TEST_CASE("a corner mate by rook and king is pure", "[themes][mate]") {
 TEST_CASE("double check is impure", "[themes][mate]") {
     // Two white units bear on the king's square at once, so the king's square
     // is attacked twice and the mate is not pure under our definition.
-    auto s = at("R5k1/5K2/6N1/8/8/8/8/8 b - - 0 1");
-    if (final_board(s).state() == PosState::Checkmate)
-        REQUIRE(is_pure(s) == (attackersOfKingIsOne(s)));
-    // Guard: this fixture exists to pin the rule, so assert the rule directly.
-    REQUIRE_FALSE(is_pure(at("6k1/5K2/8/8/8/8/8/R5R1 b - - 0 1")));
+    auto s = at("6k1/5K2/8/8/8/8/8/R5R1 b - - 0 1");
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE_FALSE(is_pure(s));
 }
 
 TEST_CASE("an over-guarded flight square is impure", "[themes][mate]") {
@@ -718,7 +716,7 @@ TEST_CASE("a position with no black king detects nothing", "[themes][mate]") {
 }
 ```
 
-**Note for the implementer:** the "double check is impure" case above contains a call to a helper `attackersOfKingIsOne` that does not exist — it is a deliberate placeholder marking a fixture you must verify. **Delete those first three lines of that test case** and keep only the final `REQUIRE_FALSE(...)` assertion, after confirming with `Board::from_fen(...)->state() == PosState::Checkmate` that the FEN really is mate. If any FEN in this file is not actually checkmate, fix the FEN — a detector asserted against a non-mate proves nothing.
+**Note for the implementer:** every FEN in this file used as a mate fixture must really be checkmate — Step 2 below verifies that before you implement anything. If one is not, fix the FEN and keep the assertion; a detector asserted against a non-mate proves nothing. Each test case above asserts `state() == PosState::Checkmate` where the fixture's whole point is that it is a mate, so a bad FEN fails loudly rather than passing vacuously.
 
 - [ ] **Step 2: Verify every fixture FEN really is mate**
 
@@ -2446,14 +2444,7 @@ In the submit handler, `Object.fromEntries(new FormData(form).entries())` keeps 
     q.theme = selectedThemes(themeSel);      // fromEntries would keep only one
 ```
 
-and in `runQuery`, include the chosen themes in each result row so the CSV export carries them:
-
-```js
-  rows = b.fens.map((fen) => ({ fen, dtm: Number(q.dtm),
-                                count: q.count === "" ? "" : Number(q.count) }));
-```
-
-(leave this line as it is — the export schema is unchanged in this rung.)
+The CSV export schema is unchanged in this rung — `rows` keeps carrying `{fen, dtm, count}` and `runQuery` needs no edit.
 
 - [ ] **Step 8: Show themes in the explorer**
 
