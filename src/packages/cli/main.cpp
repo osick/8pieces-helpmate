@@ -193,13 +193,21 @@ int cmd_probe(const std::vector<std::string>& pos, const std::string& tables, bo
             // material's table cannot answer a solutions() walk of the original
             // (unflipped) FEN -- it throws MissingTableError, turning a working
             // probe into a half-printed answer plus exit 2. Flipping the position
-            // ourselves and detecting on THAT is not a fix either: every mate
-            // detector assumes Black is the mated side, so detecting on the
-            // flipped board would silently answer a different question than the
-            // one asked. So: no detection, just say why.
-            std::cerr << "note: themes are unavailable for a color-flipped probe (the mate "
-                         "detectors assume Black is the mated side; flipping the position to "
-                         "detect on it would silently answer a different position)\n";
+            // ourselves and detecting on THAT is not a fix either: the mate
+            // detectors are hard-coded to the black king, so pure/model/ideal/
+            // mirror would survive the flip unchanged but the colour-labelled
+            // ones (single-piece:white/:black, excelsior:white/:black) would
+            // come out swapped -- a wrong answer dressed as a right one.
+            //
+            // The stdout line matters as much as the note: without it,
+            // `probe FEN --themes 2>/dev/null | grep '^themes:'` yields nothing
+            // at exit 0, which a script cannot tell apart from a position that
+            // genuinely has no themes (that case prints "themes: (none)").
+            std::cout << "themes: (unavailable: colors were flipped to find a table)\n";
+            std::cerr << "note: themes are unavailable for a color-flipped probe. The mate "
+                         "detectors are hard-coded to the black king, so the colour-labelled "
+                         "themes would come out swapped. Re-run with the colours of the "
+                         "position exchanged to get a correct answer.\n";
         } else {
             // Detection forces solution enumeration, so it stays opt-in: a plain
             // probe must not start paying for a field most callers never read.

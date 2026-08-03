@@ -2674,6 +2674,13 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 
 **Placeholder scan.** One deliberate placeholder survives, and it is flagged as such: `attackersOfKingIsOne` in Task 3's "double check is impure" test, with an explicit instruction to delete those lines after verifying the fixture. Task 3 Step 2 and Task 4 Step 1 both carry notes telling the implementer to fix a fixture rather than a detector if a hand-written FEN turns out not to be mate or not to be legal — hand-authored chess fixtures are the one thing here that cannot be fully verified without running the code.
 
+**Superseded during execution.** `shape_of_solutions` was deleted in Task 6's fix
+round: the claim below that it agrees with `shape_of` is false. SAN is a function
+of *(board, move)*, and the board before the last ply differs between solutions,
+so keying on `(from, to, promotion)` changed what `--ends` counts — on 60.5% of
+KQvkq dtm=4 positions. `mine` keeps v0.6.2's SAN-keyed shape path; `solutions()`
+is used only for themes.
+
 **Type consistency.** `Solution{start, plies}` and `final_board()` are defined in Task 1 and used unchanged in Tasks 3, 4, 5, 6. `attackers_of` / `piece_attacks` / `king_field` are defined in Task 2 with the `ignore_king_of` parameter and used with that exact spelling in Tasks 3 and 4. `Detector = bool (*)(const Solution&)` in Task 5 matches the signature of every function declared in Tasks 3 and 4 — checked name by name: `is_pure`, `is_model`, `is_ideal`, `is_mirror`, `has_promotion`, `has_underpromotion`, `has_excelsior{,_white,_black}`, `has_switchback`, `has_closed_walk`, `has_self_block`, `is_single_piece{,_white,_black}`, `has_en_passant` — sixteen, matching the registry-size assertion in Task 5's test. `MineFilter::themes` (Task 6) is the field name used by the pybind11 bindings in Task 7. `shape_of_solutions` is declared and defined in Task 6 and asserted against `shape_of` in the same task.
 
 **One risk worth naming.** Task 6 rewrites `mine()`'s enumeration branch, which v0.6.2's `--starts`/`--ends` filters depend on. That is why Step 5 of that task runs the existing `cli_mine*` ctest cases as a regression gate before the new CLI flags are added, rather than at the end.

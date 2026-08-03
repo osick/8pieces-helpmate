@@ -100,9 +100,16 @@ set_tests_properties(cli_probe_theme_rejected PROPERTIES DEPENDS cli_gen)
 # `mine` used to silently ignore any positional beyond pos[0] -- a stray extra
 # argument changed nothing about what got printed, with no indication it was
 # dropped (the same class of bug as the --theme/--themes mix-up above).
-add_test(NAME cli_mine_extra_positional COMMAND helpmate mine KQvk extra --dtm 2 --tables ${CLI_TT})
-set_tests_properties(cli_mine_extra_positional PROPERTIES
-  PASS_REGULAR_EXPRESSION "error.*extra argument" DEPENDS cli_gen)
+# PASS_REGULAR_EXPRESSION alone would ignore the exit code: a build that
+# printed the message and then died, or that returned 0, would still pass --
+# recreating the very weakness the helper exists to close.
+add_test(NAME cli_mine_extra_positional COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=mine KQvk extra --dtm 2 --tables ${CLI_TT}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=extra argument"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_mine_extra_positional PROPERTIES DEPENDS cli_gen)
 
 add_test(NAME cli_probe_themes COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --themes --tables ${CLI_TT})
 set_tests_properties(cli_probe_themes PROPERTIES PASS_REGULAR_EXPRESSION "themes:" DEPENDS cli_gen)

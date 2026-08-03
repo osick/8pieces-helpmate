@@ -99,9 +99,12 @@ public:
     // Every legal move from `fen`, each with the value of the resulting position.
     std::vector<MoveInfo> moves(const std::string& fen) const;
     // stream FENs of canonical cells of material `m` matching `f`; stop as soon as
-    // `cb` returns false. When a shape filter (starts/ends) is set, candidates whose
-    // solution count is saturated (unenumerable) are skipped and tallied into
-    // `skipped_saturated` if non-null; existing callers that omit it are unaffected.
+    // `cb` returns false. When ANY filter that needs the solution set is used --
+    // a shape filter (starts/ends) OR a theme filter -- candidates whose solution
+    // count is saturated (unenumerable) are skipped and tallied into
+    // `skipped_saturated` if non-null; existing callers that omit it are
+    // unaffected. Pass it for theme-only queries too, or those positions are
+    // dropped with no tally.
     void mine(const Material& m, const MineFilter& f,
               const std::function<bool(const std::string&)>& cb,
               uint64_t* skipped_saturated = nullptr) const;
