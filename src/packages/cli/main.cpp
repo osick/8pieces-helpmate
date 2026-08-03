@@ -12,6 +12,7 @@
 #include "generator/generator.h"
 #include "indexing/material.h"
 #include "probe/tablebase.h"
+#include "themes/registry.h"
 #include "version.h"
 
 using namespace hm;
@@ -29,6 +30,7 @@ void usage() {
                  "  helpmate stats <MATERIAL> [--tables DIR]\n"
                  "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
                  "               [--max N] [--tables DIR]\n"
+                 "  helpmate themes\n"
                  "  helpmate compact <DIR> [--dry-run] [--compress] [--block-size N]\n"
                  "  helpmate --version\n"
                  "\n"
@@ -51,6 +53,8 @@ void usage() {
                  "         counts, dtm histogram, deepest positions, ...).\n"
                  "  mine   Print FENs of positions in MATERIAL matching --dtm exactly (and,\n"
                  "         if given, --count exactly), up to --max, one per line.\n"
+                 "  themes List every theme detector this build knows, each with the\n"
+                 "         definition it uses. These names are what --theme accepts.\n"
                  "  compact Rewrite every .hm table in DIR whose cells are all\n"
                  "         unsolvable (or invalid) as a tiny marker file, reclaiming\n"
                  "         disk space. Tables with any solvable cell are left\n"
@@ -515,6 +519,29 @@ int cmd_compact(const std::vector<std::string>& args, bool compress, bool dry, u
     return 0;
 }
 
+// helpmate themes -- print the detector registry. The vocabulary has to be
+// discoverable without the docs, and each entry carries its own definition so
+// a disagreement about what a theme means is visible right here.
+int cmd_themes() {
+    for (const auto& t : themes::theme_registry()) {
+        std::cout << t.name << "\n";
+        // Wrap the doc at ~72 columns under a 4-space indent.
+        std::string doc(t.doc);
+        size_t pos = 0;
+        while (pos < doc.size()) {
+            size_t take = std::min<size_t>(72, doc.size() - pos);
+            if (pos + take < doc.size()) {
+                size_t sp = doc.rfind(' ', pos + take);
+                if (sp != std::string::npos && sp > pos) take = sp - pos;
+            }
+            std::cout << "    " << doc.substr(pos, take) << "\n";
+            pos += take;
+            while (pos < doc.size() && doc[pos] == ' ') ++pos;
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -630,6 +657,7 @@ int main(int argc, char** argv) {
         if (cmd == "stats") return cmd_stats(pos, tables);
         if (cmd == "mine")
             return cmd_mine(pos, tables, dtm, count, maxn, starts, ends, starts_given, ends_given);
+        if (cmd == "themes") return cmd_themes();
         if (cmd == "compact") return cmd_compact(pos, compress, dry_run, block_size);
         std::cerr << "error: unknown command \"" << cmd << "\"\n\n";
         usage();
