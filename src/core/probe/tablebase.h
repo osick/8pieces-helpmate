@@ -4,6 +4,7 @@
 #include "format/table_file.h"
 #include "indexing/material.h"
 #include "indexing/slice_index.h"
+#include "probe/solution.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -83,6 +84,10 @@ public:
     std::vector<std::string> line(const std::string& fen) const;
     // all optimal lines, SAN, capped at `max`.
     std::vector<std::vector<std::string>> lines(const std::string& fen, int max = 100) const;
+    // All optimal solutions in structured form, capped at `max`. Same walk and
+    // same cap as lines(), but keeping the mover, from/to, captures,
+    // promotions and the board after each ply -- everything SAN throws away.
+    std::vector<Solution> solutions(const std::string& fen, int max = 100) const;
     // Distinct first/last moves across all optimal lines from `fen`.
     SolutionShape solution_shape(const std::string& fen) const;
     // Every legal move from `fen`, each with the value of the resulting position.
@@ -105,6 +110,8 @@ private:
     ValuePair value_of(Board& b) const;
     void collect_lines(Board& b, std::vector<std::string>& path,
                         std::vector<std::vector<std::string>>& out, int max) const;
+    void collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out,
+                           const Board& start, int max) const;
 
     std::string dir_;
     mutable std::mutex mu_;

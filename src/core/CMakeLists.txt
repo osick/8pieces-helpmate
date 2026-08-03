@@ -25,7 +25,7 @@ add_executable(helpmate_tests
   tests/test_counts.cpp tests/test_stats.cpp tests/test_threads.cpp
   tests/test_probe.cpp tests/test_generator_lookup_guards.cpp
   tests/test_ram_guard.cpp tests/test_slice_index_6piece.cpp
-  tests/test_generator_prune.cpp tests/test_block_codec.cpp)
+  tests/test_generator_prune.cpp tests/test_block_codec.cpp tests/test_solutions.cpp)
 target_link_libraries(helpmate_tests PRIVATE helpmate_core Catch2::Catch2WithMain)
 target_compile_definitions(helpmate_tests PRIVATE
   HM_TEST_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures")

@@ -123,6 +123,52 @@ std::vector<std::vector<std::string>> Tablebase::lines(const std::string& fen, i
     return out;
 }
 
+void Tablebase::collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out,
+                                   const Board& start, int max) const {
+    if ((int)out.size() >= max) return;
+    ValuePair v = value_of(b);
+    if (v.dtm == 0) { out.push_back(Solution{start, path}); return; }
+    for (const Move& m : b.legal_moves()) {
+        if ((int)out.size() >= max) return;
+        b.make(m);
+        ValuePair nv = value_of(b);
+        bool on_optimal = nv.dtm <= DTM_MAX && (int)nv.dtm == (int)v.dtm - 1;
+        b.unmake(m);
+        if (!on_optimal) continue;
+
+        Ply p;
+        p.from = m.from;
+        p.to = m.to;
+        p.promotion = m.promotion();
+        p.is_ep = m.is_ep();
+        for (const auto& pp : b.pieces()) {           // b is still PRE-move here
+            if (pp.square == m.from) p.piece = pp.piece;
+            else if (pp.square == m.to) p.captured = pp.piece.type;
+        }
+        // An en-passant capture takes a pawn that is NOT on m.to, so the scan
+        // above cannot see it.
+        if (p.is_ep) p.captured = PieceType::Pawn;
+
+        b.make(m);
+        p.is_check = b.in_check();
+        p.after = b;
+        path.push_back(std::move(p));
+        collect_solutions(b, path, out, start, max);
+        path.pop_back();
+        b.unmake(m);
+    }
+}
+
+std::vector<Solution> Tablebase::solutions(const std::string& fen, int max) const {
+    auto b = Board::from_fen(fen);
+    if (!b) throw std::invalid_argument("bad FEN (or castling rights): " + fen);
+    Board start = *b;
+    std::vector<Solution> out;
+    std::vector<Ply> path;
+    collect_solutions(*b, path, out, start, max);
+    return out;
+}
+
 std::vector<std::string> Tablebase::line(const std::string& fen) const {
     auto ls = lines(fen, 1);
     return ls.empty() ? std::vector<std::string>{} : ls[0];
