@@ -48,11 +48,24 @@ TEST_CASE("attackers are counted, not merely detected", "[themes][attack]") {
     REQUIRE(attackers_of(ps, Color::White, sq("e8")) == 2);
 }
 
+TEST_CASE("a queen attacks along rank, file, and diagonal", "[themes][attack]") {
+    // Queen a1, white king a8 (far from every test square so it never adds a
+    // second attacker), black king h8. The queen is the only piece exercising
+    // both slider directions, so all three lines need their own assertion.
+    auto ps = from_fen("K6k/8/8/8/8/8/8/Q7 w - - 0 1");
+    REQUIRE(attackers_of(ps, Color::White, sq("d1")) == 1);  // rank 1, b1/c1 clear
+    REQUIRE(attackers_of(ps, Color::White, sq("a4")) == 1);  // a-file, a2/a3 clear
+    REQUIRE(attackers_of(ps, Color::White, sq("d4")) == 1);  // a1-d4 diagonal
+}
+
 TEST_CASE("a pinned unit still counts as attacking", "[themes][attack]") {
-    // White bishop c3 is pinned to Ke1 by the black rook on e-file... it still
-    // controls its diagonal for the purpose of the black king's legality.
-    auto ps = from_fen("8/8/8/8/8/2B5/8/4K2k w - - 0 1");
-    REQUIRE(attackers_of(ps, Color::White, sq("e5")) == 1);
+    // White bishop e4 is absolutely pinned along the e-file: black rook e8,
+    // nothing between it and the bishop (e7/e6/e5 empty), bishop e4, nothing
+    // between it and the white king (e3/e2 empty), white king e1. The bishop
+    // cannot legally move off the file, yet it still controls its diagonal --
+    // attackers_of does no legality analysis, so d5 must still read as attacked.
+    auto ps = from_fen("4r2k/8/8/8/4B3/8/8/4K3 w - - 0 1");
+    REQUIRE(attackers_of(ps, Color::White, sq("d5")) == 1);
 }
 
 TEST_CASE("ignore_king_of unmasks the square behind the mated king",
@@ -75,6 +88,13 @@ TEST_CASE("piece_attacks isolates a single unit", "[themes][attack]") {
     REQUIRE(piece_attacks(ps, rh, sq("e8")));
     REQUIRE_FALSE(piece_attacks(ps, ra, sq("e5")));
     REQUIRE_FALSE(piece_attacks(ps, ra, sq("a8")));   // never attacks its own square
+}
+
+TEST_CASE("piece_attacks is blocked by an intervening unit", "[themes][attack]") {
+    // Rook a1, pawn a3: aligned with a5 by file, but the pawn sits between them.
+    auto ps = from_fen("8/8/8/8/8/P7/8/R3K2k w - - 0 1");
+    PlacedPiece ra{{Color::White, PieceType::Rook}, (uint8_t)sq("a1")};
+    REQUIRE_FALSE(piece_attacks(ps, ra, sq("a5")));
 }
 
 TEST_CASE("knights jump over occupied squares", "[themes][attack]") {
