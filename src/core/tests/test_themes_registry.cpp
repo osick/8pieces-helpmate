@@ -1,7 +1,8 @@
-#include "themes/registry.h"
 #include <algorithm>
 #include <catch2/catch_test_macros.hpp>
 #include <set>
+
+#include "themes/registry.h"
 
 using namespace hm;
 using namespace hm::themes;
@@ -30,18 +31,16 @@ TEST_CASE("names are unique", "[themes][registry]") {
 }
 
 TEST_CASE("every documented theme is findable by name", "[themes][registry]") {
-    for (const char* n : {"pure", "model", "ideal", "mirror", "promotion",
-                          "underpromotion", "excelsior", "excelsior:white",
-                          "excelsior:black", "switchback", "closed-walk",
-                          "self-block", "single-piece", "single-piece:white",
-                          "single-piece:black", "en-passant"})
+    for (const char* n : {"pure", "model", "ideal", "mirror", "promotion", "underpromotion", "excelsior",
+                          "excelsior:white", "excelsior:black", "switchback", "closed-walk", "self-block",
+                          "single-piece", "single-piece:white", "single-piece:black", "en-passant"})
         REQUIRE(find_theme(n) != nullptr);
 }
 
 TEST_CASE("an unknown name is not found", "[themes][registry]") {
-    REQUIRE(find_theme("rundlauf") == nullptr);   // the English name is closed-walk
+    REQUIRE(find_theme("rundlauf") == nullptr);  // the English name is closed-walk
     REQUIRE(find_theme("") == nullptr);
-    REQUIRE(find_theme("PURE") == nullptr);       // matching is exact, not case-folded
+    REQUIRE(find_theme("PURE") == nullptr);  // matching is exact, not case-folded
 }
 
 TEST_CASE("detect uses any semantics across solutions", "[themes][registry]") {
@@ -51,7 +50,7 @@ TEST_CASE("detect uses any semantics across solutions", "[themes][registry]") {
     // replaced with the verified fixture; see task-5-report.md for the
     // discrepancy writeup.
     auto model_mate = at("R5k1/8/6K1/8/8/8/8/8 b - - 0 1");
-    auto not_mate   = at("8/8/8/8/8/8/8/K6k w - - 0 1");
+    auto not_mate = at("8/8/8/8/8/8/8/K6k w - - 0 1");
 
     auto only_second = detect({not_mate, model_mate});
     REQUIRE(std::find(only_second.begin(), only_second.end(), "model") != only_second.end());

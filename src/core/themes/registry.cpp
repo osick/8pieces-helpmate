@@ -1,4 +1,5 @@
 #include "themes/registry.h"
+
 #include "themes/line_themes.h"
 #include "themes/mate_themes.h"
 
@@ -22,8 +23,7 @@ const std::vector<ThemeDef>& theme_registry() {
          "Mirror mate: every square adjacent to the black king is empty, of "
          "either colour."},
         {"promotion", &has_promotion, "A pawn promotes during the solution."},
-        {"underpromotion", &has_underpromotion,
-         "A pawn promotes to rook, bishop or knight."},
+        {"underpromotion", &has_underpromotion, "A pawn promotes to rook, bishop or knight."},
         {"excelsior", &has_excelsior,
          "A pawn standing on its own second rank at the start of the solution "
          "promotes during it (either colour)."},
@@ -40,10 +40,8 @@ const std::vector<ThemeDef>& theme_registry() {
          "A black unit other than the king moves onto a square of its own "
          "king's field and stands there unattacked in the mating position, "
          "blocking a flight square."},
-        {"single-piece", &is_single_piece,
-         "Every move by one side is made by the same unit (either side)."},
-        {"single-piece:white", &is_single_piece_white,
-         "Every white move is made by the same unit."},
+        {"single-piece", &is_single_piece, "Every move by one side is made by the same unit (either side)."},
+        {"single-piece:white", &is_single_piece_white, "Every white move is made by the same unit."},
         {"single-piece:black", &is_single_piece_black,
          "Every black move is made by the same unit; with the king, this is "
          "the Analyzer's 'BK moves only'."},
@@ -64,7 +62,7 @@ std::vector<std::string> detect(const std::vector<Solution>& sols) {
         for (const auto& s : sols)
             if (t.fn(s)) {
                 out.emplace_back(t.name);
-                break;                        // `any`: one solution is enough
+                break;  // `any`: one solution is enough
             }
     return out;
 }

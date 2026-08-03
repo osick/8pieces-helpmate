@@ -1,8 +1,9 @@
 #pragma once
-#include "probe/solution.h"
 #include <string>
 #include <string_view>
 #include <vector>
+
+#include "probe/solution.h"
 
 namespace hm::themes {
 
@@ -14,7 +15,7 @@ using Detector = bool (*)(const Solution&);
 struct ThemeDef {
     std::string_view name;
     Detector fn;
-    std::string_view doc;   // the definition, shown by `helpmate themes`
+    std::string_view doc;  // the definition, shown by `helpmate themes`
 };
 
 // Every detector this build knows, in display order. CLI, API and dashboard
