@@ -266,9 +266,19 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         std::string fen = Board::from_pieces(pp, stm).fen();
         if (want_solutions) {
             // v.count is this cell's own stored count -- the same number a
-            // probe() of `fen` would return, since the FEN was built from this
-            // cell of this material and so cannot color-flip. Using it directly
-            // saves a redundant table lookup per candidate.
+            // probe() of `fen` would return. Using it directly saves a
+            // redundant table lookup per candidate; two things make that
+            // safe, not "probe() cannot color-flip" (it can, in general):
+            // Board::from_pieces(pp, stm) below defaults ep_square to -1, so
+            // eval_board's EP branch -- the only place probe()'s answer can
+            // differ from this cell's raw value -- is inert for every FEN
+            // built here; and load(m) already succeeded (this loop is
+            // iterating `s`, a slice it returned), so probe()'s color-flip
+            // fallback, which only triggers when the PRIMARY load fails,
+            // never runs for `fen`. Mining pawn material with reconstructed
+            // en-passant positions is a plausible next rung -- if that ever
+            // makes fen carry a real ep_square, the first load-bearer above
+            // stops holding and this shortcut needs revisiting.
             if (v.count >= COUNT_SAT) {  // unknowable, never guessed at
                 if (skipped_saturated) ++*skipped_saturated;
                 continue;

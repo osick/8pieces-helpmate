@@ -68,7 +68,15 @@ bool has_closed_walk(const Solution& s) {
                 // sequence of switchbacks, not one circuit. The size test
                 // restates the theme's two-square minimum; the j >= i + 3 gap
                 // already implies it, since a ply always changes square.
-                if (mid.size() >= 2 && mid.count(t.squares[i]) == 0) return true;
+                //
+                // mid.size() alone only counts DISTINCT intermediate squares:
+                // e1-e2-d2-e2-e1 has mid = {e2, d2}, size 2, yet retraces
+                // through e2 twice rather than circulating -- a shuffle, not
+                // a Rundlauf. Requiring mid.size() == j - i - 1 (every
+                // intermediate ply lands on a square none of the others did)
+                // rules that out while leaving a genuine circuit (no repeats
+                // at all between i and j) unaffected.
+                if (mid.size() == j - i - 1 && mid.count(t.squares[i]) == 0) return true;
             }
     return false;
 }

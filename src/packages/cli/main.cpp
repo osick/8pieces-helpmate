@@ -211,14 +211,32 @@ int cmd_probe(const std::vector<std::string>& pos, const std::string& tables, bo
         } else {
             // Detection forces solution enumeration, so it stays opt-in: a plain
             // probe must not start paying for a field most callers never read.
-            auto names = themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
-            std::cout << "themes:";
-            if (names.empty()) std::cout << " (none)";
-            for (const auto& n : names) std::cout << " " << n;
-            std::cout << "\n";
-            if (p->count >= (int)COUNT_SAT)
-                std::cerr << "note: this position's solution count is saturated (255+); themes were "
-                             "detected from the first 100 solutions only\n";
+            try {
+                auto names =
+                    themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
+                std::cout << "themes:";
+                if (names.empty()) std::cout << " (none)";
+                for (const auto& n : names) std::cout << " " << n;
+                std::cout << "\n";
+                if (p->count >= (int)COUNT_SAT)
+                    std::cerr << "note: this position's solution count is saturated (255+); themes were "
+                                 "detected from the first 100 solutions only\n";
+            } catch (const MissingTableError& e) {
+                // solutions() walks every legal child move, including captures
+                // and promotions into material this --tables directory
+                // doesn't have -- routine with a partial (e.g. on-demand HF)
+                // table set. dtm=.../count=... is already on stdout above:
+                // letting this propagate past main()'s MissingTableError
+                // handler would be the exact "half-printed answer plus exit
+                // 2" the flip branch's comment above exists to prevent, just
+                // reached from a different cause. Same fix: stay exit 0,
+                // finish the answer with a clear note instead of throwing.
+                std::cout << "themes: (unavailable: " << e.what() << ")\n";
+                std::cerr << "note: themes could not be detected: " << e.what()
+                          << "\nrun: helpmate gen "
+                             "<MATERIAL> --tables "
+                          << tables << "\n";
+            }
         }
     }
     return 0;
@@ -680,14 +698,24 @@ int main(int argc, char** argv) {
             // --theme (repeatable, value) is mine's per-theme filter; --themes
             // (boolean) is probe's "also print the themes shown". They read as
             // a singular/plural typo of each other -- exactly the --end/--ends
-            // incident the comment below exists to prevent -- so on the wrong
-            // command this must be a loud error naming the right flag, not a
-            // filter that silently falls through to positionals and gets
-            // ignored (verbatim: `mine --themes mirror` used to run to
-            // completion with "mirror" discarded as a stray positional).
+            // incident the comment below exists to prevent -- so on any OTHER
+            // command this must be a loud error naming the command that
+            // actually honours it, not a filter that silently falls through
+            // to positionals and gets ignored (verbatim: `mine --themes
+            // mirror` used to run to completion with "mirror" discarded as a
+            // stray positional; `stats KQvk --theme model` and `line FEN
+            // --themes` are the same defect on commands that never even
+            // looked at either flag).
             if (cmd == "probe") {
                 std::cerr << "error: probe has no \"--theme\" flag; did you mean \"--themes\" "
                              "(no value, prints the themes shown)?\n\n";
+                usage();
+                return 3;
+            }
+            if (cmd != "mine") {
+                std::cerr << "error: " << cmd
+                          << " has no \"--theme\" flag; only \"mine\" filters by theme "
+                             "(\"--theme NAME\", repeatable)\n\n";
                 usage();
                 return 3;
             }
@@ -696,6 +724,13 @@ int main(int argc, char** argv) {
             if (cmd == "mine") {
                 std::cerr << "error: mine has no \"--themes\" flag; did you mean \"--theme NAME\" "
                              "(repeatable, filters by theme)?\n\n";
+                usage();
+                return 3;
+            }
+            if (cmd != "probe") {
+                std::cerr << "error: " << cmd
+                          << " has no \"--themes\" flag; only \"probe\" prints the themes shown "
+                             "(\"--themes\", no value)\n\n";
                 usage();
                 return 3;
             }

@@ -130,6 +130,53 @@ add_test(NAME cli_probe_themes_flipped COMMAND ${CMAKE_COMMAND}
          "-DPATTERN2=dtm=2.*colors flipped"
          -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
 set_tests_properties(cli_probe_themes_flipped PROPERTIES DEPENDS cli_gen)
+# I-4 (pre-merge review): --theme/--themes used to be rejected only on
+# probe/mine respectively -- every OTHER command (line, stats, gen, ...)
+# silently discarded them, exit 0, nothing said so. `stats --theme` is the
+# exact class of bug this branch already fixed for `mine --themes`; `line
+# --themes` is the likeliest typo of all, since the docs teach `probe
+# --themes` and `line` is its neighbour on this list.
+add_test(NAME cli_line_themes_rejected COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=line \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --themes --tables ${CLI_TT}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=line has no"
+         "-DPATTERN2=\"probe\" prints"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_line_themes_rejected PROPERTIES DEPENDS cli_gen)
+
+add_test(NAME cli_stats_theme_rejected COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=stats KQvk --theme mirror --tables ${CLI_TT}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=stats has no"
+         "-DPATTERN2=\"mine\" filters"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_stats_theme_rejected PROPERTIES DEPENDS cli_gen)
+
+# I-1 (pre-merge review): `probe --themes` used to print `dtm=... count=...`
+# and only THEN discover (via solutions() walking a capture into material
+# this --tables dir lacks) that detection can't proceed -- a half-printed
+# answer followed by exit 2, the exact failure shape the color-flip branch's
+# comment (see cmd_probe) already exists to prevent, just reached from a
+# partial table set instead of a color flip. THEME_PARTIAL_TT holds ONLY
+# KQvk.hm (copied out of CLI_TT, not Kvk.hm), so a queen-capture branch of
+# this saturated (count=255) position's solution tree hits a missing table.
+set(THEME_PARTIAL_TT ${CMAKE_BINARY_DIR}/theme_partial_tables)
+add_test(NAME cli_theme_partial_fixture_mkdir COMMAND ${CMAKE_COMMAND} -E make_directory ${THEME_PARTIAL_TT})
+add_test(NAME cli_theme_partial_fixture_copy COMMAND ${CMAKE_COMMAND} -E copy
+         ${CLI_TT}/KQvk.hm ${CLI_TT}/KQvk.stats.json ${THEME_PARTIAL_TT})
+set_tests_properties(cli_theme_partial_fixture_copy PROPERTIES
+    DEPENDS "cli_gen;cli_theme_partial_fixture_mkdir")
+add_test(NAME cli_probe_themes_missing_subtable COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=probe \"8/6kQ/8/8/8/8/8/K7 b - - 0 1\" --themes --tables ${THEME_PARTIAL_TT}"
+         -DEXPECTED_RC=0
+         "-DPATTERN1=dtm=12.*count=255"
+         "-DPATTERN2=themes: \\(unavailable"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_probe_themes_missing_subtable PROPERTIES DEPENDS cli_theme_partial_fixture_copy)
+
 add_test(NAME cli_themes COMMAND helpmate themes)
 set_tests_properties(cli_themes PROPERTIES PASS_REGULAR_EXPRESSION "closed-walk")
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})

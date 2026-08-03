@@ -70,9 +70,24 @@ PYBIND11_MODULE(_helpmate, mod) {
         .def(
             "themes",
             [](const Tablebase& t, const std::string& fen, int max) {
+                if (max < 0) {
+                    // Sentinel: use the position's own solution count, the
+                    // same cap `helpmate probe --themes` uses (saturated
+                    // positions fall back to 100, same as the CLI). A fixed
+                    // default here (the old default was 100) disagreed with
+                    // the CLI for any 100 < count < 255: the same position
+                    // would enumerate a different number of solutions on
+                    // each surface and so could report different themes
+                    // (e.g. `closed-walk` present on one, absent on the
+                    // other). Every caller of this binding -- including
+                    // app.py's /v1/probe?themes=true -- inherits the fix by
+                    // simply not overriding `max`.
+                    auto p = t.probe(fen);
+                    max = (!p) ? 100 : (p->count >= (int)COUNT_SAT ? 100 : p->count);
+                }
                 return themes::detect(t.solutions(fen, max));
             },
-            py::arg("fen"), py::arg("max") = 100)
+            py::arg("fen"), py::arg("max") = -1)
         .def(
             "moves",
             [](const Tablebase& t, const std::string& fen) {

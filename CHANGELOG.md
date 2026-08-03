@@ -33,6 +33,13 @@ bumps may change behavior).
   - **Dashboard**: a theme multi-select on the Search panel, populated from
     `/v1/themes`; the Explorer shows the current position's themes beside its
     dtm/count.
+  - **Python bindings**: `helpmate.themes()` (the registry as a list of
+    `{"name", "doc"}` dicts); `tb.themes(fen, max=-1)` (theme names for one
+    position — `max=-1`, the default, means "the position's own solution
+    count", the same cap the CLI uses); `tb.mine(...)`/`tb.mine_with_stats(...)`
+    both gained a `themes=[]` keyword argument (same `any`-within-a-theme,
+    `AND`-across-themes semantics as the CLI/API; unknown name raises
+    `ValueError`). See docs/USAGE.md's Python API reference.
 - **Match semantics**: a position matches `--theme X` when **at least one**
   of its optimal solutions shows `X` (not all of them); naming several themes
   ANDs them, but not necessarily within the same solution. A saturated
@@ -40,17 +47,30 @@ bumps may change behavior).
   filter — `mine` counts these in its existing skipped-saturated tally rather
   than dropping them silently.
 
+### Changed
+
+- `mine` given more than one positional argument now exits 3 (`error: mine
+  takes exactly one MATERIAL argument; unexpected extra argument(s): ...`)
+  instead of the previous silent `pos[0]`-only behavior, which ignored every
+  extra argument and exited 0. Upgrade-visible for any script that (by
+  accident or habit) passed more than one positional to `mine`.
+
 ### Performance
 
 Theme detection forces solution enumeration — the same work `--starts`/
 `--ends` already pay, not new cost the detectors themselves introduce.
-Measured on `KQvk`, ms/query: process floor 3.12, plain `--dtm` 4.06,
-`--starts 1` (enumerates solutions, zero detectors) 13.12, `--theme mirror`
-13.20, four `--theme` flags 14.46 — the detectors cost under 1% of the added
-work. On scan work alone (excluding the process floor) a theme query runs at
-roughly 10.7x a plain `--dtm` scan, and this compounds with the ~6.5x mining
-penalty on block-compressed tables measured in v0.7.5. Mine against raw
-tables for large theme searches.
+Measured on `KQvk` at `--dtm 2` (a shallow query, few solutions per matched
+position), ms/query: process floor 3.12, plain `--dtm` 4.06, `--starts 1`
+(enumerates solutions, zero detectors) 13.12, `--theme mirror` 13.20, four
+`--theme` flags 14.46 — the detectors cost under 1% of the added work at
+this depth (scoped to this measurement: on deeper positions of the same
+table, `solutions()` 5.59 ms vs. `detect()` 0.34 ms at count 160 (5.8%), and
+7.42 / 0.42 ms at count 218 (5.4%) — low single digits generally, not
+uniformly under 1%). The qualitative point still holds throughout: the cost
+is enumeration, not the detectors. On scan work alone (excluding the process
+floor) a `--dtm 2` theme query runs at roughly 10.7x a plain `--dtm` scan,
+and this compounds with the ~6.5x mining penalty on block-compressed tables
+measured in v0.7.5. Mine against raw tables for large theme searches.
 
 ### Known limitations
 

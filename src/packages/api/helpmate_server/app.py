@@ -199,6 +199,13 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             else:
                 try:
                     out["themes"] = tb.themes(fen)
+                except helpmate.MissingTableError:
+                    # solutions() (which detection forces) calls value_of() on
+                    # every legal child move, including captures/promotions
+                    # into material this table set doesn't have -- exactly the
+                    # partial-table-set case /v1/line and a themes-less
+                    # /v1/probe already answer with 404, not 500. Match them.
+                    return unknown(material or fen)
                 except ValueError as e:
                     return JSONResponse(status_code=400,
                                         content=error_json("invalid_fen", str(e)))

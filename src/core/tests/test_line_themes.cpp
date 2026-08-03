@@ -201,6 +201,25 @@ TEST_CASE("a repeated shuffle is a switchback, not a circuit", "[themes][line]")
     REQUIRE_FALSE(has_closed_walk(s));
 }
 
+TEST_CASE("a shuffle that revisits its own turning square is a switchback, not a closed walk",
+          "[themes][line]") {
+    // White king e1-e2-d2-e2-e1: it returns to e1 having touched two DISTINCT
+    // squares along the way (e2, d2), which naive "count of distinct
+    // intermediates >= 2" would call a circuit -- but the path re-enters e2
+    // on the way back, so it retraces rather than circulates. This is the
+    // same unit under one continuous out-and-back reading: e2-d2-e2 (one
+    // intermediate square, d2) is itself a switchback.
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}},
+                                                   {"a8", "b8", {}},
+                                                   {"e2", "d2", {}},
+                                                   {"b8", "a8", {}},
+                                                   {"d2", "e2", {}},
+                                                   {"a8", "b8", {}},
+                                                   {"e2", "e1", {}}});
+    REQUIRE_FALSE(has_closed_walk(s));
+    REQUIRE(has_switchback(s));
+}
+
 TEST_CASE("a unit that never returns shows neither walk theme", "[themes][line]") {
     // White king walks e1-e2-e3-e4-e5 -- a straight climb up the e-file that
     // revisits nothing, four plies so the trajectory reaches five squares and

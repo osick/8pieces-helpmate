@@ -1,7 +1,16 @@
 """Theme surfaces: the registry endpoint, theme filtering on mine, and
 opt-in annotation on probe."""
+import shutil
+import subprocess
 
 GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
+# KQvk, count 160: the divergence class I-2 fixes (100 < count < 255). Any
+# fixed sub-100 enumeration cap misses "closed-walk" here specifically.
+COUNT_160 = "8/8/3Q4/8/k7/8/8/1K6 b - - 0 1"
+# KQvk-shaped, dtm=12 count=255 (saturated): its optimal replies include a
+# capture of the queen landing in Kvk, a material kqvk_only_dir deliberately
+# lacks.
+MISSING_SUBTABLE_FEN = "8/6kQ/8/8/8/8/8/K7 b - - 0 1"
 
 
 def test_themes_endpoint_lists_the_registry(client):
@@ -81,3 +90,41 @@ def test_probe_themes_on_flipped_position_is_200_not_500(client):
     assert body["flipped"] is True
     assert body["themes"] is None
     assert "themes_note" in body and "flip" in body["themes_note"].lower()
+
+
+def test_probe_themes_missing_subtable_is_404_not_500(client_partial):
+    # I-1 regression: solutions() (which theme detection forces) calls
+    # value_of() on every legal child move, including a queen capture landing
+    # in Kvk -- a material kqvk_only_dir deliberately lacks. A themes-less
+    # probe of the same FEN, and /v1/line's all=true, both 404 on exactly
+    # this kind of gap; probe?themes=true used to be the odd one out at 500.
+    plain = client_partial.get("/v1/probe", params={"fen": MISSING_SUBTABLE_FEN})
+    assert plain.status_code == 200
+    r = client_partial.get("/v1/probe",
+                           params={"fen": MISSING_SUBTABLE_FEN, "themes": "true"})
+    assert r.status_code == 404, r.json()
+    assert r.json()["error"]["code"] == "unknown_material"
+
+
+def test_cli_and_api_agree_on_themes_above_100(kqvk_dir, client):
+    # I-2 regression: the CLI caps enumeration at the position's own count;
+    # the API used to always ask the binding for its fixed max=100 default.
+    # For 100 < count < 255 that disagreed -- verified here with a KQvk
+    # position whose count is 160 and whose themes include "closed-walk",
+    # which a max=100 enumeration of this exact position drops (confirmed
+    # manually: tb.themes(fen, max=100) omits it, tb.themes(fen) does not).
+    helpmate_bin = shutil.which("helpmate")
+    assert helpmate_bin, "the `helpmate` CLI binary must be on PATH (pip install .)"
+    cli = subprocess.run(
+        [helpmate_bin, "probe", COUNT_160, "--tables", str(kqvk_dir), "--themes"],
+        capture_output=True, text=True, timeout=60)
+    assert cli.returncode == 0, cli.stderr
+    themes_line = next(line for line in cli.stdout.splitlines() if line.startswith("themes:"))
+    cli_themes = set(themes_line.removeprefix("themes:").split())
+
+    r = client.get("/v1/probe", params={"fen": COUNT_160, "themes": "true"})
+    assert r.status_code == 200
+    api_themes = set(r.json()["themes"])
+
+    assert "closed-walk" in cli_themes
+    assert cli_themes == api_themes
