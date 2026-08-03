@@ -328,6 +328,195 @@ Full usage/help text (`helpmate --help`) documents every flag and exit code
 (`0` success — including a reported "unsolvable" — `2` a required table is missing and
 which `helpmate gen` command builds it, `3` bad usage/unparseable input).
 
+## Themes
+
+Since v0.8.0, `mine --theme NAME` (repeatable) and `probe --themes` search and
+annotate by named composition theme — a property of a mate (`pure`, `model`,
+…) or of the moves in a solution (`promotion`, `switchback`, …). `helpmate
+themes` is the authoritative source for the vocabulary and always matches
+this build exactly; the table below is copied verbatim from its real output
+on this checkout (`helpmate 0.8.0`):
+
+| Theme | Definition |
+|---|---|
+| `pure` | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
+| `model` | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
+| `ideal` | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
+| `mirror` | Every square adjacent to the black king is empty, of either colour. |
+| `promotion` | A pawn promotes during the solution. |
+| `underpromotion` | A pawn promotes to rook, bishop or knight. |
+| `excelsior` | A pawn standing on its own second rank at the start of the solution promotes during it (either colour). |
+| `excelsior:white` | Excelsior by a white pawn. |
+| `excelsior:black` | Excelsior by a black pawn. |
+| `switchback` | A unit leaves a square and returns to it, having visited exactly one intermediate square. |
+| `closed-walk` | Rundlauf: a unit returns to its departure square having visited two or more distinct intermediate squares, so it traverses a circuit rather than retracing its path. |
+| `self-block` | A black unit other than the king moves onto a square of its own king's field and stands there unattacked in the mating position, blocking a flight square. |
+| `single-piece` | Every move by one side is made by the same unit (either side). |
+| `single-piece:white` | Every white move is made by the same unit. |
+| `single-piece:black` | Every black move is made by the same unit; with the king, this is the Analyzer's "BK moves only". |
+| `en-passant` | A ply is an en-passant capture. |
+
+Twelve themes, sixteen registry entries: `excelsior` and `single-piece` each
+carry a broad form plus `:white`/`:black` variants, because a detector only
+answers yes/no and can't itself report which side showed it. See
+[USAGE.md](docs/USAGE.md#themes) for naming provenance (the [Helpmate
+Analyzer glossary](https://helpman.komtera.lt/themes.html)) and the API
+surfaces.
+
+### Worked example: mine, probe, line
+
+```
+$ helpmate mine KQvk --dtm 8 --theme switchback --max 3 --tables ~/tb/raw
+8/8/8/8/8/8/8/KQk5 b - - 0 1
+8/8/8/8/8/8/8/K1k1Q3 b - - 0 1
+8/8/8/8/8/8/1Q6/K1k5 b - - 0 1
+note: skipped 3 position(s) whose solution count is saturated (255+): their solutions cannot be enumerated exhaustively
+
+$ helpmate probe "8/8/8/8/8/8/8/KQk5 b - - 0 1" --themes --tables ~/tb/raw
+dtm=8 (h#4) count=190
+themes: pure model ideal mirror switchback closed-walk single-piece single-piece:black
+
+$ helpmate line "8/8/8/8/8/8/8/KQk5 b - - 0 1" --all --tables ~/tb/raw
+Kd2 Ka2 Ke2 Kb3 Kd2 Qa2+ Kc1 Qc2#
+Kd2 Ka2 Ke2 Kb3 Kd2 Qd3+ Kc1 Qc2#
+Kd2 Ka2 Ke2 Kb3 Kd2 Qe4 Kc1 Qc2#
+Kd2 Ka2 Ke2 Kb3 Kd2 Qe4 Kc1 Qe1#
+Kd2 Ka2 Ke2 Kb3 Kd2 Qf5 Kc1 Qc2#
+Kd2 Ka2 Ke2 Kb3 Kd2 Qg6 Kc1 Qc2#
+Kd2 Ka2 Ke2 Kb3 Kd2 Qh7 Kc1 Qc2#
+Kd2 Ka2 Ke2 Qe4+ Kd1 Kb3 Kc1 Qc2#
+Kd2 Ka2 Ke2 Qe4+ Kd1 Kb3 Kc1 Qe1#
+Kd2 Ka2 Ke2 Qe4+ Kd2 Kb3 Kc1 Qc2#
+```
+
+(`--all` caps at `--max`, default 10; this position has 190 optimal lines
+total, per its `count` above.) The white king's g8-b2-c3-d2-e2 wandering,
+returning to d2 via a single intermediate square each time, is the
+`switchback`; the same table at `--dtm 12` shows a genuine multi-square
+`closed-walk` instead — see the per-theme table below.
+
+### Match semantics: `any` within a theme, `AND` across themes
+
+A position matches `--theme X` when **at least one** of its optimal
+solutions shows theme `X`, not every solution. Naming several themes
+requires **all** of them to be shown, but not necessarily by the same
+solution — a position with one solution showing `mirror` and a different
+solution showing `self-block` matches `--theme mirror --theme self-block`
+even though no single line shows both:
+
+```
+$ helpmate mine KQvkq --dtm 4 --theme self-block --theme mirror --max 3 --tables ~/tb/raw
+8/8/8/8/8/k7/8/1K1Qq3 b - - 0 1
+8/8/8/8/8/k7/8/1K1Q1q2 b - - 0 1
+8/8/8/8/8/k7/8/1K1Q2q1 b - - 0 1
+
+$ helpmate probe "8/8/8/8/8/k7/8/1K1Qq3 b - - 0 1" --themes --tables ~/tb/raw
+dtm=4 (h#2) count=19
+themes: pure model mirror self-block single-piece single-piece:white single-piece:black
+```
+
+### A real example per theme
+
+Every FEN below was produced by `helpmate mine <MATERIAL> --dtm N --theme
+NAME`, then re-checked with `helpmate probe --themes` to confirm the named
+theme is actually in that position's output (shown as `pure`/`model`/etc. in
+the tables above and the worked example — the same `--tables ~/tb/raw`
+verification command works for every row).
+
+| Theme | FEN | Material |
+|---|---|---|
+| `pure`, `model`, `ideal`, `mirror`, `single-piece`, `single-piece:black` | `8/8/8/8/8/k7/8/1K2Q3 b - - 0 1` | `KQvk` |
+| `switchback`, `closed-walk` | `8/8/8/8/8/8/8/KQk5 b - - 0 1` | `KQvk` (`--dtm 8`) |
+| `closed-walk` (longer, `--dtm 12`) | `8/8/7k/5Q2/8/8/8/K7 b - - 0 1` | `KQvk` |
+| `self-block` | `8/8/8/8/8/8/2q5/K1k1Q3 b - - 0 1` | `KQvkq` |
+| `promotion`, `underpromotion` | `8/8/5p2/5P2/8/8/8/K1k5 b - - 0 1` | `KPvkp` (`--dtm 20`) |
+| `excelsior`, `excelsior:white` | `8/8/8/8/8/k1p5/2P5/K7 b - - 0 1` | `KPvkp` (`--dtm 20`) |
+| `excelsior:black` | `8/3p4/8/8/1P6/8/8/K1k5 b - - 0 1` | `KPvkp` (`--dtm 10`) |
+| `en-passant`, `single-piece:white` | `8/p7/8/1P6/8/8/8/k1K5 b - - 0 1` | `KPvkp` (`--dtm 6`) |
+
+That covers all sixteen registry entries with a verified real position — none
+omitted. `mine`ing `en-passant`/`excelsior`/`promotion`/`underpromotion` needs
+a material with pawns on both sides, so all four went against `KPvkp` (16 MB);
+some depths took over a minute to scan (`KPvkp --dtm 8` in particular), most
+returned in well under a second.
+
+### Two things to know before you trust a result
+
+**The solution cap is a false-negative source.** A position whose optimal-line
+count is saturated (255+, meaning "at least 255, exact count unknown") can
+never be enumerated, so it can never match a theme filter — `mine` reports
+these in a skipped tally rather than dropping them silently, as seen in the
+worked example above (`skipped 3 position(s)...`) and, at shallower dtm on
+bigger material, in the thousands (`KPvkp --dtm 22 --theme en-passant`
+skipped 29750 positions this way).
+
+**Colour-flipped positions cannot be annotated.** `probe` falls back to a
+color flip when only the flipped material's table exists — but every theme
+detector is hard-coded to the black king, so re-running detection on a
+flipped board would silently swap the four colour-labelled themes
+(`single-piece:white`/`:black`, `excelsior:white`/`:black`). Real output,
+against a scratch directory holding only `KQvk`'s closure (so the literal
+material of the FEN below, `Kvkq`, has no table of its own and must be
+answered via flip):
+
+```
+$ helpmate gen KQvk --tables tt
+tt/Kvk.hm max_dtm=255
+tt/KQvk.hm max_dtm=14
+
+$ helpmate probe "6q1/8/8/8/8/5k2/7K/8 w - - 0 1" --themes --tables tt
+dtm=2 (h#1, colors flipped) count=4
+themes: (unavailable: colors were flipped to find a table)
+note: themes are unavailable for a color-flipped probe. The mate detectors
+are hard-coded to the black king, so the colour-labelled themes would come
+out swapped. Re-run with the colours of the position exchanged to get a
+correct answer.
+```
+
+**Verification against published problems was deferred by explicit
+decision.** Every definition above is this project's own — precise enough to
+argue with, not checked against the Helpmate Analyzer or any other authority.
+A detector subtly at odds with composition convention returns a confident,
+wrong answer, and nothing in this project's test suite catches that; only
+comparison against known compositions would. Treat every theme match as this
+codebase's opinion, not an authoritative ruling.
+
+### Performance
+
+Theme filtering forces solution enumeration — the same work `--starts`/
+`--ends` already pay — and the detectors themselves are a small fraction of
+that cost. Measured on this checkout (`KQvk`, raw tables, `~/tb/raw`, 15-run
+averages, `taskset -c 0-3`):
+
+| Query | dtm=2 (shallow, few solutions/match) | dtm=6 (deep, up to 255 solutions/match) |
+|---|---|---|
+| process floor (`--version`) | 5.5 ms | — |
+| plain `--dtm` (no enumeration) | 5.9 ms | 6.0 ms |
+| `--starts 1` (enumerates solutions) | 13.1 ms | 929.5 ms |
+| `--theme mirror` (one detector) | 16.0 ms | 163.0 ms |
+| four `--theme` flags | 17.0 ms | 163.7 ms |
+
+Two things stand out: adding three more `--theme` flags cost under a
+millisecond at either depth — the detectors are cheap, confirming the "~5% of
+the cost" figure measured elsewhere in this project (see
+[USAGE.md](docs/USAGE.md#themes)); and at `dtm=6`, where matched positions
+can have dozens to hundreds of tied optimal lines, a theme query
+(163 ms) was substantially *cheaper* than `--starts 1` (929.5 ms) on the same
+material and depth — theme matching can stop at the first qualifying
+solution, while `--starts` must still enumerate enough of the tree to count
+distinct first moves exactly. Take the relative numbers as this run's,
+not a universal ratio.
+
+This compounds with the block-compression mining penalty measured in v0.7.5
+(`mine --count`/`--starts` runs ~6.5x slower on a compressed table,
+regardless of block size — see [Table format](#table-format) above): a
+freshly generated, page-cache-resident `KQvk` (146 KB) showed no measurable
+difference between raw and compressed (163.0 ms vs 170.8 ms, both `--theme
+mirror --dtm 6`) — too small to show the effect the 462 MiB `KRvkbn`
+measurement in v0.7.5 was based on. Mine against raw tables for large theme
+searches regardless; the penalty is real on tables that don't fit in the
+page cache, only invisible on toy ones like this.
+
 ## Python API
 
 ```bash
