@@ -202,7 +202,19 @@ TEST_CASE("a repeated shuffle is a switchback, not a circuit", "[themes][line]")
 }
 
 TEST_CASE("a unit that never returns shows neither walk theme", "[themes][line]") {
-    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}, {"e2", "e3", {}}});
+    // White king walks e1-e2-e3-e4-e5 -- a straight climb up the e-file that
+    // revisits nothing, four plies so the trajectory reaches five squares and
+    // exercises the closed-walk endpoint test's j >= i + 3 gap (e.g. i at e1,
+    // j at e4). Black king walks a8-b8-c8-d8-e8 in step, an equally monotonic
+    // line with no repeated square, so it cannot rescue either verdict either.
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}},
+                                                   {"a8", "b8", {}},
+                                                   {"e2", "e3", {}},
+                                                   {"b8", "c8", {}},
+                                                   {"e3", "e4", {}},
+                                                   {"c8", "d8", {}},
+                                                   {"e4", "e5", {}},
+                                                   {"d8", "e8", {}}});
     REQUIRE_FALSE(has_switchback(s));
     REQUIRE_FALSE(has_closed_walk(s));
 }
@@ -233,6 +245,7 @@ TEST_CASE("en passant is recognised", "[themes][line]") {
 
     auto quiet = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}});
     REQUIRE_FALSE(has_en_passant(quiet));
+    REQUIRE_FALSE(has_promotion(quiet));
 }
 
 TEST_CASE("self-block: a black unit steps onto an unattacked flight square", "[themes][line]") {

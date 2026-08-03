@@ -84,14 +84,24 @@ bool has_self_block(const Solution& s) {
         const PlacedPiece* occ = nullptr;
         for (const auto& p : ps)
             if ((int)p.square == f) occ = &p;
-        // The colour and king tests cannot bite in a real mating position -- a
-        // white unit standing undefended beside the mated king would be
-        // capturable, and no king is adjacent to itself -- so they guard only
-        // against a caller handing us a final position that is not mate.
+        // The colour and king tests are untestable by DELETION, not untested:
+        // in a real mate a white unit standing on a field square is always
+        // attacked, so the attackers_of check below already skips it whether
+        // or not this line does, and no king is ever adjacent to itself. But
+        // INVERTING either check is caught immediately by the self-block
+        // positive fixture, whose blocking square g8 holds a black rook --
+        // an inverted colour test would skip that rook, an inverted king
+        // test would skip it too.
         if (!occ || occ->piece.color != Color::Black || occ->piece.type == PieceType::King) continue;
         // Same king-removed rule as is_pure: a blocked square that White also
         // attacks is not a self-block, it is double duty.
         if (attackers_of(ps, Color::White, f, Color::Black) != 0) continue;
+        // Provably equivalent, not just a heuristic: if a black non-king unit
+        // occupies f in the final position and some black ply had `to == f`,
+        // that ply must be the one that put the occupant there. A unit sitting
+        // on f from the very start would block every other black unit from
+        // ever moving to f, so the only way a black ply can have `to == f` is
+        // for the mover of that ply to be the piece now standing on f.
         for (const auto& ply : s.plies)  // did a black unit MOVE there?
             if (ply.piece.color == Color::Black && (int)ply.to == f) return true;
     }
