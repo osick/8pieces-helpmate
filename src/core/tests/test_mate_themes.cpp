@@ -146,6 +146,48 @@ TEST_CASE("ideal implies model implies pure", "[themes][mate]") {
     }
 }
 
+TEST_CASE("a white-body field square stays pure under a double guard", "[themes][mate]") {
+    // Black Kh8. White Ng8 sits on a flight square, guarded twice: by Kf7 and by
+    // Ne7 (e7 also covers g8, g6 and c8/c6/d5/f5, none of them field squares
+    // beyond g8 itself). Rh1 checks up the h-file, single check. Field squares:
+    // g8 occupied by the white knight (a WHITE body -- denied by occupation
+    // regardless of guard count, by convention); g7 guarded once by Kf7; h7
+    // guarded once by Kf7. Each field square denied for exactly one convention-
+    // al reason, so this is pure -- even though the body square is attacked
+    // twice over.
+    auto s = at("6Nk/4NK2/8/8/8/8/8/7R b - - 0 1");
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE(is_pure(s));
+}
+
+TEST_CASE("model mate still holds with an idle black knight on the board", "[themes][mate]") {
+    // Base back-rank mate (Kg8/Ra8/Kg6) plus an idle black knight on b1, far
+    // from the king's field and not itself the mated king. The colour filter
+    // in is_model must skip this black piece rather than let the king/pawn
+    // filter (which only excludes White King/Pawn) misclassify it as
+    // non-participating and fail the mate.
+    auto s = at("R5k1/8/6K1/8/8/8/8/1n6 b - - 0 1");
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE(is_pure(s));
+    REQUIRE(is_model(s));
+}
+
+TEST_CASE("ideal mate with a black unit correctly on the field", "[themes][mate]") {
+    // Black Kh8, White Ra8 checking along the 8th (a8-h8, nothing between).
+    // Black pawn h7 self-blocks its own king's only other flight square.
+    // White Kf6 covers g7 (and g6, g5, e5, e6, e7 -- none are field squares).
+    // Field squares: g8 unoccupied, guarded once by Ra8 (through the king,
+    // once it's lifted); g7 unoccupied, guarded once by Kf6; h7 occupied by
+    // the black pawn, unattacked (Kf6 does not reach h7). Every field square
+    // denied exactly once -> pure. White king and rook both participate ->
+    // model. The black pawn stands ON a field square (h7), satisfying ideal's
+    // black-unit requirement in the ACCEPTING direction.
+    auto s = at("R6k/7p/5K2/8/8/8/8/8 b - - 0 1");
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE(is_model(s));
+    REQUIRE(is_ideal(s));
+}
+
 TEST_CASE("a position with no black king detects nothing", "[themes][mate]") {
     // Board::from_fen insists on one king per side, so build this board
     // directly: Ke1 and Ra1, White to move, no black king anywhere. The

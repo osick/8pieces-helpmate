@@ -40,6 +40,11 @@ bool on_field(const MateInfo& mi, int sq) {
 bool participates(const MateInfo& mi, const PlacedPiece& p) {
     if (piece_attacks(mi.pieces, p, mi.bk)) return true;
     if (on_field(mi, p.square)) return true;
+    // The Color::Black argument here is provably redundant: a slider reaching
+    // a field square THROUGH the black king would also attack mi.bk directly,
+    // which the piece_attacks(..., mi.bk) check above already caught. Kept
+    // anyway as a defensive, explicit statement of the same "see through the
+    // mated king" rule is_pure relies on -- do not simplify it away.
     for (int f : mi.field)
         if (piece_attacks(mi.pieces, p, f, Color::Black)) return true;
     return false;
