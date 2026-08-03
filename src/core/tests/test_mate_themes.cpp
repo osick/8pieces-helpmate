@@ -152,7 +152,8 @@ TEST_CASE("a white-body field square stays pure under a double guard", "[themes]
     // beyond g8 itself). Rh1 checks up the h-file, single check. Field squares:
     // g8 occupied by the white knight (a WHITE body -- denied by occupation
     // regardless of guard count, by convention); g7 guarded once by Kf7; h7
-    // guarded once by Kf7. Each field square denied for exactly one convention-
+    // guarded once by Rh1 (Kf7 is two files away and does not reach it). Each
+    // field square denied for exactly one convention-
     // al reason, so this is pure -- even though the body square is attacked
     // twice over.
     auto s = at("6Nk/4NK2/8/8/8/8/8/7R b - - 0 1");
