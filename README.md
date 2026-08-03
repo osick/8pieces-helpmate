@@ -390,10 +390,14 @@ Kd2 Ka2 Ke2 Qe4+ Kd2 Kb3 Kc1 Qc2#
 ```
 
 (`--all` caps at `--max`, default 10; this position has 190 optimal lines
-total, per its `count` above.) The white king's g8-b2-c3-d2-e2 wandering,
-returning to d2 via a single intermediate square each time, is the
-`switchback`; the same table at `--dtm 12` shows a genuine multi-square
-`closed-walk` instead — see the per-theme table below.
+total, per its `count` above.) In the first line, the **black** king walks
+c1-d2-e2-d2-c1: it leaves d2 and comes back having visited exactly one
+intermediate square, e2 — that is the `switchback`, and it is also why the
+position reports `single-piece:black` (every black move is that same king).
+`closed-walk` is reported too, but no line among the first ten shows it;
+under `any` semantics one of the other 180 optimal solutions does. The
+`--dtm 12` row in the per-theme table below is a clearer place to look at a
+genuine circuit.
 
 ### Match semantics: `any` within a theme, `AND` across themes
 
@@ -499,13 +503,18 @@ averages, `taskset -c 0-3`):
 Two things stand out: adding three more `--theme` flags cost under a
 millisecond at either depth — the detectors are cheap, confirming the "~5% of
 the cost" figure measured elsewhere in this project (see
-[USAGE.md](docs/USAGE.md#themes)); and at `dtm=6`, where matched positions
-can have dozens to hundreds of tied optimal lines, a theme query
-(163 ms) was substantially *cheaper* than `--starts 1` (929.5 ms) on the same
-material and depth — theme matching can stop at the first qualifying
-solution, while `--starts` must still enumerate enough of the tree to count
-distinct first moves exactly. Take the relative numbers as this run's,
-not a universal ratio.
+[USAGE.md](docs/USAGE.md#themes)); and at `dtm=6` a theme query
+(163 ms) came out substantially *cheaper* than `--starts 1` (929.5 ms) on the
+same material and depth.
+
+That second one is a measurement artifact, not a property of theme matching,
+and it is worth spelling out because the obvious explanation is wrong. Both
+filters enumerate a candidate's solutions the same way before any detector or
+counter runs. What differs is how far each query has to scan before `--max`
+(default 10) stops it: at `dtm=6`, `--theme mirror` matches 10,126 positions
+in this table while `--starts 1` matches only 2,977, so the theme query finds
+its ten hits far earlier in the sweep. Measured with `--max 100000` on both.
+Take these as this run's numbers on this material, not a universal ratio.
 
 This compounds with the block-compression mining penalty measured in v0.7.5
 (`mine --count`/`--starts` runs ~6.5x slower on a compressed table,
