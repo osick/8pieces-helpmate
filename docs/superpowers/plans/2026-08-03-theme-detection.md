@@ -2486,23 +2486,23 @@ Also clear it in the editing branch (around the existing `summary.textContent = 
 Append to `src/packages/web/tests/ui/test_dashboard.py`, matching the style of the existing tests in that file:
 
 ```python
-def test_theme_picker_is_populated_from_the_server(page, base_url):
-    page.goto(f"{base_url}/#panel=mine")
+def test_theme_picker_is_populated_from_the_server(page, server):
+    page.goto(f"{server}/#panel=mine")
     page.wait_for_selector("#mine-themes option")
     values = page.eval_on_selector_all(
         "#mine-themes option", "els => els.map(e => e.value)")
     assert "model" in values and "closed-walk" in values
 
 
-def test_explorer_shows_detected_themes(page, base_url):
-    page.goto(f"{base_url}/#fen=8/7k/5K2/8/8/8/8/6Q1%20b%20-%20-%200%201&panel=explorer")
+def test_explorer_shows_detected_themes(page, server):
+    page.goto(f"{server}/#fen={quote(GOLDEN)}")
     page.wait_for_function(
         "() => document.getElementById('position-themes').textContent.length > 0")
     text = page.inner_text("#position-themes")
     assert text  # either a theme list or "no themes detected"
 ```
 
-If the hash-state format or fixture names in `test_dashboard.py` differ from the above, follow that file's existing conventions rather than these.
+The `server` fixture is a base URL string (session-scoped, from `conftest.py`); `GOLDEN` and `quote` are already imported in `test_dashboard.py`. Follow that file's existing conventions.
 
 - [ ] **Step 10: Run the web tests**
 
