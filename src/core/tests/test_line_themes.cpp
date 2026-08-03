@@ -1,0 +1,307 @@
+#include <catch2/catch_test_macros.hpp>
+
+#include "probe/solution.h"
+#include "themes/line_themes.h"
+#include "themes/trajectory.h"
+
+using namespace hm;
+using namespace hm::themes;
+
+static int sq(const char* n) { return (n[1] - '1') * 8 + (n[0] - 'a'); }
+
+// Build a Solution by playing UCI-ish moves onto a start FEN. Each entry is
+// {from, to, promotion}. The boards are produced by Board::make so `after`,
+// captures and en passant are real, not asserted. The ply fields are filled the
+// same way Tablebase::collect_solutions fills them -- including the en-passant
+// rule that the captured pawn is NOT on the destination square -- so a detector
+// cannot pass here on a ply shape the generator never produces.
+struct MoveSpec {
+    const char* from;
+    const char* to;
+    std::optional<PieceType> promo;
+};
+
+static Solution play(const std::string& fen, const std::vector<MoveSpec>& specs) {
+    auto b = Board::from_fen(fen);
+    REQUIRE(b);
+    Solution s{*b, {}};
+    Board cur = *b;
+    for (const auto& ms : specs) {
+        const Move* found = nullptr;
+        auto legal = cur.legal_moves();
+        for (const auto& m : legal)
+            if ((int)m.from == sq(ms.from) && (int)m.to == sq(ms.to) && m.promotion() == ms.promo) found = &m;
+        REQUIRE(found != nullptr);  // the fixture asked for an illegal move
+        Ply p;
+        p.from = found->from;
+        p.to = found->to;
+        p.promotion = found->promotion();
+        p.is_ep = found->is_ep();
+        for (const auto& pp : cur.pieces()) {
+            if ((int)pp.square == (int)found->from) p.piece = pp.piece;
+            else if ((int)pp.square == (int)found->to) p.captured = pp.piece.type;
+        }
+        if (p.is_ep) p.captured = PieceType::Pawn;
+        cur.make(*found);
+        p.is_check = cur.in_check();
+        p.after = cur;
+        s.plies.push_back(std::move(p));
+    }
+    return s;
+}
+
+TEST_CASE("trajectories chain a unit's squares through the solution", "[themes][line]") {
+    // White king walks e1-e2-e3; black king shuffles a8-b8.
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}, {"e2", "e3", {}}});
+    auto ts = trajectories(s);
+    REQUIRE(ts.size() == 2);
+    for (const auto& t : ts) {
+        if (t.color == Color::White) {
+            REQUIRE(t.squares ==
+                    std::vector<uint8_t>{(uint8_t)sq("e1"), (uint8_t)sq("e2"), (uint8_t)sq("e3")});
+            REQUIRE(t.plies == std::vector<int>{0, 2});
+        } else {
+            REQUIRE(t.squares.size() == 2);
+            REQUIRE(t.plies == std::vector<int>{1});
+        }
+    }
+}
+
+TEST_CASE("a unit arriving on a captured unit's square starts its own trajectory", "[themes][line]") {
+    // Black Rd8 and pawn d6, white Rd1, kings h8 and a1. The pawn steps to d5,
+    // White takes it (Rd1xd5), then the rook recaptures onto the SAME square
+    // (Rd8xd5). Two black units moved, so the arrival must not be chained onto
+    // the dead pawn's path.
+    auto s =
+        play("3r3k/8/3p4/8/8/8/8/K2R4 b - - 0 1", {{"d6", "d5", {}}, {"d1", "d5", {}}, {"d8", "d5", {}}});
+    auto ts = trajectories(s);
+    REQUIRE(ts.size() == 3);
+    REQUIRE(ts[0].color == Color::Black);
+    REQUIRE(ts[0].squares == std::vector<uint8_t>{(uint8_t)sq("d6"), (uint8_t)sq("d5")});
+    REQUIRE(ts[1].color == Color::White);
+    REQUIRE(ts[2].color == Color::Black);
+    REQUIRE(ts[2].squares == std::vector<uint8_t>{(uint8_t)sq("d8"), (uint8_t)sq("d5")});
+    REQUIRE(s.plies[1].captured == PieceType::Pawn);
+    REQUIRE_FALSE(is_single_piece_black(s));
+    REQUIRE(is_single_piece_white(s));
+}
+
+TEST_CASE("promotion and underpromotion", "[themes][line]") {
+    auto queen = play("k7/8/8/8/8/8/6P1/4K3 w - - 0 1", {{"g2", "g4", {}},
+                                                         {"a8", "b8", {}},
+                                                         {"g4", "g5", {}},
+                                                         {"b8", "a8", {}},
+                                                         {"g5", "g6", {}},
+                                                         {"a8", "b8", {}},
+                                                         {"g6", "g7", {}},
+                                                         {"b8", "a8", {}},
+                                                         {"g7", "g8", PieceType::Queen}});
+    REQUIRE(has_promotion(queen));
+    REQUIRE_FALSE(has_underpromotion(queen));
+
+    auto knight = play("k7/8/8/8/8/8/6P1/4K3 w - - 0 1", {{"g2", "g4", {}},
+                                                          {"a8", "b8", {}},
+                                                          {"g4", "g5", {}},
+                                                          {"b8", "a8", {}},
+                                                          {"g5", "g6", {}},
+                                                          {"a8", "b8", {}},
+                                                          {"g6", "g7", {}},
+                                                          {"b8", "a8", {}},
+                                                          {"g7", "g8", PieceType::Knight}});
+    REQUIRE(has_promotion(knight));
+    REQUIRE(has_underpromotion(knight));
+}
+
+TEST_CASE("excelsior: a pawn from its own second rank promotes", "[themes][line]") {
+    auto s = play("k7/8/8/8/8/8/6P1/4K3 w - - 0 1", {{"g2", "g4", {}},
+                                                     {"a8", "b8", {}},
+                                                     {"g4", "g5", {}},
+                                                     {"b8", "a8", {}},
+                                                     {"g5", "g6", {}},
+                                                     {"a8", "b8", {}},
+                                                     {"g6", "g7", {}},
+                                                     {"b8", "a8", {}},
+                                                     {"g7", "g8", PieceType::Queen}});
+    REQUIRE(has_excelsior(s));
+    REQUIRE(has_excelsior_white(s));
+    REQUIRE_FALSE(has_excelsior_black(s));
+
+    // Near-miss: same promotion, but the pawn starts on g4, not its home rank.
+    auto near = play("k7/8/8/8/6P1/8/8/4K3 w - - 0 1", {{"g4", "g5", {}},
+                                                        {"a8", "b8", {}},
+                                                        {"g5", "g6", {}},
+                                                        {"b8", "a8", {}},
+                                                        {"g6", "g7", {}},
+                                                        {"a8", "b8", {}},
+                                                        {"g7", "g8", PieceType::Queen}});
+    REQUIRE(has_promotion(near));
+    REQUIRE_FALSE(has_excelsior(near));
+}
+
+TEST_CASE("excelsior is detected for Black on its own seventh rank", "[themes][line]") {
+    // Black Kh8 and a pawn on b7; white Ke1 marks time on e1/e2 while the pawn
+    // runs b7-b5-b4-b3-b2-b1=Q. The white king is never in check: the pawn only
+    // ever bears on the a- and c-files.
+    auto s = play("7k/1p6/8/8/8/8/8/4K3 b - - 0 1", {{"b7", "b5", {}},
+                                                     {"e1", "e2", {}},
+                                                     {"b5", "b4", {}},
+                                                     {"e2", "e1", {}},
+                                                     {"b4", "b3", {}},
+                                                     {"e1", "e2", {}},
+                                                     {"b3", "b2", {}},
+                                                     {"e2", "e1", {}},
+                                                     {"b2", "b1", PieceType::Queen}});
+    REQUIRE(has_excelsior(s));
+    REQUIRE(has_excelsior_black(s));
+    REQUIRE_FALSE(has_excelsior_white(s));
+}
+
+TEST_CASE("a pawn that leaves its home rank without promoting is not excelsior", "[themes][line]") {
+    // The black d-pawn starts on d7, its home rank, and moves -- but never
+    // reaches the eighth. Excelsior needs the promotion, not just the origin.
+    auto s = play("k7/3p4/8/4P3/8/8/8/4K3 b - - 0 1", {{"d7", "d5", {}}, {"e5", "d6", {}}});
+    REQUIRE_FALSE(has_excelsior(s));
+    REQUIRE_FALSE(has_excelsior_black(s));
+}
+
+TEST_CASE("switchback is out-and-back with exactly one intermediate square", "[themes][line]") {
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}, {"e2", "e1", {}}});
+    REQUIRE(has_switchback(s));
+    REQUIRE_FALSE(has_closed_walk(s));
+}
+
+TEST_CASE("closed walk is a circuit of two or more intermediate squares", "[themes][line]") {
+    // White king e1-e2-d2-d1-e1: three distinct intermediate squares. The black
+    // king walks a8-b8-c8-d8 rather than shuffling, so it contributes no
+    // return of its own to either verdict.
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}},
+                                                   {"a8", "b8", {}},
+                                                   {"e2", "d2", {}},
+                                                   {"b8", "c8", {}},
+                                                   {"d2", "d1", {}},
+                                                   {"c8", "d8", {}},
+                                                   {"d1", "e1", {}}});
+    REQUIRE(has_closed_walk(s));
+    REQUIRE_FALSE(has_switchback(s));
+}
+
+TEST_CASE("a repeated shuffle is a switchback, not a circuit", "[themes][line]") {
+    // White king e1-e2-e1-e2-e1 returns to its origin after four moves, but the
+    // squares between the two ends repeat, so this retraces rather than
+    // circulates. The black king a8-b8-a8-b8 never returns on an index gap of
+    // three or more, so it cannot rescue the closed-walk verdict either.
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}},
+                                                   {"a8", "b8", {}},
+                                                   {"e2", "e1", {}},
+                                                   {"b8", "a8", {}},
+                                                   {"e1", "e2", {}},
+                                                   {"a8", "b8", {}},
+                                                   {"e2", "e1", {}}});
+    REQUIRE(has_switchback(s));
+    REQUIRE_FALSE(has_closed_walk(s));
+}
+
+TEST_CASE("a unit that never returns shows neither walk theme", "[themes][line]") {
+    auto s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}, {"e2", "e3", {}}});
+    REQUIRE_FALSE(has_switchback(s));
+    REQUIRE_FALSE(has_closed_walk(s));
+}
+
+TEST_CASE("single-piece is evaluated per side", "[themes][line]") {
+    // White moves only its king; Black moves only its king.
+    auto both = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}, {"e2", "e3", {}}});
+    REQUIRE(is_single_piece_white(both));
+    REQUIRE(is_single_piece_black(both));
+    REQUIRE(is_single_piece(both));
+
+    // White moves king then rook: two white units. The rook stands on h1, not
+    // a1, so it does not attack the black king on a8 -- a white rook on the
+    // a-file would make this a position with Black already in check and White
+    // to move, which is illegal.
+    auto two = play("k7/8/8/8/8/8/8/4K2R w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}, {"h1", "h4", {}}});
+    REQUIRE_FALSE(is_single_piece_white(two));
+    REQUIRE(is_single_piece_black(two));
+    REQUIRE(is_single_piece(two));  // "either side" still holds
+}
+
+TEST_CASE("en passant is recognised", "[themes][line]") {
+    // White pawn e5, black plays d7-d5, White captures exd6 e.p.
+    auto s = play("k7/3p4/8/4P3/8/8/8/4K3 b - - 0 1", {{"d7", "d5", {}}, {"e5", "d6", {}}});
+    REQUIRE(s.plies.back().is_ep);
+    REQUIRE(has_en_passant(s));
+    REQUIRE(s.plies.back().captured == PieceType::Pawn);
+
+    auto quiet = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}});
+    REQUIRE_FALSE(has_en_passant(quiet));
+}
+
+TEST_CASE("self-block: a black unit steps onto an unattacked flight square", "[themes][line]") {
+    // Black Kh8 and Rb8; white Nf5, Rb1, Ka1. The rook swings to g8, beside its
+    // own king, and Rb1-h1 mates up the h-file: h7 is denied by the mating rook
+    // itself, g7 by the knight, and g8 only by the black rook standing on it --
+    // no white unit bears on g8, so the block is the sole reason that flight is
+    // gone.
+    auto s = play("1r5k/8/8/5N2/8/8/8/KR6 b - - 0 1", {{"b8", "g8", {}}, {"b1", "h1", {}}});
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE(has_self_block(s));
+}
+
+TEST_CASE("a self-blocked square White also attacks is not a self-block", "[themes][line]") {
+    // The same mate with a white bishop added on b3, whose diagonal
+    // b3-c4-d5-e6-f7-g8 bears on the blocking square. g8 is now denied twice
+    // over -- double duty, not a self-block.
+    auto s = play("1r5k/8/8/5N2/8/1B6/8/KR6 b - - 0 1", {{"b8", "g8", {}}, {"b1", "h1", {}}});
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE_FALSE(has_self_block(s));
+}
+
+TEST_CASE("a square attacked only through the mated king is not a self-block", "[themes][line]") {
+    // Black Kg8 and Rh7; white Bh6, Ng5, Ra1, Ke1. Black plays Rh7-h8 and
+    // Ra1-a8 mates along the eighth (f7 and h7 covered by the knight, g7 by the
+    // bishop). The rook on h8 sits on a field square, and with the mated king
+    // lifted off g8 the mating rook's ray reaches h8: attacked, so not a
+    // self-block. With the king left on the board the ray stops short and this
+    // would read as one.
+    auto s = play("6k1/7r/7B/6N1/8/8/8/R3K3 b - - 0 1", {{"h7", "h8", {}}, {"a1", "a8", {}}});
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE_FALSE(has_self_block(s));
+}
+
+TEST_CASE("a black unit already beside its king is not a self-block", "[themes][line]") {
+    // The self-block mate reached WITHOUT the black rook ever moving: it starts
+    // on g8, White plays Rb1-h1 and the identical mating position arises. The
+    // blocking square is just as unattacked, so only the missing black move
+    // separates this from the positive case.
+    auto s = play("6rk/8/8/5N2/8/8/8/KR6 w - - 0 1", {{"b1", "h1", {}}});
+    REQUIRE(final_board(s).state() == PosState::Checkmate);
+    REQUIRE_FALSE(has_self_block(s));
+}
+
+TEST_CASE("a position with no black king self-blocks nothing", "[themes][line]") {
+    // Board::from_fen insists on one king per side, so build this board
+    // directly: white Ke1 and Ra1, White to move, no black king anywhere. The
+    // self-block scan must answer false rather than take a king field around a
+    // square index of -1.
+    Solution s{
+        Board::from_pieces({{{Color::White, PieceType::King}, 4}, {{Color::White, PieceType::Rook}, 0}},
+                           Color::White, -1),
+        {}};
+    REQUIRE_FALSE(has_self_block(s));
+}
+
+TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
+    // Black Kg8 mated by Ra8 along the eighth with white Kg6 covering f7/g7/h7:
+    // a position that is already mate, hence a solution with no plies at all.
+    auto b = Board::from_fen("R5k1/8/6K1/8/8/8/8/8 b - - 0 1");
+    REQUIRE(b);
+    Solution s{*b, {}};
+    REQUIRE(s.start.state() == PosState::Checkmate);
+    REQUIRE_FALSE(has_promotion(s));
+    REQUIRE_FALSE(has_underpromotion(s));
+    REQUIRE_FALSE(has_excelsior(s));
+    REQUIRE_FALSE(has_switchback(s));
+    REQUIRE_FALSE(has_closed_walk(s));
+    REQUIRE_FALSE(has_self_block(s));
+    REQUIRE_FALSE(has_en_passant(s));
+    REQUIRE_FALSE(is_single_piece(s));  // no side moved at all
+}
