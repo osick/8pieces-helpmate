@@ -44,6 +44,19 @@ def test_unknown_theme_is_a_400_naming_the_valid_ones(client):
     assert "model" in (err.get("hint") or "")
 
 
+def test_one_bad_theme_rejects_the_whole_query(client):
+    # The repeatable case: a valid name alongside an invalid one must still be
+    # a 400 naming the bad one, in either order. Silently honouring the valid
+    # half would answer a narrower question than was asked, which is the
+    # failure mode the --end/--ends incident is named after.
+    for params in ({"theme": ["mirror", "nosuchtheme"]},
+                   {"theme": ["nosuchtheme", "mirror"]}):
+        r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, **params})
+        assert r.status_code == 400, params
+        assert r.json()["error"]["code"] == "invalid_theme"
+        assert "nosuchtheme" in r.json()["error"]["message"]
+
+
 def test_probe_omits_themes_unless_asked(client):
     assert "themes" not in client.get("/v1/probe", params={"fen": GOLDEN}).json()
 
