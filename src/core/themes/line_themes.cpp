@@ -96,12 +96,14 @@ bool has_self_block(const Solution& s) {
         // Same king-removed rule as is_pure: a blocked square that White also
         // attacks is not a self-block, it is double duty.
         if (attackers_of(ps, Color::White, f, Color::Black) != 0) continue;
-        // Provably equivalent, not just a heuristic: if a black non-king unit
-        // occupies f in the final position and some black ply had `to == f`,
-        // that ply must be the one that put the occupant there. A unit sitting
-        // on f from the very start would block every other black unit from
-        // ever moving to f, so the only way a black ply can have `to == f` is
-        // for the mover of that ply to be the piece now standing on f.
+        // The VERDICT is provably right, but not for the tempting reason. This
+        // loop does not identify which ply put the occupant on f: black unit A
+        // can arrive on f, leave again, and black unit B arrive later, in which
+        // case the first match is A's ply, not B's. It is still a genuine
+        // self-block, because B cannot be standing on f without a `to == f`
+        // ply of its own -- a unit parked on f from the start would have
+        // blocked every other black unit from ever moving there. So the answer
+        // is correct; do not reuse this loop to report WHICH ply caused it.
         for (const auto& ply : s.plies)  // did a black unit MOVE there?
             if (ply.piece.color == Color::Black && (int)ply.to == f) return true;
     }
