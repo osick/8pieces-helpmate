@@ -106,6 +106,9 @@ for. Split out of v0.7 because it needs its own foundations: a definition of
 what a "theme" is, a precomputed index per material, generation tooling, and
 new query endpoints. Starts with its own brainstorming session.
 
+- **Shipped in v0.8.0.** Twelve themes across CLI (`mine --theme`,
+  `probe --themes`, `helpmate themes`), API (`/v1/themes`, `theme=` on
+  `/v1/mine`, `themes=true` on `/v1/probe`) and the dashboard.
 - Design: **approved** — `docs/superpowers/specs/2026-08-03-theme-detection-design.md`
 - Depends on: v0.7 (the UI that will present it), v0.6 storage
 - Scoped to twelve cheap, precisely-defined themes computed on the fly during

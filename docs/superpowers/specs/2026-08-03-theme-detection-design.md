@@ -1,7 +1,8 @@
 # Theme detection (v0.8) — Design
 
 Date: 2026-08-03
-Status: approved by user (brainstorming session 2026-08-03)
+Status: approved by user (brainstorming session 2026-08-03). Implemented in
+v0.8.0; see docs/superpowers/plans/2026-08-03-theme-detection.md.
 Origin: `specs/specround_2026_07_29.md` — "pattern search (#solution, moves,
 position, pattern, moves, themes, …)", roadmap rung v0.8.
 Reference studied: the Helpmate Analyzer glossary at
