@@ -1,9 +1,4 @@
 #pragma once
-#include "chess/board.h"
-#include "chess/types.h"
-#include "format/table_file.h"
-#include "indexing/material.h"
-#include "indexing/slice_index.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -12,6 +7,13 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "chess/board.h"
+#include "chess/types.h"
+#include "format/table_file.h"
+#include "indexing/material.h"
+#include "indexing/slice_index.h"
+#include "probe/solution.h"
 
 namespace hm {
 
@@ -35,6 +37,11 @@ struct MineFilter {
     int count  = -1;   // optional, exact
     int starts = -1;   // optional, exact: distinct first moves across optimal lines
     int ends   = -1;   // optional, exact: distinct final (mating) moves
+    // Theme names, validated against themes::theme_registry(). A position
+    // matches when EVERY listed theme is shown by AT LEAST ONE of its optimal
+    // solutions -- `any` within a theme, AND across themes. An unregistered
+    // name throws std::invalid_argument rather than being silently dropped.
+    std::vector<std::string> themes;
 };
 
 // Shape of a position's optimal-solution set: how many distinct moves the
@@ -83,14 +90,21 @@ public:
     std::vector<std::string> line(const std::string& fen) const;
     // all optimal lines, SAN, capped at `max`.
     std::vector<std::vector<std::string>> lines(const std::string& fen, int max = 100) const;
+    // All optimal solutions in structured form, capped at `max`. Same walk and
+    // same cap as lines(), but keeping the mover, from/to, captures,
+    // promotions and the board after each ply -- everything SAN throws away.
+    std::vector<Solution> solutions(const std::string& fen, int max = 100) const;
     // Distinct first/last moves across all optimal lines from `fen`.
     SolutionShape solution_shape(const std::string& fen) const;
     // Every legal move from `fen`, each with the value of the resulting position.
     std::vector<MoveInfo> moves(const std::string& fen) const;
     // stream FENs of canonical cells of material `m` matching `f`; stop as soon as
-    // `cb` returns false. When a shape filter (starts/ends) is set, candidates whose
-    // solution count is saturated (unenumerable) are skipped and tallied into
-    // `skipped_saturated` if non-null; existing callers that omit it are unaffected.
+    // `cb` returns false. When ANY filter that needs the solution set is used --
+    // a shape filter (starts/ends) OR a theme filter -- candidates whose solution
+    // count is saturated (unenumerable) are skipped and tallied into
+    // `skipped_saturated` if non-null; existing callers that omit it are
+    // unaffected. Pass it for theme-only queries too, or those positions are
+    // dropped with no tally.
     void mine(const Material& m, const MineFilter& f,
               const std::function<bool(const std::string&)>& cb,
               uint64_t* skipped_saturated = nullptr) const;
@@ -105,6 +119,8 @@ private:
     ValuePair value_of(Board& b) const;
     void collect_lines(Board& b, std::vector<std::string>& path,
                         std::vector<std::vector<std::string>>& out, int max) const;
+    void collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out, const Board& start,
+                           int max) const;
 
     std::string dir_;
     mutable std::mutex mu_;

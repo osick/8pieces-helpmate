@@ -228,3 +228,9 @@ label.inline { display: inline-flex; align-items: center; gap: .35rem; color: va
 #mine-form input[name="material"] { width: 9rem; }
 #mine-form button { align-self: end; }
 #panel-mine .row { margin-top: .75rem; }
+
+/* The theme picker is taller than the numeric inputs beside it, so let it
+   claim its own row rather than stretching the whole form's line height. */
+#mine-form select[multiple] { min-width: 14rem; }
+#mine-form .hint { display: block; opacity: 0.7; font-size: 0.85em; }
+#position-themes { margin-top: 0.25rem; opacity: 0.85; }

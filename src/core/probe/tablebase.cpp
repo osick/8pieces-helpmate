@@ -1,8 +1,11 @@
 #include "probe/tablebase.h"
-#include "chess/san.h"
-#include "generator/eval.h"
+
 #include <set>
 #include <utility>
+
+#include "chess/san.h"
+#include "generator/eval.h"
+#include "themes/registry.h"
 
 namespace hm {
 
@@ -123,6 +126,55 @@ std::vector<std::vector<std::string>> Tablebase::lines(const std::string& fen, i
     return out;
 }
 
+void Tablebase::collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out,
+                                  const Board& start, int max) const {
+    if ((int)out.size() >= max) return;
+    ValuePair v = value_of(b);
+    if (v.dtm == 0) {
+        out.push_back(Solution{start, path});
+        return;
+    }
+    for (const Move& m : b.legal_moves()) {
+        if ((int)out.size() >= max) return;
+        b.make(m);
+        ValuePair nv = value_of(b);
+        bool on_optimal = nv.dtm <= DTM_MAX && (int)nv.dtm == (int)v.dtm - 1;
+        b.unmake(m);
+        if (!on_optimal) continue;
+
+        Ply p;
+        p.from = m.from;
+        p.to = m.to;
+        p.promotion = m.promotion();
+        p.is_ep = m.is_ep();
+        for (const auto& pp : b.pieces()) {  // b is still PRE-move here
+            if (pp.square == m.from) p.piece = pp.piece;
+            else if (pp.square == m.to) p.captured = pp.piece.type;
+        }
+        // An en-passant capture takes a pawn that is NOT on m.to, so the scan
+        // above cannot see it.
+        if (p.is_ep) p.captured = PieceType::Pawn;
+
+        b.make(m);
+        p.is_check = b.in_check();
+        p.after = b;
+        path.push_back(std::move(p));
+        collect_solutions(b, path, out, start, max);
+        path.pop_back();
+        b.unmake(m);
+    }
+}
+
+std::vector<Solution> Tablebase::solutions(const std::string& fen, int max) const {
+    auto b = Board::from_fen(fen);
+    if (!b) throw std::invalid_argument("bad FEN (or castling rights): " + fen);
+    Board start = *b;
+    std::vector<Solution> out;
+    std::vector<Ply> path;
+    collect_solutions(*b, path, out, start, max);
+    return out;
+}
+
 std::vector<std::string> Tablebase::line(const std::string& fen) const {
     auto ls = lines(fen, 1);
     return ls.empty() ? std::vector<std::string>{} : ls[0];
@@ -193,7 +245,18 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     const Slice* s = load(m);
     if (!s) throw MissingTableError("no table for " + m.name());
     Color stm = (f.dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
+
+    // Resolve theme names ONCE, before the scan: a typo must be an error that
+    // names the valid options, not millions of positions filtered by nothing.
+    std::vector<themes::Detector> dets;
+    for (const auto& n : f.themes) {
+        const auto* d = themes::find_theme(n);
+        if (!d) throw std::invalid_argument("unknown theme: \"" + n + "\"");
+        dets.push_back(d->fn);
+    }
+
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
+    const bool want_solutions = want_shape || !dets.empty();
     std::vector<PlacedPiece> pp;
     for (uint64_t c = 0; c < s->index.size(); ++c) {
         ValuePair v = s->reader.get(stm, c);
@@ -201,14 +264,57 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
         std::string fen = Board::from_pieces(pp, stm).fen();
-        if (want_shape) {
-            SolutionShape sh = solution_shape(fen);
-            if (!sh.exhaustive) {                       // count saturated: unknowable
+        if (want_solutions) {
+            // v.count is this cell's own stored count -- the same number a
+            // probe() of `fen` would return. Using it directly saves a
+            // redundant table lookup per candidate; two things make that
+            // safe, not "probe() cannot color-flip" (it can, in general):
+            // Board::from_pieces(pp, stm) below defaults ep_square to -1, so
+            // eval_board's EP branch -- the only place probe()'s answer can
+            // differ from this cell's raw value -- is inert for every FEN
+            // built here; and load(m) already succeeded (this loop is
+            // iterating `s`, a slice it returned), so probe()'s color-flip
+            // fallback, which only triggers when the PRIMARY load fails,
+            // never runs for `fen`. Mining pawn material with reconstructed
+            // en-passant positions is a plausible next rung -- if that ever
+            // makes fen carry a real ep_square, the first load-bearer above
+            // stops holding and this shortcut needs revisiting.
+            if (v.count >= COUNT_SAT) {  // unknowable, never guessed at
                 if (skipped_saturated) ++*skipped_saturated;
                 continue;
             }
-            if (f.starts >= 0 && sh.starts != f.starts) continue;
-            if (f.ends   >= 0 && sh.ends   != f.ends)   continue;
+            if (want_shape) {
+                // --starts/--ends are a released v0.6.2 feature (see CHANGELOG.md)
+                // keyed on SAN, not on (from, to, promotion): SAN disambiguates a
+                // capture from a quiet move sharing the same (from, to) (Qxa4# vs
+                // Qa4#: v0.6.2 counts 2 distinct mating moves), and distinguishes
+                // two moves that happen to share a destination square but render
+                // identically otherwise (Qb4-b1# vs Qe4-b1#, both SAN "Qb1#": v0.6.2
+                // counts 1). A (from, to, promotion) key gets both cases backwards.
+                // Changing --ends's meaning as a side effect of adding themes is not
+                // acceptable, so this goes through lines()/shape_of exactly like
+                // v0.6.2 did, not through solutions().
+                SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
+                if (f.starts >= 0 && sh.starts != f.starts) continue;
+                if (f.ends >= 0 && sh.ends != f.ends) continue;
+            }
+            if (!dets.empty()) {
+                auto sols = solutions(fen, (int)v.count);
+                bool all_present = true;
+                for (auto d : dets) {  // AND across themes...
+                    bool any = false;
+                    for (const auto& sol : sols)  // ...`any` within one
+                        if (d(sol)) {
+                            any = true;
+                            break;
+                        }
+                    if (!any) {
+                        all_present = false;
+                        break;
+                    }
+                }
+                if (!all_present) continue;
+            }
         }
         if (!cb(fen)) return;
     }

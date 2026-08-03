@@ -12,6 +12,7 @@
 #include "generator/generator.h"
 #include "indexing/material.h"
 #include "probe/tablebase.h"
+#include "themes/registry.h"
 #include "version.h"
 
 using namespace hm;
@@ -28,7 +29,9 @@ void usage() {
                  "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
                  "  helpmate stats <MATERIAL> [--tables DIR]\n"
                  "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
+                 "                           [--theme NAME]...\n"
                  "               [--max N] [--tables DIR]\n"
+                 "  helpmate themes\n"
                  "  helpmate compact <DIR> [--dry-run] [--compress] [--block-size N]\n"
                  "  helpmate --version\n"
                  "\n"
@@ -51,6 +54,8 @@ void usage() {
                  "         counts, dtm histogram, deepest positions, ...).\n"
                  "  mine   Print FENs of positions in MATERIAL matching --dtm exactly (and,\n"
                  "         if given, --count exactly), up to --max, one per line.\n"
+                 "  themes List every theme detector this build knows, each with the\n"
+                 "         definition it uses. These names are what --theme accepts.\n"
                  "  compact Rewrite every .hm table in DIR whose cells are all\n"
                  "         unsolvable (or invalid) as a tiny marker file, reclaiming\n"
                  "         disk space. Tables with any solvable cell are left\n"
@@ -84,6 +89,11 @@ void usage() {
                  "  --starts N     mine: optional, exact number of distinct first moves across\n"
                  "                 the optimal solutions (must be >= 1, and <= --count if given)\n"
                  "  --ends N       mine: optional, exact number of distinct mating moves\n"
+                 "  --theme NAME   mine: only positions where at least one optimal solution\n"
+                 "                 shows theme NAME. Repeatable; every named theme must be\n"
+                 "                 present, though not necessarily in the same solution.\n"
+                 "                 `helpmate themes` lists the names and their definitions.\n"
+                 "  --themes       probe: also print the themes the position's solutions show\n"
                  "  --dry-run      compact: report what would be rewritten, write nothing\n"
                  "  --version      print version (\"helpmate "
               << HELPMATE_VERSION
@@ -96,6 +106,8 @@ void usage() {
                  "  helpmate stats KQvk --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --count 1 --max 5 --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --tables tt\n"
+                 "  helpmate mine KQvk --dtm 2 --theme mirror --max 5 --tables tt\n"
+                 "  helpmate probe \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --themes --tables tt\n"
                  "\n"
                  "Exit codes: 0 success (an \"unsolvable\" answer is still success), 2 a\n"
                  "table needed to answer the query is missing (message says which one and\n"
@@ -160,7 +172,7 @@ int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int 
     return 0;
 }
 
-int cmd_probe(const std::vector<std::string>& pos, const std::string& tables) {
+int cmd_probe(const std::vector<std::string>& pos, const std::string& tables, bool show_themes) {
     if (pos.empty()) {
         std::cerr << "error: probe needs a FEN argument\n\n";
         usage();
@@ -174,6 +186,59 @@ int cmd_probe(const std::vector<std::string>& pos, const std::string& tables) {
     }
     std::cout << "dtm=" << p->dtm << " (" << Tablebase::h_notation(p->dtm, stm_of(pos[0]))
               << (p->flipped ? ", colors flipped" : "") << ") count=" << p->count << "\n";
+    if (show_themes) {
+        if (p->flipped) {
+            // tb.solutions(pos[0], ...) walks the position AS QUERIED. When probe
+            // only found an answer by color-flipping to the OTHER material, that
+            // material's table cannot answer a solutions() walk of the original
+            // (unflipped) FEN -- it throws MissingTableError, turning a working
+            // probe into a half-printed answer plus exit 2. Flipping the position
+            // ourselves and detecting on THAT is not a fix either: the mate
+            // detectors are hard-coded to the black king, so pure/model/ideal/
+            // mirror would survive the flip unchanged but the colour-labelled
+            // ones (single-piece:white/:black, excelsior:white/:black) would
+            // come out swapped -- a wrong answer dressed as a right one.
+            //
+            // The stdout line matters as much as the note: without it,
+            // `probe FEN --themes 2>/dev/null | grep '^themes:'` yields nothing
+            // at exit 0, which a script cannot tell apart from a position that
+            // genuinely has no themes (that case prints "themes: (none)").
+            std::cout << "themes: (unavailable: colors were flipped to find a table)\n";
+            std::cerr << "note: themes are unavailable for a color-flipped probe. The mate "
+                         "detectors are hard-coded to the black king, so the colour-labelled "
+                         "themes would come out swapped. Re-run with the colours of the "
+                         "position exchanged to get a correct answer.\n";
+        } else {
+            // Detection forces solution enumeration, so it stays opt-in: a plain
+            // probe must not start paying for a field most callers never read.
+            try {
+                auto names =
+                    themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
+                std::cout << "themes:";
+                if (names.empty()) std::cout << " (none)";
+                for (const auto& n : names) std::cout << " " << n;
+                std::cout << "\n";
+                if (p->count >= (int)COUNT_SAT)
+                    std::cerr << "note: this position's solution count is saturated (255+); themes were "
+                                 "detected from the first 100 solutions only\n";
+            } catch (const MissingTableError& e) {
+                // solutions() walks every legal child move, including captures
+                // and promotions into material this --tables directory
+                // doesn't have -- routine with a partial (e.g. on-demand HF)
+                // table set. dtm=.../count=... is already on stdout above:
+                // letting this propagate past main()'s MissingTableError
+                // handler would be the exact "half-printed answer plus exit
+                // 2" the flip branch's comment above exists to prevent, just
+                // reached from a different cause. Same fix: stay exit 0,
+                // finish the answer with a clear note instead of throwing.
+                std::cout << "themes: (unavailable: " << e.what() << ")\n";
+                std::cerr << "note: themes could not be detected: " << e.what()
+                          << "\nrun: helpmate gen "
+                             "<MATERIAL> --tables "
+                          << tables << "\n";
+            }
+        }
+    }
     return 0;
 }
 
@@ -223,9 +288,21 @@ int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
 }
 
 int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count, int maxn,
-             int starts, int ends, bool starts_given, bool ends_given) {
+             int starts, int ends, bool starts_given, bool ends_given,
+             const std::vector<std::string>& theme_names) {
     if (pos.empty()) {
         std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n";
+        usage();
+        return 3;
+    }
+    if (pos.size() > 1) {
+        // A stray extra positional used to be silently ignored (mine only ever
+        // read pos[0]) -- the same class of bug as a discarded --theme/--themes
+        // typo above: something the user typed changes nothing about what gets
+        // printed, with no indication anything was dropped.
+        std::cerr << "error: mine takes exactly one MATERIAL argument; unexpected extra argument(s):";
+        for (size_t i = 1; i < pos.size(); ++i) std::cerr << " \"" << pos[i] << "\"";
+        std::cerr << "\n\n";
         usage();
         return 3;
     }
@@ -250,6 +327,13 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
             return 3;
         }
     }
+    for (const auto& n : theme_names) {
+        if (themes::find_theme(n)) continue;
+        std::cerr << "error: unknown theme \"" << n << "\"\nvalid themes:";
+        for (const auto& t : themes::theme_registry()) std::cerr << " " << t.name;
+        std::cerr << "\nrun: helpmate themes    (for what each one means)\n";
+        return 3;
+    }
     auto m = Material::parse(pos[0]);
     if (!m) {
         std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n";
@@ -259,7 +343,7 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
     int printed = 0;
     uint64_t skipped = 0;
     tb.mine(
-        *m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
+        *m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends, .themes = theme_names},
         [&](const std::string& fen) {
             if (printed >= maxn)
                 return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
@@ -515,6 +599,29 @@ int cmd_compact(const std::vector<std::string>& args, bool compress, bool dry, u
     return 0;
 }
 
+// helpmate themes -- print the detector registry. The vocabulary has to be
+// discoverable without the docs, and each entry carries its own definition so
+// a disagreement about what a theme means is visible right here.
+int cmd_themes() {
+    for (const auto& t : themes::theme_registry()) {
+        std::cout << t.name << "\n";
+        // Wrap the doc at ~72 columns under a 4-space indent.
+        std::string doc(t.doc);
+        size_t pos = 0;
+        while (pos < doc.size()) {
+            size_t take = std::min<size_t>(72, doc.size() - pos);
+            if (pos + take < doc.size()) {
+                size_t sp = doc.rfind(' ', pos + take);
+                if (sp != std::string::npos && sp > pos) take = sp - pos;
+            }
+            std::cout << "    " << doc.substr(pos, take) << "\n";
+            pos += take;
+            while (pos < doc.size() && doc[pos] == ' ') ++pos;
+        }
+    }
+    return 0;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -540,13 +647,15 @@ int main(int argc, char** argv) {
     bool dry_run = false;
     bool starts_given = false, ends_given = false;
     std::vector<std::string> pos;  // positional args
+    std::vector<std::string> theme_names;  // --theme, repeatable
+    bool show_themes = false;              // probe --themes
     // Flags below all take a value; if one appears with nothing after it,
     // that's a usage error, not a stray positional argument (e.g. `probe FEN
     // --tables` with no directory should not silently treat "--tables" as
     // the FEN's replacement).
     auto needs_value = [](const std::string& a) {
         return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" || a == "--max" ||
-               a == "--starts" || a == "--ends" || a == "--block-size";
+               a == "--starts" || a == "--ends" || a == "--block-size" || a == "--theme";
     };
     // Consumes the value following flag `a` (already known to exist) into
     // `target`; on malformed/out-of-range input prints one clear message +
@@ -585,6 +694,48 @@ int main(int argc, char** argv) {
         else if (a == "--compress") compress = true;
         else if (a == "--dry-run") dry_run = true;
         else if (a == "--block-size") set_int(a, i, block_size_kib);
+        else if (a == "--theme") {
+            // --theme (repeatable, value) is mine's per-theme filter; --themes
+            // (boolean) is probe's "also print the themes shown". They read as
+            // a singular/plural typo of each other -- exactly the --end/--ends
+            // incident the comment below exists to prevent -- so on any OTHER
+            // command this must be a loud error naming the command that
+            // actually honours it, not a filter that silently falls through
+            // to positionals and gets ignored (verbatim: `mine --themes
+            // mirror` used to run to completion with "mirror" discarded as a
+            // stray positional; `stats KQvk --theme model` and `line FEN
+            // --themes` are the same defect on commands that never even
+            // looked at either flag).
+            if (cmd == "probe") {
+                std::cerr << "error: probe has no \"--theme\" flag; did you mean \"--themes\" "
+                             "(no value, prints the themes shown)?\n\n";
+                usage();
+                return 3;
+            }
+            if (cmd != "mine") {
+                std::cerr << "error: " << cmd
+                          << " has no \"--theme\" flag; only \"mine\" filters by theme "
+                             "(\"--theme NAME\", repeatable)\n\n";
+                usage();
+                return 3;
+            }
+            theme_names.push_back(args[++i]);
+        } else if (a == "--themes") {
+            if (cmd == "mine") {
+                std::cerr << "error: mine has no \"--themes\" flag; did you mean \"--theme NAME\" "
+                             "(repeatable, filters by theme)?\n\n";
+                usage();
+                return 3;
+            }
+            if (cmd != "probe") {
+                std::cerr << "error: " << cmd
+                          << " has no \"--themes\" flag; only \"probe\" prints the themes shown "
+                             "(\"--themes\", no value)\n\n";
+                usage();
+                return 3;
+            }
+            show_themes = true;
+        }
         // An unrecognised --flag is a usage error, never a positional argument.
         // Silently ignoring it is worse than useless here: `mine --end 2` (the
         // real flag is --ends) used to run to completion with the filter simply
@@ -625,11 +776,13 @@ int main(int argc, char** argv) {
     try {
         if (cmd == "gen")
             return cmd_gen(pos, tables, threads, verbose, progress, force_ram, compress, block_size);
-        if (cmd == "probe") return cmd_probe(pos, tables);
+        if (cmd == "probe") return cmd_probe(pos, tables, show_themes);
         if (cmd == "line") return cmd_line(pos, tables, all, maxn);
         if (cmd == "stats") return cmd_stats(pos, tables);
         if (cmd == "mine")
-            return cmd_mine(pos, tables, dtm, count, maxn, starts, ends, starts_given, ends_given);
+            return cmd_mine(pos, tables, dtm, count, maxn, starts, ends, starts_given, ends_given,
+                            theme_names);
+        if (cmd == "themes") return cmd_themes();
         if (cmd == "compact") return cmd_compact(pos, compress, dry_run, block_size);
         std::cerr << "error: unknown command \"" << cmd << "\"\n\n";
         usage();

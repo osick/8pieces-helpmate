@@ -14,3 +14,19 @@ def kqvk_dir(tmp_path_factory) -> Path:
 def client(kqvk_dir) -> TestClient:
     app = create_app(ChainSource([LocalDir(kqvk_dir)]))
     return TestClient(app)
+
+@pytest.fixture(scope="session")
+def kqvk_only_dir(tmp_path_factory, kqvk_dir) -> Path:
+    """KQvk.hm (+ sidecar) with NO Kvk.hm alongside it -- a partial table set,
+    the routine (on-demand HF chain) shape that I-1 needs: KQvk itself is
+    reachable, but a capture into Kvk is not. Copied out of kqvk_dir's full
+    closure rather than generated fresh, so this stays cheap."""
+    d = tmp_path_factory.mktemp("tables_kqvk_only")
+    for ext in (".hm", ".stats.json"):
+        (d / f"KQvk{ext}").write_bytes((kqvk_dir / f"KQvk{ext}").read_bytes())
+    return Path(d)
+
+@pytest.fixture()
+def client_partial(kqvk_only_dir) -> TestClient:
+    app = create_app(ChainSource([LocalDir(kqvk_only_dir)]))
+    return TestClient(app)

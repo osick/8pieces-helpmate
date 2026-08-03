@@ -58,17 +58,17 @@ count — is an O(1) table lookup, not a fresh search.
 
 `pip install . ./src/packages/api` (or `make install`, which also adds the
 web package) gives you `helpmate-server` (a read-only HTTP API —
-health/catalog/stats/probe/line/moves/mine, with on-demand fetching from a
-Hugging Face dataset for tables not stored locally) and `helpmate-tables`
-(push/pull tables to that dataset). See the
+health/catalog/stats/probe/line/moves/mine/themes, with on-demand fetching
+from a Hugging Face dataset for tables not stored locally) and
+`helpmate-tables` (push/pull tables to that dataset). See the
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
 
 The same process serves a **web dashboard** at `/` — an interactive board with
-per-move evaluations and optimal lines, a material browser with mate-length
-and solution-count histograms, and composition search with the `starts`/`ends`
-shape filters. No build step, no CDN: plain ES modules with cm-chessboard
-vendored.
+per-move evaluations, optimal lines and their themes, a material browser with
+mate-length and solution-count histograms, and composition search with the
+`starts`/`ends` shape filters and a theme multi-select. No build step, no
+CDN: plain ES modules with cm-chessboard vendored.
 
 ```bash
 helpmate-server --tables ~/tb --port 8642   # then open http://127.0.0.1:8642/
@@ -226,8 +226,8 @@ at `build-cov/coverage/index.html`.
 
 ## CLI usage
 
-All five subcommands, run for real against this repo (`--tables` points at a scratch
-directory; a real workflow would reuse one directory across all five commands).
+All seven subcommands, run for real against this repo (`--tables` points at a scratch
+directory; a real workflow would reuse one directory across all seven commands).
 
 **`gen`** — build every table needed for a material class, including sub-slices
 reached by captures/promotions:
@@ -301,10 +301,28 @@ distinct first moves / distinct mating moves among the optimal solutions — see
 [USAGE.md](docs/USAGE.md#mine--scan-for-composition-candidates) for the full
 semantics and a worked dual-shape example.
 
+`--theme NAME` (v0.8.0, repeatable) narrows the scan by named theme instead —
+a position matches when at least one optimal solution shows each named theme:
+
+```
+$ helpmate mine KRvkbn --dtm 8 --theme model --theme self-block --tables ~/tb
+```
+
+(positions at `h#4` where some optimal solution is a model mate and some
+optimal solution — not necessarily the same one — shows a self-block; see
+[USAGE.md](docs/USAGE.md#themes) for the full theme list, the CLI/API/probe
+surfaces, and the performance caveat on compressed tables)
+
 **`compact`** — rewrite already-fully-unsolvable tables (e.g. ones built before v0.6.1
 added pruning at generation time) as tiny marker files, reclaiming disk space with no
 change in queryable results; see [USAGE.md](docs/USAGE.md#compact--reclaim-disk-space-in-already-unsolvable-tables)
 for a worked example.
+
+**`themes`** (v0.8.0) — list every theme detector this build knows, with the
+definition it uses; this is the vocabulary `mine --theme` and `probe
+--themes` accept. See [USAGE.md](docs/USAGE.md#themes) for the full list, the
+`any`-within-a-theme/`AND`-across-themes match rule, and the `probe --themes`
+surface for annotating a single position.
 
 Full usage/help text (`helpmate --help`) documents every flag and exit code
 (`0` success — including a reported "unsolvable" — `2` a required table is missing and

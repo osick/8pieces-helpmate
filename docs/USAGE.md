@@ -305,7 +305,7 @@ material is `h#7`. A re-run prints
 ## `probe` — look up one position
 
 ```
-helpmate probe <FEN> [--tables DIR]
+helpmate probe <FEN> [--tables DIR] [--themes]
 ```
 
 ```
@@ -318,6 +318,22 @@ but unsolvable position it prints `unsolvable` (still exit 0). If the
 position's own slice is missing but the color-flipped slice exists, the probe
 transparently flips colors and annotates the output
 (`dtm=2 (h#1, colors flipped) count=4`).
+
+- `--themes`: also print which named themes (see [Themes](#themes) below) the
+  position's optimal solutions show. Opt-in — detection forces solution
+  enumeration, work a plain probe does not otherwise pay for:
+
+```
+$ helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables tt --themes
+dtm=2 (h#1) count=4
+themes: pure model ideal mirror single-piece single-piece:white single-piece:black
+```
+
+  A position with no themes prints `themes: (none)`. A color-flipped probe
+  (see above) cannot show themes at all — the detectors are hard-coded to the
+  black king, so a flipped position's colour-labelled themes would come out
+  swapped — and prints `themes: (unavailable: colors were flipped to find a
+  table)` instead, still at exit 0.
 
 ## `line` — print optimal lines
 
@@ -398,7 +414,7 @@ enumerate the actual positions at any (dtm, count).
 ## `mine` — scan for composition candidates
 
 ```
-helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N] [--max N] [--tables DIR]
+helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N] [--theme NAME]... [--max N] [--tables DIR]
 ```
 
 - `--dtm D` (**required**): exact distance-to-mate, in plies, to match;
@@ -409,6 +425,12 @@ helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N] [--max N] [
 - `--ends N` (optional): additionally require exactly N *distinct mating
   moves* across the optimal solutions — i.e. how many different final moves
   deliver mate, ignoring how each one got there;
+- `--theme NAME` (optional, repeatable): additionally require that at least
+  one optimal solution shows theme NAME; every named theme must be shown
+  (by some solution, not necessarily the same one). See [Themes](#themes)
+  below for the full semantics, the theme list, and the performance caveat —
+  theme filters force solution enumeration and cost noticeably more than a
+  plain `--dtm`/`--count`/`--starts`/`--ends` scan;
 - `--max N`: cap on FENs printed (default 10).
 
 `--starts`/`--ends` are exact-match filters, evaluated (cheaply) only for
@@ -453,8 +475,10 @@ match the FEN a query used to reach the same position.)
 If any matched position's solution count is *saturated* (stored as 255+,
 meaning the true count is unenumerable — see [DTM
 semantics](#dtm-semantics-plies-hn-notation)), it can't be checked against
-`--starts`/`--ends` and is skipped rather than guessed at; `mine` tallies
-these and, if any were skipped, prints a note to stderr when it exits:
+`--starts`/`--ends`/`--theme` and is skipped rather than guessed at (a
+`--theme`-only query, with neither `--starts` nor `--ends` given, skips and
+tallies these exactly the same way); `mine` tallies these and, if any were
+skipped, prints a note to stderr when it exits:
 
 ```
 note: skipped N position(s) whose solution count is saturated (255+): their
@@ -464,6 +488,182 @@ solutions cannot be enumerated exhaustively
 (`KQvk` has no saturated-count positions, so this note never fires for the
 examples above; it applies to richer material classes where hundreds of
 optimal replies can tie.)
+
+## Themes
+
+Since v0.8.0, `mine`, `probe` and the HTTP API can search and annotate by
+**theme** — a named, precisely defined property of a mate (`pure`, `model`,
+…) or of a solution's moves (`promotion`, `switchback`, …). Naming follows
+the [Helpmate Analyzer glossary](https://helpman.komtera.lt/themes.html)
+(Viktoras Paliulionis) wherever a name already exists there, so results are
+comparable with established practice. `helpmate themes` always prints the
+authoritative, in-build list below — read that if this table and the binary
+you're running ever disagree.
+
+Sixteen registry entries cover twelve themes. Four themes exist in both a
+broad and a colour-specific form (`excelsior`/`excelsior:white`/
+`excelsior:black`, `single-piece`/`single-piece:white`/`single-piece:black`)
+because a detector only ever answers yes/no — it cannot itself report *which*
+side showed the theme, so the colour-specific name is a separate registry
+entry rather than an extra output field.
+
+| Theme | Definition |
+|---|---|
+| `pure` | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
+| `model` | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
+| `ideal` | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
+| `mirror` | Every square adjacent to the black king is empty, of either colour. |
+| `promotion` | A pawn promotes during the solution. |
+| `underpromotion` | A pawn promotes to rook, bishop or knight. |
+| `excelsior` | A pawn standing on its own second rank at the start of the solution promotes during it (either colour). |
+| `excelsior:white` | Excelsior by a white pawn. |
+| `excelsior:black` | Excelsior by a black pawn. |
+| `switchback` | A unit leaves a square and returns to it, having visited exactly one intermediate square. |
+| `closed-walk` | Rundlauf: a unit returns to its departure square having visited two or more distinct intermediate squares, so it traverses a circuit rather than retracing its path. |
+| `self-block` | A black unit other than the king moves onto a square of its own king's field and stands there unattacked in the mating position, blocking a flight square. |
+| `single-piece` | Every move by one side is made by the same unit (either side). |
+| `single-piece:white` | Every white move is made by the same unit. |
+| `single-piece:black` | Every black move is made by the same unit; with the king, this is the Analyzer's "BK moves only". |
+| `en-passant` | A ply is an en-passant capture. |
+
+### Match semantics: `any` within a theme, `AND` across themes
+
+A position matches `--theme X` when **at least one** of its optimal solutions
+shows theme `X` — not every solution. Naming several themes (`--theme model
+--theme self-block`, or `theme=model&theme=self-block` on the API) requires
+**all** of them to be shown, but not necessarily by the same solution: a
+position with two solutions, one a model mate and the other showing
+self-block, matches `--theme model --theme self-block` even though no single
+solution shows both. A same-solution ("this one line shows both") variant is
+not offered in v0.8.
+
+### The three CLI surfaces
+
+```
+helpmate mine <MATERIAL> --dtm N [--theme NAME]...   # repeatable, ANDed
+helpmate probe <FEN> --themes                         # annotate one position
+helpmate themes                                       # list detectors + their definitions
+```
+
+`helpmate themes` prints exactly the table above, generated from the
+in-build registry — the vocabulary `--theme` and `--themes` accept is always
+discoverable without the docs, and never drifts from the binary.
+
+### The three API surfaces
+
+- `GET /v1/themes` — the registry as JSON, so the dashboard (or any client)
+  can build its own theme picker without a hard-coded list:
+
+  ```
+  $ curl -s http://127.0.0.1:8642/v1/themes
+  {"themes":[{"name":"pure","doc":"Pure mate: ..."}, ...]}
+  ```
+
+- `GET /v1/mine` gains a repeatable `theme=` query parameter (same `any`
+  within a theme, `AND` across themes semantics as the CLI). An unknown name
+  is a `400 invalid_theme` listing every valid name, never silently ignored:
+
+  ```
+  $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" \
+      --data-urlencode "dtm=2" --data-urlencode "theme=mirror" --data-urlencode "max=5"
+  {"fens":["8/8/8/8/8/8/8/k1KQ4 b - - 0 1", ...],"truncated":true,"skipped_saturated":0}
+
+  $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" \
+      --data-urlencode "dtm=2" --data-urlencode "theme=bogus"
+  {"error":{"code":"invalid_theme","message":"unknown theme: bogus","hint":"valid themes: pure, model, ..."}}
+  ```
+
+- `GET /v1/probe?fen=…&themes=true` — opt-in (default `false`): detection
+  forces solution enumeration, and `probe` is on the dashboard's hot path, so
+  a plain probe must not pay for a field most callers never read. On a match,
+  the response gains a `themes` array:
+
+  ```
+  $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" \
+      --data-urlencode "themes=true"
+  {"dtm":2,"count":4,"flipped":false,"notation":"h#1",
+   "themes":["pure","model","ideal","mirror","single-piece","single-piece:white","single-piece:black"]}
+  ```
+
+  For a color-flipped probe, `themes` is `null` (not an empty array — that
+  would mean "no themes found") with a sibling `themes_note` explaining why;
+  see [Two honest limitations](#two-honest-limitations) below.
+
+### Two things to know before you trust a result
+
+**The solution cap is a false-negative source.** Themes are detected across
+a position's optimal solutions, capped at the position's own solution count.
+A position whose count is saturated (255+) is never enumerated and never
+matches a theme filter; `mine` reports these in its skipped tally rather than
+dropping them silently.
+
+**Theme filters are slow on compressed tables.** Detection forces solution
+enumeration, which is exactly the random-access pattern that defeats the
+block cache — on a compressed table it compounds with the ~6.5x mining
+penalty measured in v0.7.5. Mine against raw tables when running theme
+searches over large material.
+
+### Performance
+
+Measured on `KQvk` at `--dtm 2` (a shallow query: matched positions have at
+most a handful of optimal solutions each), milliseconds per query (`--tables`
+on local disk, raw format):
+
+| Query | ms/query |
+|---|---|
+| process floor (empty invocation) | 3.12 |
+| plain `--dtm` | 4.06 |
+| `--starts 1` (enumerates solutions, zero detectors) | 13.12 |
+| `--theme mirror` (one detector) | 13.20 |
+| four `--theme` flags | 14.46 |
+
+**The detectors cost under 1% of the added work at this depth** — but that
+number is scoped to this shallow `dtm=2` query, not a general figure. The
+cost is solution enumeration itself — exactly the work the existing
+`--starts`/`--ends` filters already pay, not something the theme feature
+introduces — and enumeration cost scales with how many solutions a matched
+position actually has. Measured on deeper positions of the same `KQvk` table,
+where `detect()` has more solutions to run its detectors over: `solutions()`
+5.59 ms vs. `detect()` 0.34 ms at count 160 (detectors are 5.8% of the added
+work), and 7.42 ms vs. 0.42 ms at count 218 (5.4%). The qualitative claim
+still holds at every depth measured — the cost is enumeration, not the
+detectors — but "under 1%" is specific to the shallow case; expect low
+single digits generally. On scan work alone (subtracting the process floor
+from each `dtm=2` number above) a theme query runs at roughly **10.7x** a
+plain `--dtm` scan. This compounds with the ~6.5x mining penalty on
+block-compressed tables measured in v0.7.5 (see [Table
+format](#table-format) above), so the practical advice stands: mine against
+raw tables for large theme searches.
+
+### Two honest limitations
+
+**Colour-flipped positions cannot be annotated — even though most themes
+would survive the flip unharmed.** When `probe` resolves a position by
+flipping colours to find a table (see [Symmetry reduction](#symmetry-reduction)
+above), `solutions()`/`detect()` cannot simply run on the flipped board
+either: `solutions()` walks the position AS QUERIED, and the flip-found
+table cannot answer a walk of the *original* (unflipped) FEN. Flipping the
+position ourselves and detecting on *that* is not a fix: every detector is
+hard-coded to the black king, so the four colour-labelled themes
+(`single-piece:white`/`:black`, `excelsior:white`/`:black`) would come out
+swapped — a wrong answer dressed as a right one. The other twelve registry
+entries, including `pure`/`model`/`ideal`/`mirror`, are in fact
+flip-invariant (they read from the black king's field the same way
+regardless of which side of the board it's on) and could, in principle,
+still be answered on a flipped board — that selective re-detection is a
+known follow-up, not something v0.8.0 ships; today the whole `themes` field
+is withheld rather than risk the four that aren't. The CLI prints a note and
+exits 0; the API returns `"themes": null` with a `themes_note` field
+explaining why, distinct from `[]` (no themes found).
+
+**Verification against published problems was deferred by explicit
+decision.** The definitions above are this project's own — stated precisely
+enough to be argued with, not certified against the Helpmate Analyzer or any
+other authority. A detector subtly at odds with composition convention will
+return a confident, wrong result, and nothing in this project's test suite
+will catch that; only comparison against known compositions would. That
+comparison has not been done. Treat every theme match as this codebase's
+opinion, not an authoritative ruling.
 
 ## `compact` — reclaim disk space in already-unsolvable tables
 
@@ -701,17 +901,34 @@ Reference:
 - `tb.line(fen)` — one optimal line as a list of SAN strings (empty list if
   unsolvable or already mate).
 - `tb.lines(fen, max=100)` — every optimal line, capped at `max`.
-- `tb.mine(material, dtm, count=-1, max=100, starts=-1, ends=-1)` — list of
-  FENs matching `dtm` exactly and, for each of `count`/`starts`/`ends` that
-  is `>= 0`/`>= 1`, that criterion exactly too (`starts`/`ends`: distinct
-  first moves / distinct mating moves among the optimal solutions — see the
-  CLI [`mine`](#mine--scan-for-composition-candidates) section for what
-  these mean).
-- `tb.mine_with_stats(material, dtm, count=-1, max=100, starts=-1, ends=-1)`
-  — like `tb.mine`, but returns `(fens, skipped_saturated)`: the FEN list
-  plus how many matched-so-far positions were skipped because their stored
-  solution count is saturated (255+) and so couldn't be checked against
-  `starts`/`ends`.
+- `tb.mine(material, dtm, count=-1, max=100, starts=-1, ends=-1, themes=[])`
+  — list of FENs matching `dtm` exactly and, for each of `count`/`starts`/
+  `ends` that is `>= 0`/`>= 1`, that criterion exactly too (`starts`/`ends`:
+  distinct first moves / distinct mating moves among the optimal solutions —
+  see the CLI [`mine`](#mine--scan-for-composition-candidates) section for
+  what these mean). `themes`: a list of theme names, every one of which must
+  be shown by at least one optimal solution (not necessarily the same one —
+  see "Match semantics" under [Themes](#themes) above); an unknown name
+  raises `ValueError`.
+- `tb.mine_with_stats(material, dtm, count=-1, max=100, starts=-1, ends=-1,
+  themes=[])` — like `tb.mine`, but returns `(fens, skipped_saturated)`: the
+  FEN list plus how many matched-so-far positions were skipped because their
+  stored solution count is saturated (255+) and so couldn't be checked
+  against `starts`/`ends`/`themes`.
+- `tb.themes(fen, max=-1)` — the theme names the position's optimal solutions
+  show, as a list (same detectors and `any`-within-a-theme semantics as
+  `probe --themes`/`GET /v1/probe?themes=true`). `max=-1` (the default) is a
+  sentinel meaning "the position's own solution count" — capped at 100 if
+  that count is saturated (255+) — exactly the cap the CLI uses; passing an
+  explicit non-negative `max` enumerates at most that many solutions instead,
+  which can under-count themes relative to the CLI/API defaults for a
+  position with more solutions than the `max` given. Raises
+  `helpmate.MissingTableError` if a solution walk needs a table this
+  `Tablebase` doesn't have (e.g. a capture into missing sub-material).
+- `helpmate.themes()` — the theme registry as a list of `{"name": ...,
+  "doc": ...}` dicts, in display order; the same data `helpmate themes` and
+  `GET /v1/themes` print, generated from the in-build registry so it never
+  drifts from the binary.
 - `tb.stats(material)` — the stats JSON as a Python dict (fields as in the
   [reference](#statsjson-field-reference) above).
 
@@ -749,7 +966,10 @@ Three screens:
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
   one from the complete legal-move list, which shows the value each move leads
   to and outlines in green the ones that keep the shortest mate. Below it, the
-  optimal lines in SAN, exportable as PGN. The position is encoded in the URL
+  optimal lines in SAN, exportable as PGN, and (since v0.8.0) the current
+  position's themes — fetched via `probe --themes` (opt-in on the client too),
+  showing `themes_note` in place of the list for a color-flipped position
+  rather than a blank field. The position is encoded in the URL
   (`/#fen=<urlencoded>`), so every position is a shareable link and the
   browser's back button walks the history.
 - **Materials** — every table the server can reach, with piece count, size and
@@ -758,9 +978,12 @@ Three screens:
   by side to move, a histogram of how many optimal solutions positions have,
   and the deepest sample positions — each clickable into the explorer.
 - **Search** — a form over [`/v1/mine`](#get-v1mine), including the `starts` /
-  `ends` shape filters. Results are clickable FENs, exportable as a FEN list
-  or CSV. Impossible filter combinations (`starts` greater than `count`) are
-  rejected before the request; the server stays the authority for the rest.
+  `ends` shape filters and (since v0.8.0) a theme multi-select populated from
+  [`/v1/themes`](#get-v1themes), so the picker's vocabulary always matches the
+  server's own build rather than a hard-coded list. Results are clickable
+  FENs, exportable as a FEN list or CSV. Impossible filter combinations
+  (`starts` greater than `count`) are rejected before the request; the server
+  stays the authority for the rest.
 
 **Editing a position.** Under the board, a palette places pieces: pick one,
 then click squares. `Erase` empties the squares you click, `Clear board`
@@ -863,6 +1086,18 @@ $ curl -s http://127.0.0.1:8642/v1/materials
 `max_dtm`/`cells` are `null` for a `remote` entry (not yet downloaded, so the
 stats sidecar hasn't been read).
 
+### `GET /v1/themes`
+
+The theme registry — name plus definition for every one of the sixteen
+entries in [Themes](#themes) above — served straight from the C++ build so
+the dashboard's theme picker never hard-codes a list that can drift from the
+binary it's talking to:
+
+```
+$ curl -s http://127.0.0.1:8642/v1/themes
+{"themes":[{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure)."}, ...]}
+```
+
 ### `GET /v1/materials/{name}/stats`
 
 The full `stats.json` for one material class (same content as `helpmate
@@ -904,6 +1139,10 @@ $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=garbage"
 
 Like the CLI, `probe` transparently falls back to the color-flipped material
 when only that slice is generated, and reports it via `"flipped": true`.
+
+`?themes=true` (opt-in) adds a `themes` array; see [Themes](#themes) above
+for the full semantics, the flip-fallback limitation (`themes: null` +
+`themes_note`), and a real captured example.
 
 ### `GET /v1/line`
 
@@ -956,7 +1195,9 @@ Parameters: `material`, `dtm` (required), `count` (optional, exact match),
 moves / distinct mating moves among the optimal solutions — see the CLI
 [`mine`](#mine--scan-for-composition-candidates) section for what these mean
 and why the golden `8/8/8/8/8/2K5/7Q/1k6 b - - 0 1` position has `starts=2,
-ends=4`), and `max`.
+ends=4`), repeatable `theme` (optional — see [Themes](#themes) above for the
+match semantics, an unknown-name example, and the performance caveat), and
+`max`.
 
 ```
 $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "count=1" --data-urlencode "max=3"
@@ -965,10 +1206,15 @@ $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data
 
 Every response carries `skipped_saturated`: the number of matched-so-far
 positions whose stored solution count was saturated (255+, unenumerable) and
-so had to be skipped rather than checked against `starts`/`ends` — 0 when no
-`starts`/`ends` filter is given, or when nothing saturated was encountered
-(as above; `KQvk` has no saturated-count positions). `starts`/`ends` narrow
-the match to a specific dual shape:
+so had to be skipped rather than checked against `starts`/`ends`/`theme` — 0
+when none of `starts`, `ends` or `theme` is given (nothing forces solution
+enumeration, so nothing is ever skipped on this account), or when nothing
+saturated was encountered (as above; `KQvk` has no saturated-count
+positions). A theme-only query (`starts`/`ends` both omitted) skips and
+tallies saturated positions exactly the same way `starts`/`ends` do — a
+saturated position's solutions can't be enumerated, so it can't be checked
+against a theme filter either. `starts`/`ends` narrow the match to a
+specific dual shape:
 
 ```
 $ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2" --data-urlencode "count=4" --data-urlencode "starts=2" --data-urlencode "ends=4" --data-urlencode "max=3"

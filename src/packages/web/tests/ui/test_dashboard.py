@@ -1,4 +1,4 @@
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, parse_qs
 
 GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
 
@@ -159,3 +159,63 @@ def test_mine_search_and_client_side_validation(page, server):
     page.click("#mine-form button[type=submit]")
     page.wait_for_function(
         "document.getElementById('mine-status').textContent.includes('cannot exceed')")
+
+
+def test_theme_picker_is_populated_from_the_server(page, server):
+    page.goto(f"{server}/#panel=mine")
+    page.wait_for_selector("#mine-themes option")
+    values = page.eval_on_selector_all(
+        "#mine-themes option", "els => els.map(e => e.value)")
+    assert "model" in values and "closed-walk" in values
+
+
+def test_selecting_two_themes_sends_both_not_just_the_last(page, server):
+    # Regression: Object.fromEntries(new FormData(form).entries()) keeps only
+    # the LAST value of a repeated field. A naive read of the multi-select
+    # would silently narrow a two-theme search down to one -- the exact class
+    # of bug this project has hit before, so assert on the actual request the
+    # browser sends rather than trusting the picker looks right on screen.
+    page.goto(f"{server}/#panel=mine")
+    page.wait_for_selector("#mine-themes option")
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.select_option("#mine-themes", ["model", "mirror"])
+    with page.expect_request(lambda r: "/v1/mine" in r.url) as req_info:
+        page.click("#mine-form button[type=submit]")
+    qs = parse_qs(urlparse(req_info.value.url).query)
+    assert qs.get("theme") == ["model", "mirror"]
+
+
+def test_explorer_shows_detected_themes(page, server):
+    page.goto(f"{server}/#fen={quote(GOLDEN)}")
+    page.wait_for_function(
+        "() => document.getElementById('position-themes').textContent.length > 0")
+    text = page.inner_text("#position-themes")
+    # Measured against the fixture's KQvk table (GET /v1/probe?themes=true):
+    # {"themes": ["pure", "model", "ideal", "mirror", "single-piece",
+    # "single-piece:white", "single-piece:black"]}. Assert the actual
+    # rendered content, not just that something is there -- a smoke check
+    # here would pass with the themes_note/themeSummary priority reversed,
+    # or with an entirely wrong theme list.
+    assert text == ("pure · model · ideal · mirror · single-piece · "
+                     "single-piece:white · single-piece:black")
+
+
+def test_explorer_shows_the_flip_note_not_no_themes_detected(page, server):
+    # Regression: a colour-flipped position (answered via the fixture's only
+    # table, KQvk, by swapping colours) reports themes: null + themes_note --
+    # never themes: [] -- because the mate detectors are hard-coded to the
+    # black king and can't run safely on the flipped position. If explorer.js
+    # ever regresses to `themesEl.textContent = themeSummary(body.themes);`
+    # (dropping the `themes_note ||` fallback), themeSummary(null) returns ""
+    # and every flipped position would render nothing... except mine.js's
+    # theme picker is unaffected, so this specific regression is silent in
+    # every other test. Assert the actual flip explanation, not just
+    # "non-empty".
+    flipped_fen = "6q1/8/8/8/8/5k2/7K/8 w - - 0 1"
+    page.goto(f"{server}/#fen={quote(flipped_fen)}")
+    page.wait_for_function(
+        "() => document.getElementById('position-themes').textContent.length > 0")
+    text = page.inner_text("#position-themes")
+    assert "flip" in text.lower()
+    assert text != "no themes detected"

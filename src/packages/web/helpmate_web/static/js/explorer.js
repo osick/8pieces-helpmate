@@ -9,6 +9,7 @@ import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { encodeState, decodeState } from "./lib/state.js";
 import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
+import { themeSummary } from "./lib/themes.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
@@ -80,7 +81,8 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   const summary = document.getElementById("position-summary");
   const moveList = document.getElementById("move-list");
   const linesEl = document.getElementById("lines");
-  moveList.textContent = ""; linesEl.textContent = "";
+  const themesEl = document.getElementById("position-themes");
+  moveList.textContent = ""; linesEl.textContent = ""; themesEl.textContent = "";
   linesEl.dataset.lines = "[]";
 
   // A position with a missing or duplicated king is one the editor produces
@@ -129,6 +131,18 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     ? "no helpmate from this position"
     : `dtm ${b.dtm} (${b.notation}) · ${b.count} optimal line(s)` +
       (b.flipped ? " · colors flipped" : "");
+
+  if (b.solvable !== false) {
+    // A second call, like the /v1/line one below: themes are opt-in on
+    // /v1/probe precisely so the moves request stays cheap. A colour-flipped
+    // probe answers with themes: null plus a themes_note explaining why
+    // detection didn't run -- show that note rather than leaving the line
+    // blank or misreporting it as "no themes detected".
+    api.probe(fen, true).then(({ body }) => {
+      if (seq !== renderSeq) return;         // superseded by a newer render()
+      themesEl.textContent = body.themes_note || themeSummary(body.themes);
+    }).catch(() => { /* annotation is a nicety; never break the board on it */ });
+  }
 
   for (const m of b.moves) {
     const li = document.createElement("li");
@@ -213,6 +227,7 @@ function setArmed(piece, { commit = true } = {}) {
     const summary = document.getElementById("position-summary");
     summary.textContent = "editing — click the armed piece again to evaluate";
     summary.classList.add("muted");
+    document.getElementById("position-themes").textContent = "";
     document.getElementById("move-list").textContent = "";
     const linesEl = document.getElementById("lines");
     linesEl.textContent = ""; linesEl.dataset.lines = "[]";

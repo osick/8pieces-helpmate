@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 from typing import Optional
 import helpmate
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -122,6 +122,12 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     def materials():
         return {"materials": [vars(s) for s in chain.catalog()]}
 
+    @app.get("/v1/themes")
+    def themes_list():
+        # Served from the core registry so the dashboard never hard-codes a
+        # theme list that can drift from the build it is talking to.
+        return {"themes": helpmate.themes()}
+
     @app.get("/v1/materials/{name}/stats")
     def stats(name: str):
         d, resp = _resolve_or_response(name)
@@ -146,17 +152,18 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         return f"h#{dtm // 2}" if dtm % 2 == 0 else f"h#{dtm // 2}.5"
 
     @app.get("/v1/probe")
-    def probe(fen: str):
+    def probe(fen: str, themes: bool = False):
         material = None
         try:
             material = _dir_for_fen(fen)
-            flipped = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
-            d = chain.resolve(material) or chain.resolve(flipped)
+            flipped_mat = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
+            d = chain.resolve(material) or chain.resolve(flipped_mat)
             if d is None:
                 d, resp = _resolve_or_response(material)
                 if resp is not None:
                     return resp
-            res = _tb(chain, d).probe(fen)
+            tb = _tb(chain, d)
+            res = tb.probe(fen)
         except helpmate.MissingTableError:
             return unknown(material or fen)
         except ValueError as e:
@@ -165,8 +172,44 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         if res is None:
             return {"solvable": False}
         dtm, count, flipped = res
-        return {"dtm": dtm, "count": count, "flipped": flipped,
-                "notation": h_notation(dtm)}
+        out = {"dtm": dtm, "count": count, "flipped": flipped,
+               "notation": h_notation(dtm)}
+        if themes:
+            # Opt-in: detection forces solution enumeration, and /v1/probe is
+            # on the dashboard's hot path.
+            if flipped:
+                # tb.solutions(fen, ...) walks the position AS QUERIED. probe()
+                # only answered by colour-flipping to the OTHER material's
+                # table; that table cannot answer a solutions() walk of the
+                # original (unflipped) FEN -- it throws MissingTableError,
+                # turning a working probe into a 500. Flipping the position
+                # ourselves and detecting on THAT is not a fix either: the
+                # mate detectors are hard-coded to the black king, so the
+                # colour-labelled themes (single-piece:white/:black,
+                # excelsior:white/:black) would come out swapped -- a wrong
+                # answer dressed as a right one. So: stay 200, report themes
+                # as unavailable (None, distinct from "no themes found" = []),
+                # and say why in a sibling field.
+                out["themes"] = None
+                out["themes_note"] = ("themes unavailable: colors were flipped to find a "
+                                       "table. The mate detectors are hard-coded to the black "
+                                       "king, so colour-labelled themes would come out swapped; "
+                                       "re-run with the colours of the position exchanged to get "
+                                       "a correct answer.")
+            else:
+                try:
+                    out["themes"] = tb.themes(fen)
+                except helpmate.MissingTableError:
+                    # solutions() (which detection forces) calls value_of() on
+                    # every legal child move, including captures/promotions
+                    # into material this table set doesn't have -- exactly the
+                    # partial-table-set case /v1/line and a themes-less
+                    # /v1/probe already answer with 404, not 500. Match them.
+                    return unknown(material or fen)
+                except ValueError as e:
+                    return JSONResponse(status_code=400,
+                                        content=error_json("invalid_fen", str(e)))
+        return out
 
     @app.get("/v1/line")
     def line(fen: str, all: bool = False):
@@ -219,7 +262,8 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
 
     @app.get("/v1/mine")
     def mine(material: str, dtm: int, count: int = -1, max: int = 100,
-             starts: Optional[int] = None, ends: Optional[int] = None):
+             starts: Optional[int] = None, ends: Optional[int] = None,
+             theme: list[str] = Query(default=[])):
         for name, val in (("starts", starts), ("ends", ends)):
             if val is None:
                 continue
@@ -232,6 +276,12 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                     f"{name}={val} cannot exceed count={count}",
                     hint="a position with N solutions has at most N distinct "
                          "starting or mating moves"))
+        known = {t["name"] for t in helpmate.themes()}
+        for name in theme:
+            if name not in known:
+                return JSONResponse(status_code=400, content=error_json(
+                    "invalid_theme", f"unknown theme: {name}",
+                    hint="valid themes: " + ", ".join(t["name"] for t in helpmate.themes())))
         starts = -1 if starts is None else starts
         ends = -1 if ends is None else ends
         d, resp = _resolve_or_response(material)
@@ -246,7 +296,7 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return {"fens": [], "truncated": True, "note": "timeout",
                     "skipped_saturated": 0}
         fut = pool.submit(_tb(chain, d).mine_with_stats, material, dtm, count,
-                          clamped + 1, starts, ends)
+                          clamped + 1, starts, ends, theme)
         try:
             fens, skipped = fut.result(timeout=mine_timeout)
         except FutTimeout:

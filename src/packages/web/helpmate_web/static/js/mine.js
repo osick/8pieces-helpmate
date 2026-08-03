@@ -1,6 +1,7 @@
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { encodeState } from "./lib/state.js";
 import { toFenList, toCsv } from "./lib/export.js";
+import { selectedThemes } from "./lib/themes.js";
 
 let rows = [];
 
@@ -70,9 +71,24 @@ export function initMine() {
   const status = document.getElementById("mine-status");
   const results = document.getElementById("mine-results");
 
+  // Populated from /v1/themes so the vocabulary always matches the server's
+  // build. A failure here leaves an empty picker and no theme filtering --
+  // the rest of the search screen must keep working.
+  const themeSel = document.getElementById("mine-themes");
+  api.themes().then(({ body }) => {
+    for (const t of body.themes) {
+      const o = document.createElement("option");
+      o.value = t.name;
+      o.textContent = t.name;
+      o.title = t.doc;
+      themeSel.appendChild(o);
+    }
+  }).catch(() => { /* leave the picker empty; the numeric filters still work */ });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const q = Object.fromEntries(new FormData(form).entries());
+    q.theme = selectedThemes(themeSel);      // fromEntries would keep only one
     results.textContent = ""; rows = [];
     const bad = validate(q);
     if (bad) { status.textContent = bad; return; }

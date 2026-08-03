@@ -6,6 +6,87 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.8.0] - 2026-08-03
+
+### Added
+
+- **Theme detection**: `mine`, `probe` and the HTTP API can now search and
+  annotate by named theme. Sixteen registry entries cover twelve themes —
+  four mate-position themes computed from the final board alone (`pure`,
+  `model`, `ideal`, `mirror`) and eight computed from one solution's plies
+  (`promotion`, `underpromotion`, `excelsior` [+ `:white`/`:black` colour
+  variants], `switchback`, `closed-walk`, `self-block`, `single-piece` [+
+  `:white`/`:black`], `en-passant`). Naming follows the Helpmate Analyzer
+  glossary (<https://helpman.komtera.lt/themes.html>) wherever a name already
+  exists there. See docs/USAGE.md's new "Themes" section for every
+  definition, the match semantics, and the performance and correctness
+  caveats below.
+  - **CLI**: `helpmate mine <MATERIAL> --dtm N --theme NAME` (repeatable),
+    `helpmate probe <FEN> --themes` (annotate one position), `helpmate
+    themes` (list the registry with its definitions — the same vocabulary
+    `--theme`/`--themes` accept, discoverable without the docs).
+  - **API**: `GET /v1/themes` (the registry as JSON), repeatable `theme=` on
+    `GET /v1/mine` (unknown name → `400 invalid_theme` listing every valid
+    name), opt-in `themes=true` on `GET /v1/probe` (adds a `themes` array;
+    `null` + `themes_note` for a color-flipped probe, since the detectors are
+    hard-coded to the black king).
+  - **Dashboard**: a theme multi-select on the Search panel, populated from
+    `/v1/themes`; the Explorer shows the current position's themes beside its
+    dtm/count.
+  - **Python bindings**: `helpmate.themes()` (the registry as a list of
+    `{"name", "doc"}` dicts); `tb.themes(fen, max=-1)` (theme names for one
+    position — `max=-1`, the default, means "the position's own solution
+    count", the same cap the CLI uses); `tb.mine(...)`/`tb.mine_with_stats(...)`
+    both gained a `themes=[]` keyword argument (same `any`-within-a-theme,
+    `AND`-across-themes semantics as the CLI/API; unknown name raises
+    `ValueError`). See docs/USAGE.md's Python API reference.
+- **Match semantics**: a position matches `--theme X` when **at least one**
+  of its optimal solutions shows `X` (not all of them); naming several themes
+  ANDs them, but not necessarily within the same solution. A saturated
+  position (255+ solutions) can't be enumerated and never matches a theme
+  filter — `mine` counts these in its existing skipped-saturated tally rather
+  than dropping them silently.
+
+### Changed
+
+- `mine` given more than one positional argument now exits 3 (`error: mine
+  takes exactly one MATERIAL argument; unexpected extra argument(s): ...`)
+  instead of the previous silent `pos[0]`-only behavior, which ignored every
+  extra argument and exited 0. Upgrade-visible for any script that (by
+  accident or habit) passed more than one positional to `mine`.
+
+### Performance
+
+Theme detection forces solution enumeration — the same work `--starts`/
+`--ends` already pay, not new cost the detectors themselves introduce.
+Measured on `KQvk` at `--dtm 2` (a shallow query, few solutions per matched
+position), ms/query: process floor 3.12, plain `--dtm` 4.06, `--starts 1`
+(enumerates solutions, zero detectors) 13.12, `--theme mirror` 13.20, four
+`--theme` flags 14.46 — the detectors cost under 1% of the added work at
+this depth (scoped to this measurement: on deeper positions of the same
+table, `solutions()` 5.59 ms vs. `detect()` 0.34 ms at count 160 (5.8%), and
+7.42 / 0.42 ms at count 218 (5.4%) — low single digits generally, not
+uniformly under 1%). The qualitative point still holds throughout: the cost
+is enumeration, not the detectors. On scan work alone (excluding the process
+floor) a `--dtm 2` theme query runs at roughly 10.7x a plain `--dtm` scan,
+and this compounds with the ~6.5x mining penalty on block-compressed tables
+measured in v0.7.5. Mine against raw tables for large theme searches.
+
+### Known limitations
+
+- **Colour-flipped positions cannot be annotated.** Every detector is
+  hard-coded to the black king, so a `probe` answered via the color-flip
+  fallback (see docs/USAGE.md's "Symmetry reduction") reports themes as
+  unavailable rather than risk a swapped colour-labelled result. Twelve of
+  the sixteen registry entries are in fact flip-invariant and could, in
+  principle, still be answered — a known follow-up, not shipped here.
+- **Verification against published problems was deferred by explicit
+  decision.** These definitions are this project's own, stated precisely
+  enough to be argued with, not certified against the Helpmate Analyzer or
+  any other authority. A detector subtly at odds with composition convention
+  will return a confident, wrong result, and nothing in this project's test
+  suite would catch that.
+
 ## [0.7.5] - 2026-08-02
 
 ### Added
