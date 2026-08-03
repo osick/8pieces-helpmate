@@ -44,16 +44,85 @@ add_test(NAME cli_mine_shape_ends_miss COMMAND helpmate mine KQvk --dtm 2 --coun
 add_test(NAME cli_mine_shape_negative COMMAND helpmate mine KQvk --dtm 2 --starts -1 --tables ${CLI_TT})
 # --starts is legal without --count; the golden position has starts 2.
 add_test(NAME cli_mine_shape_no_count COMMAND helpmate mine KQvk --dtm 2 --starts 2 --max 200 --tables ${CLI_TT})
-add_test(NAME cli_mine_theme COMMAND helpmate mine KQvk --dtm 2 --theme mirror --max 5 --tables ${CLI_TT})
-add_test(NAME cli_mine_theme_unknown COMMAND helpmate mine KQvk --dtm 2 --theme nosuch --tables ${CLI_TT})
-add_test(NAME cli_probe_themes COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --themes --tables ${CLI_TT})
-set_tests_properties(cli_mine_theme PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DEPENDS cli_gen)
+# cli_mine_theme: PASS_REGULAR_EXPRESSION "b - - 0 1" alone matches every mined
+# FEN, so it used to pass even with the filter silently ignored entirely (the
+# Critical-2 defect below) -- it would not have caught that bug. Verified via
+# a script that pins the exact, independently-measured counts instead (see
+# verify_mine_theme_filters.cmake): 580 unfiltered, 477 with `mirror`.
+add_test(NAME cli_mine_theme COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         -DTABLES=${CLI_TT}
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/verify_mine_theme_filters.cmake)
+set_tests_properties(cli_mine_theme PROPERTIES DEPENDS cli_gen)
+
 # An unknown theme must fail loudly and name the alternatives -- the --end/--ends
 # lesson: a silently discarded filter returns positions that do not match what
-# was asked for, with nothing to indicate it.
-set_tests_properties(cli_mine_theme_unknown PROPERTIES
-  WILL_FAIL TRUE DEPENDS cli_gen)
+# was asked for, with nothing to indicate it. WILL_FAIL alone only pins
+# "nonzero exit" (a segfault would pass too), and PASS_REGULAR_EXPRESSION alone
+# ignores the exit code -- pin both together via the shared script.
+add_test(NAME cli_mine_theme_unknown COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=mine KQvk --dtm 2 --theme nosuch --tables ${CLI_TT}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=unknown theme \"nosuch\""
+         "-DPATTERN2=valid themes"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_mine_theme_unknown PROPERTIES DEPENDS cli_gen)
+
+# Critical-2 regression: `mine --themes` (plural, probe's flag) used to fall
+# through to positionals and get silently discarded -- `mine KQvk --dtm 2
+# --themes mirror --max 100000` ran to completion returning the FULL
+# unfiltered pool (580 lines), exit 0, with nothing indicating "mirror" was
+# ever dropped. It must now be a loud, named error instead.
+add_test(NAME cli_mine_themes_rejected COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=mine KQvk --dtm 2 --themes mirror --max 100000 --tables ${CLI_TT}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=mine has no"
+         "-DPATTERN2=--theme NAME"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_mine_themes_rejected PROPERTIES DEPENDS cli_gen)
+
+# The mirror-image mix-up: `probe --theme` (singular, mine's flag) must also
+# be rejected, naming the right flag (--themes). Rejection happens while
+# scanning flags, before the FEN is ever parsed, so the FEN need not even be
+# well-formed here -- quoted anyway so this stays a faithful, copy-pasteable
+# repro of the real command.
+add_test(NAME cli_probe_theme_rejected COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=probe \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --theme mirror --tables ${CLI_TT}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=probe has no"
+         "-DPATTERN2=did you mean \"--themes\""
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_probe_theme_rejected PROPERTIES DEPENDS cli_gen)
+
+# `mine` used to silently ignore any positional beyond pos[0] -- a stray extra
+# argument changed nothing about what got printed, with no indication it was
+# dropped (the same class of bug as the --theme/--themes mix-up above).
+add_test(NAME cli_mine_extra_positional COMMAND helpmate mine KQvk extra --dtm 2 --tables ${CLI_TT})
+set_tests_properties(cli_mine_extra_positional PROPERTIES
+  PASS_REGULAR_EXPRESSION "error.*extra argument" DEPENDS cli_gen)
+
+add_test(NAME cli_probe_themes COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --themes --tables ${CLI_TT})
 set_tests_properties(cli_probe_themes PROPERTIES PASS_REGULAR_EXPRESSION "themes:" DEPENDS cli_gen)
+
+# Important-3 regression: probe's color-flip fallback (see cli_probe's own
+# color-flip coverage below) used to break `--themes` -- tb.solutions() walks
+# the ORIGINAL (unflipped) FEN, which has no table of its own when probe only
+# answered via the flip, so it threw MissingTableError and turned a working
+# probe into a half-printed answer plus exit 2. Now it must print a note and
+# still exit 0. Only KQvk is generated into CLI_TT, not its flip Kvkq, so this
+# FEN (White king mated by a lone black queen) is guaranteed to hit the flip
+# path -- same FEN as test_probe.cpp's "probe color-flipped position".
+add_test(NAME cli_probe_themes_flipped COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=probe \"6q1/8/8/8/8/5k2/7K/8 w - - 0 1\" --themes --tables ${CLI_TT}"
+         -DEXPECTED_RC=0
+         "-DPATTERN1=note:.*color-flipped"
+         "-DPATTERN2=dtm=2.*colors flipped"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_probe_themes_flipped PROPERTIES DEPENDS cli_gen)
 add_test(NAME cli_themes COMMAND helpmate themes)
 set_tests_properties(cli_themes PROPERTIES PASS_REGULAR_EXPRESSION "closed-walk")
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})

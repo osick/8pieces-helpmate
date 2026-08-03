@@ -63,6 +63,25 @@ std::string gen_kqvkn() {
     }
     return dir;
 }
+
+// KQvkq: the smallest material with two queens, which is what it takes to
+// reach a real --starts/--ends SAN-vs-(from,to,promotion) divergence -- a
+// single-queen material (KQvk) can never produce the disambiguation cases
+// below (see the CRITICAL-1 regression test), nor the cross-solution AND
+// case (see the "AND across solutions" regression test). ~13s to generate at
+// --threads 4; shared (generated once) by every TEST_CASE that needs it.
+std::string gen_kqvkq() {
+    static std::string dir;
+    if (dir.empty()) {
+        dir = (std::filesystem::temp_directory_path() / "hm_solutions_test_kqvkq").string();
+        std::filesystem::create_directories(dir);
+        GenOptions opt;
+        opt.tables_dir = dir;
+        opt.threads = 4;
+        generate(*Material::parse("KQvkq"), opt);
+    }
+    return dir;
+}
 }  // namespace
 
 TEST_CASE("solutions() mirrors lines() one-for-one", "[themes][solutions]") {
@@ -183,21 +202,6 @@ TEST_CASE("a capturing ply reports the captured piece type", "[themes][solutions
 // constraints for this suite. No smaller material can reach en passant, so
 // this branch is knowingly left untested rather than faked.
 
-TEST_CASE("shape_of_solutions agrees with the SAN-based shape_of", "[themes][solutions]") {
-    Tablebase tb(gen_kqvk());
-    auto ls = tb.lines(kGolden, 100);
-    auto ss = tb.solutions(kGolden, 100);
-    SolutionShape from_san = shape_of(4, ls);
-    SolutionShape from_plies = shape_of_solutions(4, ss);
-    REQUIRE(from_plies.starts == from_san.starts);
-    REQUIRE(from_plies.ends == from_san.ends);
-    REQUIRE(from_plies.exhaustive == from_san.exhaustive);
-}
-
-TEST_CASE("a saturated count is never enumerated", "[themes][solutions]") {
-    REQUIRE_FALSE(shape_of_solutions((int)COUNT_SAT, {}).exhaustive);
-}
-
 TEST_CASE("mine filters by theme", "[themes][solutions]") {
     Tablebase tb(gen_kqvk());
     auto m = Material::parse("KQvk");
@@ -240,16 +244,120 @@ TEST_CASE("mine filters by theme", "[themes][solutions]") {
 TEST_CASE("multiple themes AND together", "[themes][solutions]") {
     Tablebase tb(gen_kqvk());
     auto m = Material::parse("KQvk");
+    // True KQvk dtm=2 totals (measured with an unbounded callback): mirror =
+    // 477, mirror+model = 439. A cap of 400 sits BELOW both totals, so both
+    // scans saturate at the same ceiling and the assertion degenerates to
+    // "400 <= 400", which holds under any semantics including OR -- an OR
+    // implementation would give mirror-or-model = 482 for KQvk, and 400 <=
+    // 400 still passes without ever comparing 482 to anything. 700 clears
+    // both true totals (matching the cap already used in "mine filters by
+    // theme" above), so the assertion becomes the real "439 <= 477", which
+    // holds for AND and fails for OR (482 > 477).
     size_t one = 0, both = 0;
     tb.mine(*m, MineFilter{.dtm = 2, .themes = {"mirror"}}, [&](const std::string&) {
         ++one;
-        return one < 400;
+        return one < 700;
     });
     tb.mine(*m, MineFilter{.dtm = 2, .themes = {"mirror", "model"}}, [&](const std::string&) {
         ++both;
-        return both < 400;
+        return both < 700;
     });
     REQUIRE(both <= one);
+}
+
+// IMPORTANT-2 regression: AND must hold ACROSS a position's solutions, not
+// require both themes within the SAME solution. For KQvkq, positions showing
+// mirror in SOME solution and model in SOME solution (any/any) number 13,090;
+// positions showing both in the SAME solution number only 12,890 -- so an
+// implementation that wrongly required both themes within one solution would
+// still pass every other test in this file (they never exercise a position
+// where the two counts diverge) while silently rejecting ~200 legitimate
+// hits. This position is the reviewer-verified case where the two counts
+// diverge: mirror appears in one optimal solution, model in a different one,
+// never together in a single solution.
+TEST_CASE("themes AND across solutions, not within one solution", "[themes][solutions]") {
+    Tablebase tb(gen_kqvkq());
+    auto m = Material::parse("KQvkq");
+    REQUIRE(m);
+    const char* fen = "8/8/8/8/5q2/2K5/4Q3/1k6 b - - 0 1";  // count 14
+
+    auto sols = tb.solutions(fen, 100);
+    REQUIRE(sols.size() == 14);
+    bool any_mirror = false, any_model = false, same_solution_both = false;
+    for (const auto& s : sols) {
+        bool mi = themes::is_mirror(s), mo = themes::is_model(s);
+        any_mirror = any_mirror || mi;
+        any_model = any_model || mo;
+        same_solution_both = same_solution_both || (mi && mo);
+    }
+    // The distinguishing property this test exists to pin: both themes show up
+    // SOMEWHERE across the solution set, but never together in one solution.
+    REQUIRE(any_mirror);
+    REQUIRE(any_model);
+    REQUIRE_FALSE(same_solution_both);
+
+    auto p = tb.probe(fen);
+    REQUIRE(p);
+    REQUIRE(p->count == 14);
+
+    // mine() emits CANONICAL fens (symmetry-reduced); compute this position's
+    // canonical form the same way mine() does, via SliceIndex::encode/decode,
+    // rather than hand-transcribing it.
+    Board b = *Board::from_fen(fen);
+    SliceIndex si(*m);
+    auto idx = si.encode(b.pieces());
+    REQUIRE(idx);
+    std::vector<PlacedPiece> pp;
+    REQUIRE(si.decode(*idx, pp));
+    std::string canon = Board::from_pieces(pp, b.stm()).fen();
+
+    // Direction 1 (accept): a position matching mirror-in-one-solution and
+    // model-in-a-different-solution must be accepted by themes={"mirror",
+    // "model"} -- correct per "any within a theme, AND across themes", which a
+    // same-solution-required implementation would get wrong for exactly this
+    // position.
+    bool accepted = false;
+    tb.mine(*m, MineFilter{.dtm = p->dtm, .count = p->count, .themes = {"mirror", "model"}},
+            [&](const std::string& f) {
+                if (f == canon) accepted = true;
+                return true;
+            });
+    REQUIRE(accepted);
+
+    // Direction 2 (reject): a position matching only "mirror" (mirror shown by
+    // some solution, model shown by NO solution) must be excluded from the AND
+    // result. Scan the same dtm/count bucket (narrow and cheap: filtered on
+    // both dtm and count, not the whole material) for such a position and
+    // confirm it is genuinely mirror-without-model, not merely absent because
+    // of a bug.
+    std::vector<std::string> mirror_hits;
+    tb.mine(*m, MineFilter{.dtm = p->dtm, .count = p->count, .themes = {"mirror"}},
+            [&](const std::string& f) {
+                mirror_hits.push_back(f);
+                return mirror_hits.size() < 500;
+            });
+    std::set<std::string> both_hits;
+    tb.mine(*m, MineFilter{.dtm = p->dtm, .count = p->count, .themes = {"mirror", "model"}},
+            [&](const std::string& f) {
+                both_hits.insert(f);
+                return true;
+            });
+    bool found_reject_case = false;
+    for (const auto& f : mirror_hits) {
+        if (both_hits.count(f)) continue;  // shows both -> not the "only A" case
+        auto fsols = tb.solutions(f, 100);
+        bool fm = false, fmo = false;
+        for (const auto& s : fsols) {
+            fm = fm || themes::is_mirror(s);
+            fmo = fmo || themes::is_model(s);
+        }
+        REQUIRE(fm);  // it came from the mirror-filtered result, so mirror must hold somewhere
+        if (!fmo) {   // model truly never holds: the clean "matching only A" case
+            found_reject_case = true;
+            break;
+        }
+    }
+    REQUIRE(found_reject_case);
 }
 
 TEST_CASE("an unknown theme name is rejected, never ignored", "[themes][solutions]") {
@@ -258,4 +366,65 @@ TEST_CASE("an unknown theme name is rejected, never ignored", "[themes][solution
     REQUIRE_THROWS_AS(tb.mine(*m, MineFilter{.dtm = 2, .themes = {"nosuchtheme"}},
                               [](const std::string&) { return false; }),
                       std::invalid_argument);
+}
+
+// CRITICAL-1 regression: --ends is a released v0.6.2 feature keyed on SAN
+// (distinct moves compared as rendered text), not on (from, to, promotion).
+// KQvk (a single queen) can never exercise the divergence -- SAN differs from
+// (from, to, promotion) only via a capture marker or a disambiguator, and
+// KQvk has nothing to capture and no second piece of the same type to
+// disambiguate against. KQvkq (two queens, a capturable one) is the smallest
+// material that does. Both positions below are the reviewer's verified
+// real-table divergence; mine()'s --ends filter must reproduce the v0.6.2
+// (SAN-keyed) number, not the (from, to, promotion)-keyed one.
+TEST_CASE("mine --ends stays SAN-keyed, not (from,to,promotion)-keyed", "[themes][solutions]") {
+    Tablebase tb(gen_kqvkq());
+    auto m = Material::parse("KQvkq");
+    REQUIRE(m);
+
+    auto check_ends = [&](const char* fen, int san_ends, int wrong_ends) {
+        auto p = tb.probe(fen);
+        REQUIRE(p);
+        // Ground truth: solution_shape() always went through the SAN-based
+        // path (lines()/shape_of) and was never touched by this task, so it
+        // independently confirms the expected v0.6.2 value.
+        auto sh = tb.solution_shape(fen);
+        REQUIRE(sh.exhaustive);
+        REQUIRE(sh.ends == san_ends);
+
+        // Canonical form, the same way mine() builds its output FENs.
+        Board b = *Board::from_fen(fen);
+        SliceIndex si(*m);
+        auto idx = si.encode(b.pieces());
+        REQUIRE(idx);
+        std::vector<PlacedPiece> pp;
+        REQUIRE(si.decode(*idx, pp));
+        std::string canon = Board::from_pieces(pp, b.stm()).fen();
+
+        // mine() must place this position under --ends == the SAN value, and
+        // NOT under the (from,to,promotion)-keyed value the bug produced.
+        bool found_at_san = false, found_at_wrong = false;
+        tb.mine(*m, MineFilter{.dtm = p->dtm, .count = p->count, .ends = san_ends},
+                [&](const std::string& f) {
+                    if (f == canon) found_at_san = true;
+                    return true;
+                });
+        tb.mine(*m, MineFilter{.dtm = p->dtm, .count = p->count, .ends = wrong_ends},
+                [&](const std::string& f) {
+                    if (f == canon) found_at_wrong = true;
+                    return true;
+                });
+        CHECK(found_at_san);
+        CHECK_FALSE(found_at_wrong);
+    };
+
+    // Qxa4# and Qa4#: same (from,to) = d1->a4, differ only by the capture
+    // marker. v0.6.2 (SAN-keyed): ends=2. Buggy (from,to,promotion)-keyed
+    // code collapses them to ends=1.
+    check_ends("8/8/8/8/8/1q6/8/k1KQ4 b - - 0 1", 2, 1);
+
+    // Qb4-b1# and Qe4-b1#: different (from,to), both render as SAN "Qb1#".
+    // v0.6.2 (SAN-keyed): ends=1. Buggy (from,to,promotion)-keyed code splits
+    // them into ends=2.
+    check_ends("8/8/8/8/8/8/2q5/K1k1Q3 b - - 0 1", 1, 2);
 }

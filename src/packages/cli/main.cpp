@@ -187,16 +187,31 @@ int cmd_probe(const std::vector<std::string>& pos, const std::string& tables, bo
     std::cout << "dtm=" << p->dtm << " (" << Tablebase::h_notation(p->dtm, stm_of(pos[0]))
               << (p->flipped ? ", colors flipped" : "") << ") count=" << p->count << "\n";
     if (show_themes) {
-        // Detection forces solution enumeration, so it stays opt-in: a plain
-        // probe must not start paying for a field most callers never read.
-        auto names = themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
-        std::cout << "themes:";
-        if (names.empty()) std::cout << " (none)";
-        for (const auto& n : names) std::cout << " " << n;
-        std::cout << "\n";
-        if (p->count >= (int)COUNT_SAT)
-            std::cerr << "note: this position's solution count is saturated (255+); themes were "
-                         "detected from the first 100 solutions only\n";
+        if (p->flipped) {
+            // tb.solutions(pos[0], ...) walks the position AS QUERIED. When probe
+            // only found an answer by color-flipping to the OTHER material, that
+            // material's table cannot answer a solutions() walk of the original
+            // (unflipped) FEN -- it throws MissingTableError, turning a working
+            // probe into a half-printed answer plus exit 2. Flipping the position
+            // ourselves and detecting on THAT is not a fix either: every mate
+            // detector assumes Black is the mated side, so detecting on the
+            // flipped board would silently answer a different question than the
+            // one asked. So: no detection, just say why.
+            std::cerr << "note: themes are unavailable for a color-flipped probe (the mate "
+                         "detectors assume Black is the mated side; flipping the position to "
+                         "detect on it would silently answer a different position)\n";
+        } else {
+            // Detection forces solution enumeration, so it stays opt-in: a plain
+            // probe must not start paying for a field most callers never read.
+            auto names = themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
+            std::cout << "themes:";
+            if (names.empty()) std::cout << " (none)";
+            for (const auto& n : names) std::cout << " " << n;
+            std::cout << "\n";
+            if (p->count >= (int)COUNT_SAT)
+                std::cerr << "note: this position's solution count is saturated (255+); themes were "
+                             "detected from the first 100 solutions only\n";
+        }
     }
     return 0;
 }
@@ -251,6 +266,17 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
              const std::vector<std::string>& theme_names) {
     if (pos.empty()) {
         std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n";
+        usage();
+        return 3;
+    }
+    if (pos.size() > 1) {
+        // A stray extra positional used to be silently ignored (mine only ever
+        // read pos[0]) -- the same class of bug as a discarded --theme/--themes
+        // typo above: something the user typed changes nothing about what gets
+        // printed, with no indication anything was dropped.
+        std::cerr << "error: mine takes exactly one MATERIAL argument; unexpected extra argument(s):";
+        for (size_t i = 1; i < pos.size(); ++i) std::cerr << " \"" << pos[i] << "\"";
+        std::cerr << "\n\n";
         usage();
         return 3;
     }
@@ -642,8 +668,31 @@ int main(int argc, char** argv) {
         else if (a == "--compress") compress = true;
         else if (a == "--dry-run") dry_run = true;
         else if (a == "--block-size") set_int(a, i, block_size_kib);
-        else if (a == "--theme") theme_names.push_back(args[++i]);
-        else if (a == "--themes") show_themes = true;
+        else if (a == "--theme") {
+            // --theme (repeatable, value) is mine's per-theme filter; --themes
+            // (boolean) is probe's "also print the themes shown". They read as
+            // a singular/plural typo of each other -- exactly the --end/--ends
+            // incident the comment below exists to prevent -- so on the wrong
+            // command this must be a loud error naming the right flag, not a
+            // filter that silently falls through to positionals and gets
+            // ignored (verbatim: `mine --themes mirror` used to run to
+            // completion with "mirror" discarded as a stray positional).
+            if (cmd == "probe") {
+                std::cerr << "error: probe has no \"--theme\" flag; did you mean \"--themes\" "
+                             "(no value, prints the themes shown)?\n\n";
+                usage();
+                return 3;
+            }
+            theme_names.push_back(args[++i]);
+        } else if (a == "--themes") {
+            if (cmd == "mine") {
+                std::cerr << "error: mine has no \"--themes\" flag; did you mean \"--theme NAME\" "
+                             "(repeatable, filters by theme)?\n\n";
+                usage();
+                return 3;
+            }
+            show_themes = true;
+        }
         // An unrecognised --flag is a usage error, never a positional argument.
         // Silently ignoring it is worse than useless here: `mine --end 2` (the
         // real flag is --ends) used to run to completion with the filter simply

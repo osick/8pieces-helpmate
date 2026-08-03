@@ -73,11 +73,6 @@ struct MoveInfo {
 // saturates -- no such position exists in any material generated so far.
 SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines);
 
-// Same as shape_of, from structured solutions. Distinct moves are compared by
-// (from, to, promotion) rather than SAN; SAN disambiguation makes the two
-// equivalent, and a test pins that they agree.
-SolutionShape shape_of_solutions(int count, const std::vector<Solution>& sols);
-
 // Read side of the tablebase: loads generated .hm files on demand (lazily, cached)
 // and answers position queries. All public methods are logically const (internal
 // cache access is mutex-guarded), so a single Tablebase can be shared/queried

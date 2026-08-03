@@ -1,6 +1,5 @@
 #include "probe/tablebase.h"
 
-#include <array>
 #include <set>
 #include <utility>
 
@@ -233,20 +232,6 @@ SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& l
     return {(int)firsts.size(), (int)lasts.size(), true};
 }
 
-SolutionShape shape_of_solutions(int count, const std::vector<Solution>& sols) {
-    if (count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
-    auto key = [](const Ply& p) {
-        return std::array<int, 3>{p.from, p.to, p.promotion ? (int)*p.promotion : -1};
-    };
-    std::set<std::array<int, 3>> firsts, lasts;
-    for (const auto& s : sols) {
-        if (s.plies.empty()) continue;  // dtm 0: already mate, no moves
-        firsts.insert(key(s.plies.front()));
-        lasts.insert(key(s.plies.back()));
-    }
-    return {(int)firsts.size(), (int)lasts.size(), true};
-}
-
 SolutionShape Tablebase::solution_shape(const std::string& fen) const {
     auto p = probe(fen);
     if (!p) return {0, 0, true};                       // unsolvable: no solutions at all
@@ -288,26 +273,38 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
                 if (skipped_saturated) ++*skipped_saturated;
                 continue;
             }
-            auto sols = solutions(fen, (int)v.count);
             if (want_shape) {
-                SolutionShape sh = shape_of_solutions((int)v.count, sols);
+                // --starts/--ends are a released v0.6.2 feature (see CHANGELOG.md)
+                // keyed on SAN, not on (from, to, promotion): SAN disambiguates a
+                // capture from a quiet move sharing the same (from, to) (Qxa4# vs
+                // Qa4#: v0.6.2 counts 2 distinct mating moves), and distinguishes
+                // two moves that happen to share a destination square but render
+                // identically otherwise (Qb4-b1# vs Qe4-b1#, both SAN "Qb1#": v0.6.2
+                // counts 1). A (from, to, promotion) key gets both cases backwards.
+                // Changing --ends's meaning as a side effect of adding themes is not
+                // acceptable, so this goes through lines()/shape_of exactly like
+                // v0.6.2 did, not through solutions().
+                SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
                 if (f.starts >= 0 && sh.starts != f.starts) continue;
                 if (f.ends >= 0 && sh.ends != f.ends) continue;
             }
-            bool all_present = true;
-            for (auto d : dets) {  // AND across themes...
-                bool any = false;
-                for (const auto& sol : sols)  // ...`any` within one
-                    if (d(sol)) {
-                        any = true;
+            if (!dets.empty()) {
+                auto sols = solutions(fen, (int)v.count);
+                bool all_present = true;
+                for (auto d : dets) {  // AND across themes...
+                    bool any = false;
+                    for (const auto& sol : sols)  // ...`any` within one
+                        if (d(sol)) {
+                            any = true;
+                            break;
+                        }
+                    if (!any) {
+                        all_present = false;
                         break;
                     }
-                if (!any) {
-                    all_present = false;
-                    break;
                 }
+                if (!all_present) continue;
             }
-            if (!all_present) continue;
         }
         if (!cb(fen)) return;
     }
