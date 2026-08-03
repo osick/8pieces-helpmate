@@ -124,10 +124,13 @@ std::vector<std::vector<std::string>> Tablebase::lines(const std::string& fen, i
 }
 
 void Tablebase::collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out,
-                                   const Board& start, int max) const {
+                                  const Board& start, int max) const {
     if ((int)out.size() >= max) return;
     ValuePair v = value_of(b);
-    if (v.dtm == 0) { out.push_back(Solution{start, path}); return; }
+    if (v.dtm == 0) {
+        out.push_back(Solution{start, path});
+        return;
+    }
     for (const Move& m : b.legal_moves()) {
         if ((int)out.size() >= max) return;
         b.make(m);
@@ -141,7 +144,7 @@ void Tablebase::collect_solutions(Board& b, std::vector<Ply>& path, std::vector<
         p.to = m.to;
         p.promotion = m.promotion();
         p.is_ep = m.is_ep();
-        for (const auto& pp : b.pieces()) {           // b is still PRE-move here
+        for (const auto& pp : b.pieces()) {  // b is still PRE-move here
             if (pp.square == m.from) p.piece = pp.piece;
             else if (pp.square == m.to) p.captured = pp.piece.type;
         }

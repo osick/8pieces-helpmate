@@ -1,6 +1,7 @@
-#include "themes/attack.h"
-#include "chess/board.h"
 #include <catch2/catch_test_macros.hpp>
+
+#include "chess/board.h"
+#include "themes/attack.h"
 
 using namespace hm;
 using namespace hm::themes;
@@ -31,7 +32,7 @@ TEST_CASE("pawns attack diagonally, never forward", "[themes][attack]") {
     auto ps = from_fen("8/8/8/8/8/8/4P3/4K2k w - - 0 1");
     REQUIRE(attackers_of(ps, Color::White, sq("d3")) == 1);
     REQUIRE(attackers_of(ps, Color::White, sq("f3")) == 1);
-    REQUIRE(attackers_of(ps, Color::White, sq("e3")) == 0);   // the push square
+    REQUIRE(attackers_of(ps, Color::White, sq("e3")) == 0);  // the push square
     REQUIRE(attackers_of(ps, Color::White, sq("e4")) == 0);
 }
 
@@ -68,8 +69,7 @@ TEST_CASE("a pinned unit still counts as attacking", "[themes][attack]") {
     REQUIRE(attackers_of(ps, Color::White, sq("d5")) == 1);
 }
 
-TEST_CASE("ignore_king_of unmasks the square behind the mated king",
-          "[themes][attack]") {
+TEST_CASE("ignore_king_of unmasks the square behind the mated king", "[themes][attack]") {
     // White rook h1 checks the black king on h5. h6 is NOT a flight square --
     // the king cannot run along the checking line -- but with the king on the
     // board it blocks the ray and a naive scan reports h6 unattacked.
@@ -87,7 +87,7 @@ TEST_CASE("piece_attacks isolates a single unit", "[themes][attack]") {
     REQUIRE(piece_attacks(ps, ra, sq("e8")));
     REQUIRE(piece_attacks(ps, rh, sq("e8")));
     REQUIRE_FALSE(piece_attacks(ps, ra, sq("e5")));
-    REQUIRE_FALSE(piece_attacks(ps, ra, sq("a8")));   // never attacks its own square
+    REQUIRE_FALSE(piece_attacks(ps, ra, sq("a8")));  // never attacks its own square
 }
 
 TEST_CASE("piece_attacks is blocked by an intervening unit", "[themes][attack]") {
@@ -103,5 +103,5 @@ TEST_CASE("knights jump over occupied squares", "[themes][attack]") {
     // which would make this fixture pass for the wrong reason (2 attackers,
     // not 1). A rook on c2 occupies the square without adding an attack.
     auto ps = from_fen("8/8/8/8/8/PPP5/PNR5/K1P4k w - - 0 1");
-    REQUIRE(attackers_of(ps, Color::White, sq("d3")) == 1);   // the knight, boxed in
+    REQUIRE(attackers_of(ps, Color::White, sq("d3")) == 1);  // the knight, boxed in
 }

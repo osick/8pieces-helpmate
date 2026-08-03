@@ -1,7 +1,8 @@
 #pragma once
-#include "chess/types.h"
 #include <optional>
 #include <vector>
+
+#include "chess/types.h"
 
 namespace hm::themes {
 

@@ -1,9 +1,10 @@
-#include "probe/tablebase.h"
-#include "probe/solution.h"
-#include "generator/generator.h"
 #include <catch2/catch_test_macros.hpp>
 #include <filesystem>
 #include <set>
+
+#include "generator/generator.h"
+#include "probe/solution.h"
+#include "probe/tablebase.h"
 
 using namespace hm;
 
@@ -17,7 +18,8 @@ std::string gen_kqvk() {
     if (dir.empty()) {
         dir = (std::filesystem::temp_directory_path() / "hm_solutions_test").string();
         std::filesystem::create_directories(dir);
-        GenOptions opt; opt.tables_dir = dir;
+        GenOptions opt;
+        opt.tables_dir = dir;
         generate(*Material::parse("KQvk"), opt);
     }
     return dir;
@@ -32,7 +34,8 @@ std::string gen_kpvk() {
     if (dir.empty()) {
         dir = (std::filesystem::temp_directory_path() / "hm_solutions_test_kpvk").string();
         std::filesystem::create_directories(dir);
-        GenOptions opt; opt.tables_dir = dir;
+        GenOptions opt;
+        opt.tables_dir = dir;
         generate(*Material::parse("KPvk"), opt);
     }
     return dir;
@@ -51,7 +54,9 @@ std::string gen_kqvkn() {
     if (dir.empty()) {
         dir = (std::filesystem::temp_directory_path() / "hm_solutions_test_kqvkn").string();
         std::filesystem::create_directories(dir);
-        GenOptions opt; opt.tables_dir = dir; opt.threads = 4;
+        GenOptions opt;
+        opt.tables_dir = dir;
+        opt.threads = 4;
         generate(*Material::parse("KQvkn"), opt);
     }
     return dir;
@@ -92,7 +97,7 @@ TEST_CASE("plies record the moving unit and its from/to", "[themes][solutions]")
         REQUIRE(s.plies[1].piece.color == Color::White);
         for (const auto& p : s.plies) {
             REQUIRE(p.from != p.to);
-            REQUIRE_FALSE(p.captured.has_value());   // no captures in this material
+            REQUIRE_FALSE(p.captured.has_value());  // no captures in this material
             REQUIRE_FALSE(p.promotion.has_value());
             REQUIRE_FALSE(p.is_ep);
         }
@@ -101,15 +106,14 @@ TEST_CASE("plies record the moving unit and its from/to", "[themes][solutions]")
 
 TEST_CASE("a position that is already mate yields one empty solution", "[themes][solutions]") {
     Tablebase tb(gen_kqvk());
-    const char* mated = "8/8/8/8/8/8/8/kQK5 b - - 0 1";   // dtm 0
+    const char* mated = "8/8/8/8/8/8/8/kQK5 b - - 0 1";  // dtm 0
     auto ss = tb.solutions(mated, 100);
     REQUIRE(ss.size() == 1);
     REQUIRE(ss[0].plies.empty());
-    REQUIRE(final_board(ss[0]).fen() == mated);           // start is the mate
+    REQUIRE(final_board(ss[0]).fen() == mated);  // start is the mate
 }
 
-TEST_CASE("solutions() rejects a bad FEN the same way lines() does",
-          "[themes][solutions]") {
+TEST_CASE("solutions() rejects a bad FEN the same way lines() does", "[themes][solutions]") {
     Tablebase tb(gen_kqvk());
     REQUIRE_THROWS_AS(tb.solutions("garbage", 10), std::invalid_argument);
 }

@@ -1,10 +1,4 @@
 #pragma once
-#include "chess/board.h"
-#include "chess/types.h"
-#include "format/table_file.h"
-#include "indexing/material.h"
-#include "indexing/slice_index.h"
-#include "probe/solution.h"
 #include <functional>
 #include <map>
 #include <memory>
@@ -13,6 +7,13 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+#include "chess/board.h"
+#include "chess/types.h"
+#include "format/table_file.h"
+#include "indexing/material.h"
+#include "indexing/slice_index.h"
+#include "probe/solution.h"
 
 namespace hm {
 
@@ -110,8 +111,8 @@ private:
     ValuePair value_of(Board& b) const;
     void collect_lines(Board& b, std::vector<std::string>& path,
                         std::vector<std::vector<std::string>>& out, int max) const;
-    void collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out,
-                           const Board& start, int max) const;
+    void collect_solutions(Board& b, std::vector<Ply>& path, std::vector<Solution>& out, const Board& start,
+                           int max) const;
 
     std::string dir_;
     mutable std::mutex mu_;

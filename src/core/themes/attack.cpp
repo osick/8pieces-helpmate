@@ -1,4 +1,5 @@
 #include "themes/attack.h"
+
 #include <array>
 #include <cstdlib>
 #include <utility>
@@ -68,8 +69,7 @@ int attackers_of(const std::vector<PlacedPiece>& pieces, Color by, int sq,
             if (i < 0) continue;
             const Piece& pc = pieces[i].piece;
             if (pc.color == by &&
-                (pc.type == PieceType::Queen ||
-                 pc.type == (diagonal ? PieceType::Bishop : PieceType::Rook)))
+                (pc.type == PieceType::Queen || pc.type == (diagonal ? PieceType::Bishop : PieceType::Rook)))
                 ++n;
             break;  // the ray is blocked either way
         }
@@ -86,8 +86,7 @@ bool piece_attacks(const std::vector<PlacedPiece>& pieces, const PlacedPiece& p,
 
     switch (p.piece.type) {
         case PieceType::Knight:
-            return (std::abs(df) == 1 && std::abs(dr) == 2) ||
-                   (std::abs(df) == 2 && std::abs(dr) == 1);
+            return (std::abs(df) == 1 && std::abs(dr) == 2) || (std::abs(df) == 2 && std::abs(dr) == 1);
         case PieceType::King:
             return std::abs(df) <= 1 && std::abs(dr) <= 1;
         case PieceType::Pawn:
