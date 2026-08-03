@@ -191,4 +191,31 @@ def test_explorer_shows_detected_themes(page, server):
     page.wait_for_function(
         "() => document.getElementById('position-themes').textContent.length > 0")
     text = page.inner_text("#position-themes")
-    assert text  # either a theme list or "no themes detected"
+    # Measured against the fixture's KQvk table (GET /v1/probe?themes=true):
+    # {"themes": ["pure", "model", "ideal", "mirror", "single-piece",
+    # "single-piece:white", "single-piece:black"]}. Assert the actual
+    # rendered content, not just that something is there -- a smoke check
+    # here would pass with the themes_note/themeSummary priority reversed,
+    # or with an entirely wrong theme list.
+    assert text == ("pure · model · ideal · mirror · single-piece · "
+                     "single-piece:white · single-piece:black")
+
+
+def test_explorer_shows_the_flip_note_not_no_themes_detected(page, server):
+    # Regression: a colour-flipped position (answered via the fixture's only
+    # table, KQvk, by swapping colours) reports themes: null + themes_note --
+    # never themes: [] -- because the mate detectors are hard-coded to the
+    # black king and can't run safely on the flipped position. If explorer.js
+    # ever regresses to `themesEl.textContent = themeSummary(body.themes);`
+    # (dropping the `themes_note ||` fallback), themeSummary(null) returns ""
+    # and every flipped position would render nothing... except mine.js's
+    # theme picker is unaffected, so this specific regression is silent in
+    # every other test. Assert the actual flip explanation, not just
+    # "non-empty".
+    flipped_fen = "6q1/8/8/8/8/5k2/7K/8 w - - 0 1"
+    page.goto(f"{server}/#fen={quote(flipped_fen)}")
+    page.wait_for_function(
+        "() => document.getElementById('position-themes').textContent.length > 0")
+    text = page.inner_text("#position-themes")
+    assert "flip" in text.lower()
+    assert text != "no themes detected"
