@@ -1,8 +1,12 @@
 #include "probe/tablebase.h"
-#include "chess/san.h"
-#include "generator/eval.h"
+
+#include <array>
 #include <set>
 #include <utility>
+
+#include "chess/san.h"
+#include "generator/eval.h"
+#include "themes/registry.h"
 
 namespace hm {
 
@@ -229,6 +233,20 @@ SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& l
     return {(int)firsts.size(), (int)lasts.size(), true};
 }
 
+SolutionShape shape_of_solutions(int count, const std::vector<Solution>& sols) {
+    if (count >= (int)COUNT_SAT) return {0, 0, false};  // cannot enumerate exhaustively
+    auto key = [](const Ply& p) {
+        return std::array<int, 3>{p.from, p.to, p.promotion ? (int)*p.promotion : -1};
+    };
+    std::set<std::array<int, 3>> firsts, lasts;
+    for (const auto& s : sols) {
+        if (s.plies.empty()) continue;  // dtm 0: already mate, no moves
+        firsts.insert(key(s.plies.front()));
+        lasts.insert(key(s.plies.back()));
+    }
+    return {(int)firsts.size(), (int)lasts.size(), true};
+}
+
 SolutionShape Tablebase::solution_shape(const std::string& fen) const {
     auto p = probe(fen);
     if (!p) return {0, 0, true};                       // unsolvable: no solutions at all
@@ -242,7 +260,18 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     const Slice* s = load(m);
     if (!s) throw MissingTableError("no table for " + m.name());
     Color stm = (f.dtm % 2) ? Color::White : Color::Black;  // parity invariant: wtm dtm odd, btm dtm even
+
+    // Resolve theme names ONCE, before the scan: a typo must be an error that
+    // names the valid options, not millions of positions filtered by nothing.
+    std::vector<themes::Detector> dets;
+    for (const auto& n : f.themes) {
+        const auto* d = themes::find_theme(n);
+        if (!d) throw std::invalid_argument("unknown theme: \"" + n + "\"");
+        dets.push_back(d->fn);
+    }
+
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
+    const bool want_solutions = want_shape || !dets.empty();
     std::vector<PlacedPiece> pp;
     for (uint64_t c = 0; c < s->index.size(); ++c) {
         ValuePair v = s->reader.get(stm, c);
@@ -250,14 +279,35 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
         std::string fen = Board::from_pieces(pp, stm).fen();
-        if (want_shape) {
-            SolutionShape sh = solution_shape(fen);
-            if (!sh.exhaustive) {                       // count saturated: unknowable
+        if (want_solutions) {
+            // v.count is this cell's own stored count -- the same number a
+            // probe() of `fen` would return, since the FEN was built from this
+            // cell of this material and so cannot color-flip. Using it directly
+            // saves a redundant table lookup per candidate.
+            if (v.count >= COUNT_SAT) {  // unknowable, never guessed at
                 if (skipped_saturated) ++*skipped_saturated;
                 continue;
             }
-            if (f.starts >= 0 && sh.starts != f.starts) continue;
-            if (f.ends   >= 0 && sh.ends   != f.ends)   continue;
+            auto sols = solutions(fen, (int)v.count);
+            if (want_shape) {
+                SolutionShape sh = shape_of_solutions((int)v.count, sols);
+                if (f.starts >= 0 && sh.starts != f.starts) continue;
+                if (f.ends >= 0 && sh.ends != f.ends) continue;
+            }
+            bool all_present = true;
+            for (auto d : dets) {  // AND across themes...
+                bool any = false;
+                for (const auto& sol : sols)  // ...`any` within one
+                    if (d(sol)) {
+                        any = true;
+                        break;
+                    }
+                if (!any) {
+                    all_present = false;
+                    break;
+                }
+            }
+            if (!all_present) continue;
         }
         if (!cb(fen)) return;
     }

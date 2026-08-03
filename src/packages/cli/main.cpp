@@ -29,6 +29,7 @@ void usage() {
                  "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
                  "  helpmate stats <MATERIAL> [--tables DIR]\n"
                  "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
+                 "                           [--theme NAME]...\n"
                  "               [--max N] [--tables DIR]\n"
                  "  helpmate themes\n"
                  "  helpmate compact <DIR> [--dry-run] [--compress] [--block-size N]\n"
@@ -88,6 +89,11 @@ void usage() {
                  "  --starts N     mine: optional, exact number of distinct first moves across\n"
                  "                 the optimal solutions (must be >= 1, and <= --count if given)\n"
                  "  --ends N       mine: optional, exact number of distinct mating moves\n"
+                 "  --theme NAME   mine: only positions where at least one optimal solution\n"
+                 "                 shows theme NAME. Repeatable; every named theme must be\n"
+                 "                 present, though not necessarily in the same solution.\n"
+                 "                 `helpmate themes` lists the names and their definitions.\n"
+                 "  --themes       probe: also print the themes the position's solutions show\n"
                  "  --dry-run      compact: report what would be rewritten, write nothing\n"
                  "  --version      print version (\"helpmate "
               << HELPMATE_VERSION
@@ -100,6 +106,8 @@ void usage() {
                  "  helpmate stats KQvk --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --count 1 --max 5 --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --tables tt\n"
+                 "  helpmate mine KQvk --dtm 2 --theme mirror --max 5 --tables tt\n"
+                 "  helpmate probe \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --themes --tables tt\n"
                  "\n"
                  "Exit codes: 0 success (an \"unsolvable\" answer is still success), 2 a\n"
                  "table needed to answer the query is missing (message says which one and\n"
@@ -164,7 +172,7 @@ int cmd_gen(const std::vector<std::string>& pos, const std::string& tables, int 
     return 0;
 }
 
-int cmd_probe(const std::vector<std::string>& pos, const std::string& tables) {
+int cmd_probe(const std::vector<std::string>& pos, const std::string& tables, bool show_themes) {
     if (pos.empty()) {
         std::cerr << "error: probe needs a FEN argument\n\n";
         usage();
@@ -178,6 +186,18 @@ int cmd_probe(const std::vector<std::string>& pos, const std::string& tables) {
     }
     std::cout << "dtm=" << p->dtm << " (" << Tablebase::h_notation(p->dtm, stm_of(pos[0]))
               << (p->flipped ? ", colors flipped" : "") << ") count=" << p->count << "\n";
+    if (show_themes) {
+        // Detection forces solution enumeration, so it stays opt-in: a plain
+        // probe must not start paying for a field most callers never read.
+        auto names = themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
+        std::cout << "themes:";
+        if (names.empty()) std::cout << " (none)";
+        for (const auto& n : names) std::cout << " " << n;
+        std::cout << "\n";
+        if (p->count >= (int)COUNT_SAT)
+            std::cerr << "note: this position's solution count is saturated (255+); themes were "
+                         "detected from the first 100 solutions only\n";
+    }
     return 0;
 }
 
@@ -227,7 +247,8 @@ int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
 }
 
 int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int dtm, int count, int maxn,
-             int starts, int ends, bool starts_given, bool ends_given) {
+             int starts, int ends, bool starts_given, bool ends_given,
+             const std::vector<std::string>& theme_names) {
     if (pos.empty()) {
         std::cerr << "error: mine needs a MATERIAL argument (e.g. KQvk)\n\n";
         usage();
@@ -254,6 +275,13 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
             return 3;
         }
     }
+    for (const auto& n : theme_names) {
+        if (themes::find_theme(n)) continue;
+        std::cerr << "error: unknown theme \"" << n << "\"\nvalid themes:";
+        for (const auto& t : themes::theme_registry()) std::cerr << " " << t.name;
+        std::cerr << "\nrun: helpmate themes    (for what each one means)\n";
+        return 3;
+    }
     auto m = Material::parse(pos[0]);
     if (!m) {
         std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n";
@@ -263,7 +291,7 @@ int cmd_mine(const std::vector<std::string>& pos, const std::string& tables, int
     int printed = 0;
     uint64_t skipped = 0;
     tb.mine(
-        *m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
+        *m, MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends, .themes = theme_names},
         [&](const std::string& fen) {
             if (printed >= maxn)
                 return false;  // handles --max 0 (print none), matches `line --all`'s pre-check
@@ -567,13 +595,15 @@ int main(int argc, char** argv) {
     bool dry_run = false;
     bool starts_given = false, ends_given = false;
     std::vector<std::string> pos;  // positional args
+    std::vector<std::string> theme_names;  // --theme, repeatable
+    bool show_themes = false;              // probe --themes
     // Flags below all take a value; if one appears with nothing after it,
     // that's a usage error, not a stray positional argument (e.g. `probe FEN
     // --tables` with no directory should not silently treat "--tables" as
     // the FEN's replacement).
     auto needs_value = [](const std::string& a) {
         return a == "--tables" || a == "--threads" || a == "--dtm" || a == "--count" || a == "--max" ||
-               a == "--starts" || a == "--ends" || a == "--block-size";
+               a == "--starts" || a == "--ends" || a == "--block-size" || a == "--theme";
     };
     // Consumes the value following flag `a` (already known to exist) into
     // `target`; on malformed/out-of-range input prints one clear message +
@@ -612,6 +642,8 @@ int main(int argc, char** argv) {
         else if (a == "--compress") compress = true;
         else if (a == "--dry-run") dry_run = true;
         else if (a == "--block-size") set_int(a, i, block_size_kib);
+        else if (a == "--theme") theme_names.push_back(args[++i]);
+        else if (a == "--themes") show_themes = true;
         // An unrecognised --flag is a usage error, never a positional argument.
         // Silently ignoring it is worse than useless here: `mine --end 2` (the
         // real flag is --ends) used to run to completion with the filter simply
@@ -652,11 +684,12 @@ int main(int argc, char** argv) {
     try {
         if (cmd == "gen")
             return cmd_gen(pos, tables, threads, verbose, progress, force_ram, compress, block_size);
-        if (cmd == "probe") return cmd_probe(pos, tables);
+        if (cmd == "probe") return cmd_probe(pos, tables, show_themes);
         if (cmd == "line") return cmd_line(pos, tables, all, maxn);
         if (cmd == "stats") return cmd_stats(pos, tables);
         if (cmd == "mine")
-            return cmd_mine(pos, tables, dtm, count, maxn, starts, ends, starts_given, ends_given);
+            return cmd_mine(pos, tables, dtm, count, maxn, starts, ends, starts_given, ends_given,
+                            theme_names);
         if (cmd == "themes") return cmd_themes();
         if (cmd == "compact") return cmd_compact(pos, compress, dry_run, block_size);
         std::cerr << "error: unknown command \"" << cmd << "\"\n\n";

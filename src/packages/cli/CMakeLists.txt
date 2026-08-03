@@ -44,6 +44,16 @@ add_test(NAME cli_mine_shape_ends_miss COMMAND helpmate mine KQvk --dtm 2 --coun
 add_test(NAME cli_mine_shape_negative COMMAND helpmate mine KQvk --dtm 2 --starts -1 --tables ${CLI_TT})
 # --starts is legal without --count; the golden position has starts 2.
 add_test(NAME cli_mine_shape_no_count COMMAND helpmate mine KQvk --dtm 2 --starts 2 --max 200 --tables ${CLI_TT})
+add_test(NAME cli_mine_theme COMMAND helpmate mine KQvk --dtm 2 --theme mirror --max 5 --tables ${CLI_TT})
+add_test(NAME cli_mine_theme_unknown COMMAND helpmate mine KQvk --dtm 2 --theme nosuch --tables ${CLI_TT})
+add_test(NAME cli_probe_themes COMMAND helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --themes --tables ${CLI_TT})
+set_tests_properties(cli_mine_theme PROPERTIES PASS_REGULAR_EXPRESSION "b - - 0 1" DEPENDS cli_gen)
+# An unknown theme must fail loudly and name the alternatives -- the --end/--ends
+# lesson: a silently discarded filter returns positions that do not match what
+# was asked for, with nothing to indicate it.
+set_tests_properties(cli_mine_theme_unknown PROPERTIES
+  WILL_FAIL TRUE DEPENDS cli_gen)
+set_tests_properties(cli_probe_themes PROPERTIES PASS_REGULAR_EXPRESSION "themes:" DEPENDS cli_gen)
 add_test(NAME cli_themes COMMAND helpmate themes)
 set_tests_properties(cli_themes PROPERTIES PASS_REGULAR_EXPRESSION "closed-walk")
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})

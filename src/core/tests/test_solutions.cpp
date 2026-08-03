@@ -5,6 +5,8 @@
 #include "generator/generator.h"
 #include "probe/solution.h"
 #include "probe/tablebase.h"
+#include "themes/mate_themes.h"
+#include "themes/registry.h"
 
 using namespace hm;
 
@@ -180,3 +182,80 @@ TEST_CASE("a capturing ply reports the captured piece type", "[themes][solutions
 // minutes), so it fails both the "cheap generation" and "no [slow] tests"
 // constraints for this suite. No smaller material can reach en passant, so
 // this branch is knowingly left untested rather than faked.
+
+TEST_CASE("shape_of_solutions agrees with the SAN-based shape_of", "[themes][solutions]") {
+    Tablebase tb(gen_kqvk());
+    auto ls = tb.lines(kGolden, 100);
+    auto ss = tb.solutions(kGolden, 100);
+    SolutionShape from_san = shape_of(4, ls);
+    SolutionShape from_plies = shape_of_solutions(4, ss);
+    REQUIRE(from_plies.starts == from_san.starts);
+    REQUIRE(from_plies.ends == from_san.ends);
+    REQUIRE(from_plies.exhaustive == from_san.exhaustive);
+}
+
+TEST_CASE("a saturated count is never enumerated", "[themes][solutions]") {
+    REQUIRE_FALSE(shape_of_solutions((int)COUNT_SAT, {}).exhaustive);
+}
+
+TEST_CASE("mine filters by theme", "[themes][solutions]") {
+    Tablebase tb(gen_kqvk());
+    auto m = Material::parse("KQvk");
+    REQUIRE(m);
+
+    // KQvk's whole dtm=2 pool is 580 positions, of which 477 show `mirror`
+    // (measured directly: `mine(dtm=2)` vs `mine(dtm=2, themes={"mirror"})`
+    // with an unbounded callback). The brief's original cap of 400 sits below
+    // BOTH totals, so both scans saturate at the same ceiling and the
+    // intended "477 < 580" difference never surfaces -- that is a fixture
+    // defect (cap chosen too low relative to the true totals), not a filter
+    // bug: with only three pieces on the board (white king, white queen,
+    // black king), `mirror` genuinely fails only when the mating queen lands
+    // adjacent to the black king (a contact mate), which is common enough
+    // that ~18% of positions are excluded. 700 clears both true totals so the
+    // scans terminate naturally instead of both hitting the same cap.
+    std::vector<std::string> unfiltered, mirrored;
+    tb.mine(*m, MineFilter{.dtm = 2}, [&](const std::string& f) {
+        unfiltered.push_back(f);
+        return unfiltered.size() < 700;
+    });
+    tb.mine(*m, MineFilter{.dtm = 2, .themes = {"mirror"}}, [&](const std::string& f) {
+        mirrored.push_back(f);
+        return mirrored.size() < 700;
+    });
+
+    REQUIRE_FALSE(unfiltered.empty());
+    REQUIRE_FALSE(mirrored.empty());
+    REQUIRE(mirrored.size() < unfiltered.size());  // the filter must bite
+    // Every hit really shows the theme.
+    for (const auto& f : mirrored) {
+        auto sols = tb.solutions(f, 100);
+        bool any = false;
+        for (const auto& s : sols)
+            if (themes::is_mirror(s)) any = true;
+        REQUIRE(any);
+    }
+}
+
+TEST_CASE("multiple themes AND together", "[themes][solutions]") {
+    Tablebase tb(gen_kqvk());
+    auto m = Material::parse("KQvk");
+    size_t one = 0, both = 0;
+    tb.mine(*m, MineFilter{.dtm = 2, .themes = {"mirror"}}, [&](const std::string&) {
+        ++one;
+        return one < 400;
+    });
+    tb.mine(*m, MineFilter{.dtm = 2, .themes = {"mirror", "model"}}, [&](const std::string&) {
+        ++both;
+        return both < 400;
+    });
+    REQUIRE(both <= one);
+}
+
+TEST_CASE("an unknown theme name is rejected, never ignored", "[themes][solutions]") {
+    Tablebase tb(gen_kqvk());
+    auto m = Material::parse("KQvk");
+    REQUIRE_THROWS_AS(tb.mine(*m, MineFilter{.dtm = 2, .themes = {"nosuchtheme"}},
+                              [](const std::string&) { return false; }),
+                      std::invalid_argument);
+}

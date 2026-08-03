@@ -37,6 +37,11 @@ struct MineFilter {
     int count  = -1;   // optional, exact
     int starts = -1;   // optional, exact: distinct first moves across optimal lines
     int ends   = -1;   // optional, exact: distinct final (mating) moves
+    // Theme names, validated against themes::theme_registry(). A position
+    // matches when EVERY listed theme is shown by AT LEAST ONE of its optimal
+    // solutions -- `any` within a theme, AND across themes. An unregistered
+    // name throws std::invalid_argument rather than being silently dropped.
+    std::vector<std::string> themes;
 };
 
 // Shape of a position's optimal-solution set: how many distinct moves the
@@ -67,6 +72,11 @@ struct MoveInfo {
 // Free function so both branches are unit-testable without a table that
 // saturates -- no such position exists in any material generated so far.
 SolutionShape shape_of(int count, const std::vector<std::vector<std::string>>& lines);
+
+// Same as shape_of, from structured solutions. Distinct moves are compared by
+// (from, to, promotion) rather than SAN; SAN disambiguation makes the two
+// equivalent, and a test pins that they agree.
+SolutionShape shape_of_solutions(int count, const std::vector<Solution>& sols);
 
 // Read side of the tablebase: loads generated .hm files on demand (lazily, cached)
 // and answers position queries. All public methods are logically const (internal
