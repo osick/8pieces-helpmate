@@ -1,9 +1,11 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
-#include "probe/tablebase.h"
+
+#include "chess/board.h"
 #include "generator/generator.h"
 #include "indexing/material.h"
-#include "chess/board.h"
+#include "probe/tablebase.h"
+#include "themes/registry.h"
 #include "version.h"
 namespace py = pybind11;
 using namespace hm;
@@ -57,52 +59,96 @@ PYBIND11_MODULE(_helpmate, mod) {
         py::arg("compress") = false, py::arg("block_size") = kDefaultBlockSize / 1024);
     py::class_<Tablebase>(mod, "Tablebase")
         .def(py::init<std::string>())
-        .def("probe", [](const Tablebase& t, const std::string& fen) -> py::object {
-            auto p = t.probe(fen);
-            if (!p) return py::none();
-            return py::make_tuple(p->dtm, p->count, p->flipped);
-        })
+        .def("probe",
+             [](const Tablebase& t, const std::string& fen) -> py::object {
+                 auto p = t.probe(fen);
+                 if (!p) return py::none();
+                 return py::make_tuple(p->dtm, p->count, p->flipped);
+             })
         .def("line", &Tablebase::line)
         .def("lines", &Tablebase::lines, py::arg("fen"), py::arg("max") = 100)
-        .def("moves", [](const Tablebase& t, const std::string& fen) {
+        .def(
+            "themes",
+            [](const Tablebase& t, const std::string& fen, int max) {
+                return themes::detect(t.solutions(fen, max));
+            },
+            py::arg("fen"), py::arg("max") = 100)
+        .def(
+            "moves",
+            [](const Tablebase& t, const std::string& fen) {
+                py::list out;
+                for (const auto& m : t.moves(fen)) {
+                    py::dict d;
+                    d["uci"] = m.uci;
+                    d["san"] = m.san;
+                    d["fen"] = m.fen;
+                    d["dtm"] = m.solvable ? py::cast(m.dtm) : py::none();
+                    d["count"] = m.count;
+                    d["solvable"] = m.solvable;
+                    d["optimal"] = m.optimal;
+                    out.append(std::move(d));
+                }
+                return out;
+            },
+            py::arg("fen"))
+        .def(
+            "mine",
+            [](const Tablebase& t, const std::string& mat, int dtm, int count, int max, int starts, int ends,
+               std::vector<std::string> themes) {
+                validate_mine_shape(count, starts, ends);
+                std::vector<std::string> out;
+                t.mine(mat_or_throw(mat),
+                       MineFilter{.dtm = dtm,
+                                  .count = count,
+                                  .starts = starts,
+                                  .ends = ends,
+                                  .themes = std::move(themes)},
+                       [&](const std::string& f) {
+                           out.push_back(f);
+                           return (int)out.size() < max;
+                       });
+                return out;
+            },
+            py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100,
+            py::arg("starts") = -1, py::arg("ends") = -1, py::arg("themes") = std::vector<std::string>{})
+        .def(
+            "_mine_with_stats",
+            [](const Tablebase& t, const std::string& mat, int dtm, int count, int max, int starts, int ends,
+               std::vector<std::string> themes) {
+                validate_mine_shape(count, starts, ends);
+                std::vector<std::string> out;
+                uint64_t skipped = 0;
+                t.mine(
+                    mat_or_throw(mat),
+                    MineFilter{.dtm = dtm,
+                               .count = count,
+                               .starts = starts,
+                               .ends = ends,
+                               .themes = std::move(themes)},
+                    [&](const std::string& f) {
+                        out.push_back(f);
+                        return (int)out.size() < max;
+                    },
+                    &skipped);
+                return std::make_pair(out, skipped);  // -> (list[str], int) in Python
+            },
+            py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100,
+            py::arg("starts") = -1, py::arg("ends") = -1, py::arg("themes") = std::vector<std::string>{})
+        .def("_stats_json",
+             [](const Tablebase& t, const std::string& mat) { return t.stats_json(mat_or_throw(mat)); });
+    mod.def(
+        "themes",
+        []() {
             py::list out;
-            for (const auto& m : t.moves(fen)) {
+            for (const auto& t : themes::theme_registry()) {
                 py::dict d;
-                d["uci"] = m.uci;  d["san"] = m.san;  d["fen"] = m.fen;
-                d["dtm"] = m.solvable ? py::cast(m.dtm) : py::none();
-                d["count"] = m.count;
-                d["solvable"] = m.solvable;
-                d["optimal"] = m.optimal;
+                d["name"] = std::string(t.name);
+                d["doc"] = std::string(t.doc);
                 out.append(std::move(d));
             }
             return out;
-        }, py::arg("fen"))
-        .def("mine", [](const Tablebase& t, const std::string& mat, int dtm, int count,
-                        int max, int starts, int ends) {
-            validate_mine_shape(count, starts, ends);
-            std::vector<std::string> out;
-            t.mine(mat_or_throw(mat),
-                   MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
-                   [&](const std::string& f) {
-                       out.push_back(f); return (int)out.size() < max; });
-            return out;
-        }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100,
-           py::arg("starts") = -1, py::arg("ends") = -1)
-        .def("_mine_with_stats", [](const Tablebase& t, const std::string& mat, int dtm,
-                                    int count, int max, int starts, int ends) {
-            validate_mine_shape(count, starts, ends);
-            std::vector<std::string> out;
-            uint64_t skipped = 0;
-            t.mine(mat_or_throw(mat),
-                   MineFilter{.dtm = dtm, .count = count, .starts = starts, .ends = ends},
-                   [&](const std::string& f) {
-                       out.push_back(f); return (int)out.size() < max; },
-                   &skipped);
-            return std::make_pair(out, skipped);      // -> (list[str], int) in Python
-        }, py::arg("material"), py::arg("dtm"), py::arg("count") = -1, py::arg("max") = 100,
-           py::arg("starts") = -1, py::arg("ends") = -1)
-        .def("_stats_json", [](const Tablebase& t, const std::string& mat) {
-            return t.stats_json(mat_or_throw(mat)); });
+        },
+        "Every theme detector this build knows: [{name, doc}, ...], in display order.");
     mod.def("_perft", [](const std::string& fen, int depth) {
         auto b = Board::from_fen(fen);
         if (!b) throw std::invalid_argument("bad fen");

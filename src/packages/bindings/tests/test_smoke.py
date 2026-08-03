@@ -69,3 +69,25 @@ def test_errors(tables):
         tb.probe("garbage")
     with pytest.raises(RuntimeError):
         tb.probe("8/8/8/8/3n4/4k3/8/4K3 w - - 0 1")   # Kvkn not generated
+
+
+def test_theme_registry_is_exposed():
+    reg = helpmate.themes()
+    names = [t["name"] for t in reg]
+    assert "model" in names and "en-passant" in names
+    assert all(t["doc"] for t in reg)
+
+
+def test_probe_themes_and_mine_theme_filter(tables):
+    tb = helpmate.Tablebase(tables)
+    golden = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
+    assert isinstance(tb.themes(golden), list)
+    # KQvk dtm=2 true totals (measured): 580 unfiltered, 477 with theme
+    # "mirror" -- max must exceed BOTH true totals, or comparing two
+    # truncated-at-max lists would pass under any filter semantics,
+    # including a no-op filter.
+    wide = tb.mine("KQvk", dtm=2, max=600)
+    narrow = tb.mine("KQvk", dtm=2, max=600, themes=["mirror"])
+    assert len(wide) == 580 and len(narrow) == 477
+    assert set(narrow) <= set(wide)
+    assert len(narrow) < len(wide)
