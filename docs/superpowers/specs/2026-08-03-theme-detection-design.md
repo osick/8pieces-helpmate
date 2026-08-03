@@ -43,6 +43,14 @@ occupied by a black unit *and* attacked by White is doing double duty and
 breaks purity. Double check therefore makes a mate impure under this
 definition.
 
+*Correctness rule, found during planning:* when testing whether a **field
+square** is attacked, the black king is removed from the occupancy first. A
+rook on h1 checking a king on h5 also denies h6, because the king cannot run
+along the checking line away from the checker — but a naive scan sees the king
+itself blocking the ray and reports h6 unattacked. Every field-square test
+below uses the king-removed board; the test of the king's *own* square uses the
+full board.
+
 *Contested edge, decided here:* a square attacked by a **pinned** white unit
 counts as attacked. A pinned unit still controls squares for the purpose of
 the black king's legality, and the alternative reading requires modelling
@@ -55,9 +63,16 @@ square by standing on it. White pawns and the white king are exempt by
 convention.
 
 **`ideal`** — an ideal mate: `model`, and **every** unit on the board of
-either colour participates, with no exemptions. The white king and white pawns
-must participate too, and every black unit must be blocking a field square or
-pinned in a way that matters.
+either colour participates, with no exemptions. Operationally: every white unit
+(king and pawns included) attacks the king's square or a field square, or
+stands on a field square; every black unit other than the king stands on a
+field square. The black king participates by being the mated one.
+
+*Tightened during planning.* This first read "every black unit must be blocking
+a field square or pinned in a way that matters" — but "pinned in a way that
+matters" is exactly the kind of undecidable-locally clause rejected under
+`pure`. A black unit that is not on a field square does not participate, full
+stop.
 
 **`mirror`** — a mirror mate: every square of the black king's field is
 **empty** — no unit of either colour stands on any square adjacent to the
@@ -80,8 +95,9 @@ solution, having visited **exactly one** intermediate square (an out-and-back).
 
 **`closed-walk`** — Rundlauf. A unit returns to its departure square having
 visited **two or more** distinct intermediate squares, so it traverses a
-circuit rather than retracing its path. `switchback` and `closed-walk` are
-mutually exclusive by construction.
+circuit rather than retracing its path. The two are mutually exclusive **for a
+given return event**, not for a solution: one solution may contain a switchback
+by one unit and a closed walk by another, and then shows both themes.
 
 **`self-block`** — a black unit other than the king moves to a square of the
 black king's field, and in the mating position that square is occupied by that
@@ -148,6 +164,15 @@ Adding a theme is one function and one registry entry; CLI, API and dashboard
 all inherit it with no further plumbing, because each enumerates the registry
 rather than hard-coding names.
 
+**Colour-specific variants are separate registry entries.** A `bool` detector
+cannot report *which* side showed the theme, so where colour matters the
+registry carries the narrow names beside the broad one:
+`excelsior` / `excelsior:white` / `excelsior:black`, and `single-piece` /
+`single-piece:white` / `single-piece:black`. Sixteen registry entries for the
+twelve themes. This keeps the signature uniform and makes the query surface
+strictly more expressive — `--theme single-piece:black` is a real question a
+composer asks.
+
 Mate-position detectors take the final `Ply::after` — or `start` when the
 queried position is itself the mate — and ignore the rest; line
 detectors walk the whole vector. Both share the `Detector` signature so the
@@ -197,7 +222,10 @@ without the docs.
 - `GET /v1/mine?...&theme=model&theme=excelsior` — repeatable parameter,
   validated against the registry; an unknown name is a 400 `invalid_theme`
   listing the valid ones, never silently ignored.
-- `GET /v1/probe?fen=…` gains a `themes` array in its response.
+- `GET /v1/probe?fen=…&themes=true` gains a `themes` array in its response.
+  **Opt-in, not always-on:** detection forces solution enumeration, and
+  `/v1/probe` is on the dashboard's hot path. Defaulting it on would make every
+  probe pay for a field most callers never read.
 - `GET /v1/themes` — the registry, for the dashboard to build its own UI
   without a hard-coded list.
 
