@@ -1,4 +1,4 @@
-from urllib.parse import quote
+from urllib.parse import quote, urlparse, parse_qs
 
 GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
 
@@ -159,3 +159,36 @@ def test_mine_search_and_client_side_validation(page, server):
     page.click("#mine-form button[type=submit]")
     page.wait_for_function(
         "document.getElementById('mine-status').textContent.includes('cannot exceed')")
+
+
+def test_theme_picker_is_populated_from_the_server(page, server):
+    page.goto(f"{server}/#panel=mine")
+    page.wait_for_selector("#mine-themes option")
+    values = page.eval_on_selector_all(
+        "#mine-themes option", "els => els.map(e => e.value)")
+    assert "model" in values and "closed-walk" in values
+
+
+def test_selecting_two_themes_sends_both_not_just_the_last(page, server):
+    # Regression: Object.fromEntries(new FormData(form).entries()) keeps only
+    # the LAST value of a repeated field. A naive read of the multi-select
+    # would silently narrow a two-theme search down to one -- the exact class
+    # of bug this project has hit before, so assert on the actual request the
+    # browser sends rather than trusting the picker looks right on screen.
+    page.goto(f"{server}/#panel=mine")
+    page.wait_for_selector("#mine-themes option")
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.select_option("#mine-themes", ["model", "mirror"])
+    with page.expect_request(lambda r: "/v1/mine" in r.url) as req_info:
+        page.click("#mine-form button[type=submit]")
+    qs = parse_qs(urlparse(req_info.value.url).query)
+    assert qs.get("theme") == ["model", "mirror"]
+
+
+def test_explorer_shows_detected_themes(page, server):
+    page.goto(f"{server}/#fen={quote(GOLDEN)}")
+    page.wait_for_function(
+        "() => document.getElementById('position-themes').textContent.length > 0")
+    text = page.inner_text("#position-themes")
+    assert text  # either a theme list or "no themes detected"

@@ -18,8 +18,16 @@ export class ApiError extends Error {
 
 export async function getJson(path, params = {}) {
   const url = new URL(path, window.location.origin);
-  for (const [k, v] of Object.entries(params))
-    if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, v);
+  for (const [k, v] of Object.entries(params)) {
+    if (v === undefined || v === null || v === "") continue;
+    // A repeatable parameter (theme=a&theme=b) needs append, not set --
+    // searchParams.set can only ever hold the LAST value of a repeated key.
+    if (Array.isArray(v)) {
+      for (const item of v) url.searchParams.append(k, item);
+      continue;
+    }
+    url.searchParams.set(k, v);
+  }
   let res;
   try {
     res = await fetch(url);
@@ -42,8 +50,9 @@ export const api = {
   health: () => getJson("/v1/health"),
   materials: () => getJson("/v1/materials"),
   stats: (name) => getJson(`/v1/materials/${encodeURIComponent(name)}/stats`),
-  probe: (fen) => getJson("/v1/probe", { fen }),
+  probe: (fen, themes = false) => getJson("/v1/probe", { fen, themes: themes ? "true" : "" }),
   line: (fen, all = false) => getJson("/v1/line", { fen, all: all ? "true" : "" }),
   moves: (fen) => getJson("/v1/moves", { fen }),
   mine: (q) => getJson("/v1/mine", q),
+  themes: () => getJson("/v1/themes"),
 };

@@ -108,3 +108,32 @@ test("api.probe forwards the fen param", async () => {
   await api.probe("8/8/8/8/8/8/8/K6k w - - 0 1");
   assert.ok(String(calls[0]).includes("fen="));
 });
+
+test("api.probe(fen, true) asks for themes", async () => {
+  const calls = stubFetch(() => jsonResponse(200, {}));
+  await api.probe("8/8/8/8/8/8/8/K6k w - - 0 1", true);
+  assert.ok(String(calls[0]).includes("themes=true"));
+});
+
+test("api.themes hits GET /v1/themes", async () => {
+  const calls = stubFetch(() => jsonResponse(200, { themes: [] }));
+  await api.themes();
+  assert.ok(String(calls[0]).endsWith("/v1/themes"));
+});
+
+test("an array param is sent as a repeated query key, not narrowed to one value", async () => {
+  // The exact bug class this project has hit before: a naive params loop
+  // (searchParams.set) can only hold the LAST value of a repeated field,
+  // silently narrowing a two-theme search down to one.
+  const calls = stubFetch(() => jsonResponse(200, { fens: [] }));
+  await getJson("/v1/mine", { material: "KQvk", dtm: 2, theme: ["model", "mirror"] });
+  const url = new URL(String(calls[0]));
+  assert.deepEqual(url.searchParams.getAll("theme"), ["model", "mirror"]);
+});
+
+test("an empty array param sends no key at all", async () => {
+  const calls = stubFetch(() => jsonResponse(200, { fens: [] }));
+  await getJson("/v1/mine", { material: "KQvk", dtm: 2, theme: [] });
+  const url = new URL(String(calls[0]));
+  assert.deepEqual(url.searchParams.getAll("theme"), []);
+});

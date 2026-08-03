@@ -70,6 +70,7 @@
       </form>
 
       <p id="position-summary" class="verdict"></p>
+      <p id="position-themes" class="verdict"></p>
 
       <h2 class="eyebrow">Moves</h2>
       <ul id="move-list"></ul>
@@ -121,6 +122,10 @@
       <label>count <input name="count" type="number" min="1" placeholder="any"></label>
       <label>starts <input name="starts" type="number" min="1" placeholder="any"></label>
       <label>ends <input name="ends" type="number" min="1" placeholder="any"></label>
+      <label>themes
+        <select id="mine-themes" name="theme" multiple size="6"></select>
+        <small class="hint">optional — a position must show every theme you pick, though not necessarily in the same solution</small>
+      </label>
       <label>max results <input name="max" type="number" min="1" value="50"></label>
       <button type="submit">Search</button>
     </form>
