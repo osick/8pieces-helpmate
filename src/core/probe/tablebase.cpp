@@ -258,8 +258,23 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
     const bool want_solutions = want_shape || !dets.empty();
     std::vector<PlacedPiece> pp;
-    for (uint64_t c = 0; c < s->index.size(); ++c) {
-        ValuePair v = s->reader.get(stm, c);
+    // Read the two planes in block-sized chunks instead of one cell at a time.
+    // get() on a compressed table takes the block cache's mutex and memcpys a
+    // single byte per call; over a whole plane that -- not the decompression --
+    // was the cost, measured at 14x raw on KRvkbn before this loop was chunked.
+    // read_values() pays one lock and one memcpy per block touched.
+    constexpr size_t kScanChunk = 1 << 16;
+    const uint64_t plane_cells = s->index.size();
+    std::vector<uint8_t> dtm_buf(kScanChunk), cnt_buf(kScanChunk);
+    uint64_t chunk_base = 0;
+    size_t chunk_n = 0;
+    for (uint64_t c = 0; c < plane_cells; ++c) {
+        if (c - chunk_base >= chunk_n) {
+            chunk_base = c;
+            chunk_n = (size_t)std::min<uint64_t>(kScanChunk, plane_cells - c);
+            s->reader.read_values(stm, chunk_base, chunk_n, dtm_buf.data(), cnt_buf.data());
+        }
+        ValuePair v{dtm_buf[c - chunk_base], cnt_buf[c - chunk_base]};
         if (v.dtm != (uint8_t)f.dtm) continue;
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;

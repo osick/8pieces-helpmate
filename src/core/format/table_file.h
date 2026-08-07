@@ -14,21 +14,21 @@ constexpr uint8_t kEncodingRaw = 1;     // 4 contiguous byte planes
 constexpr uint8_t kEncodingBlocks = 2;  // block index + compressed blocks
 constexpr uint8_t kCodecNone = 0;
 constexpr uint8_t kCodecZstd = 1;
-// 64 KiB/level 3. `helpmate mine`'s --count/--starts path probes child
-// positions effectively at random, so on a real table nearly every probe
-// misses the reader's decompressed-block cache and pays a full block
-// decompress for one byte -- measured ~6.5x slower end to end than raw on
-// a 462 MiB table. A plain sequential scan or a single probe barely notices
-// block size (measured 9-14% either way).
+// 64 KiB/level 3.
 //
-// A 16 KiB default was tried on the theory that smaller blocks would cut
-// the mining regression (less to decompress per miss). Measured on the same
-// 462 MiB table it did NOT: 16 KiB and 64 KiB both ran ~6.5x slower than raw
-// on `mine --count`, while 16 KiB compressed worse (5.94x ratio, 77.8 MiB)
-// than 64 KiB (6.53x ratio, 70.8 MiB). Decompression is evidently not the
-// bottleneck -- the per-miss overhead in BlockCache is the suspect, but that
-// is unconfirmed and needs profiling, not another guessed block size. See
-// docs/USAGE.md's Table format section for the full numbers and
+// A 16 KiB default was once tried on the theory that smaller blocks would cut
+// the then-unexplained `mine` regression on compressed tables (less to
+// decompress per miss). It did NOT: 16 KiB and 64 KiB were indistinguishable
+// on the mining workload, while 16 KiB compressed worse (5.94x ratio, 77.8
+// MiB) than 64 KiB (6.53x ratio, 70.8 MiB). That was the correct measurement
+// and the wrong conclusion to stop at -- block size was never the variable.
+//
+// The regression had two causes, both since fixed, neither about block size:
+// a plane-wide scan read one byte per BlockCache call (fixed by
+// TableReader::read_values), and the solution-enumeration path's working set
+// did not fit a 4 MB cache (fixed by raising kBlockCacheBytes in
+// table_file.cpp). Both are documented where they were fixed. See
+// docs/USAGE.md's Table format section for the numbers and
 // tools/bench_compression.py to reproduce them. Retune only with a
 // measurement.
 constexpr uint32_t kDefaultBlockSize = 65536;
@@ -135,6 +135,22 @@ public:
     // source block exactly once as they stream forward, as long as the
     // cache's capacity keeps up with how far ahead a caller reads.
     void read_range(uint64_t logical_offset, size_t len, uint8_t* dst) const;
+
+    // The bulk form of get(): fills `dtm[0..n)` and, unless `cnt` is null,
+    // `cnt[0..n)` for cells `[first_cell, first_cell + n)` of the `stm` plane.
+    //
+    // Exists because get() on a compressed table takes the block cache's mutex
+    // and copies a single byte per call, which is fine for a probe and ruinous
+    // for a scan: mining a whole plane cell by cell measured 14x slower than
+    // the same scan over a raw table, and only ~0.2s of that was the actual
+    // decompression. This costs one lock and one memcpy per block touched
+    // instead of one per byte. Any caller walking a plane should use it; a
+    // caller looking up one position should not bother.
+    //
+    // Pass `cnt = nullptr` when only mate distances are wanted -- it skips the
+    // count plane entirely, which on a compressed table is a whole second set
+    // of blocks to decompress.
+    void read_values(Color stm, uint64_t first_cell, size_t n, uint8_t* dtm, uint8_t* cnt) const;
 
 private:
     TableReader() = default;

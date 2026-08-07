@@ -83,31 +83,51 @@ a length-prefixed JSON metadata blob; what follows the header depends on
   2`. The four planes are treated as one logical byte range, cut into
   fixed-size blocks (**64 KiB by default**, tunable via `--block-size`; see
   below), each compressed independently with zstd (level 3 by default), plus
-  a `uint64` offset index and a small bounded cache of decompressed blocks in
-  the reader (sized off `block_size`, ~4 MB total regardless of the size
-  chosen). Random access is preserved — a probe decompresses at most one
+  a `uint64` offset index and a bounded LRU cache of decompressed blocks in
+  the reader (a byte budget rather than a block count, so it is independent
+  of the `block_size` chosen: **64 MB per table since v0.8.1**, capped at the
+  table's own logical size, and only ever filled with blocks actually
+  touched). Random access is preserved — a probe decompresses at most one
   block, not the whole table.
 
-  **If you actively mine a table, know this before you compress it.**
-  `helpmate mine --count`/`--starts` — which computes each matching
-  position's full optimal-solution count, not just whether it is solvable —
-  runs **~6.5x slower** on a compressed table than on the raw equivalent
-  (measured on a real 462 MiB `KRvkbn` table, see the numbers below), and
-  this holds at *every* block size measured, 16 KiB through 64 KiB. That
-  path evaluates every legal move from a position to count optimal replies,
-  and most quiet moves stay within the *same* material's table at cell
-  indices that have no relationship to move adjacency — so the access
-  pattern is effectively random across the whole table, and nearly every
-  probe misses the reader's small decompressed-block cache and pays a full
-  block decompression to read one byte. A plain sequential scan (`mine`
-  without `--count`/`--starts`) barely notices (**+14%**), and a single
-  `probe` barely notices either (**+9%**) — the cost is specific to the
-  random-access `--count`/`--starts` path. A single warm probe measured 2.94
-  us -> 3.02 us (1.09x), and the raw `get()` path itself costs 18.3 ns ->
-  19.3 ns (+5.5%) simply from one reader having to support both formats. If
-  your workload is `mine --count`/`--starts` over a compressed corpus,
-  budget for ~6.5x there specifically; everything else is single-digit
-  percent.
+  **Mining a compressed table used to be much slower than mining the raw
+  equivalent. As of the fix described below, it is not.** Measured on a real
+  462 MiB `KRvkbn` table (compressed 70.8 MiB), `taskset -c 0-3`, warm:
+
+  | workload | before | after |
+  |---|---|---|
+  | full plane scan (`mine --dtm 14 --count 1`, no early exit) | **14.2x** raw | **2.3x** raw |
+  | solution enumeration (`mine --dtm 8 --theme model --max 200`) | **11.8x** raw | **1.14x** raw |
+  | single warm `probe` | 1.09x raw | unchanged |
+
+  There were two independent causes, and neither was block size:
+
+  - **A plane-wide scan read one byte per cache call.** `mine` walked the
+    DTM and count planes cell by cell through `TableReader::get()`, and on a
+    compressed table each such call takes the block cache's mutex and copies
+    a single byte. Over a whole plane that, not the decompression, was the
+    cost — decompressing both planes accounts for only ~0.2s of the 9.06s
+    the scan took. Scans now go through `TableReader::read_values()`, which
+    pays one lock and one memcpy per block touched.
+  - **The enumeration path's working set did not fit the block cache.**
+    `--theme`/`--starts`/`--ends` evaluate every legal move from a position
+    to count optimal replies, and most quiet moves stay within the *same*
+    material's table at cell indices with no relationship to move adjacency
+    — so the access pattern is effectively random across the whole table.
+    With a 4 MB cache nearly every probe missed and paid a full block
+    decompression to read one byte. Raising the budget to 64 MB (see
+    `kBlockCacheBytes` in `src/core/format/table_file.cpp`) took the theme
+    workload from 10.74s against 0.91s raw, to 0.67s against 0.59s raw. 16
+    MB already reached parity; 64 MB leaves headroom for larger materials.
+    The budget is a ceiling, not a reservation: the LRU only allocates
+    blocks actually touched, and that run peaked at 62 MB RSS in total. It
+    is also capped per table at that table's own logical size, so a closure
+    of small sub-slice tables cannot each claim the full 64 MB.
+
+  Note that the benchmark this section used to quote — `mine KRvkbn --dtm 8
+  --count 1 --max 20000` — **exits as soon as it has 20000 hits and never
+  scans the plane**, so it understated the scan cost by 3x. Use a filter with
+  few or no matches (`--dtm 14`) if you want to time a full scan.
 
   Compression ratio depends heavily on table size and block size: a real
   6-piece plane measured 14.5x at 64 KiB/level 3, and a real 5-piece table
@@ -119,13 +139,13 @@ a length-prefixed JSON metadata blob; what follows the header depends on
   table as evidence something is broken.
 
   **Why the default is 64 KiB, not something smaller — a hypothesis that
-  was tried and rejected.** Smaller blocks are cheaper to decompress per
-  cache miss, so a 16 KiB default was tried on the theory that it would cut
-  the `mine --count`/`--starts` regression above. In isolation the
-  per-block-miss numbers looked promising: 16 KiB/level 3 gives an 11.4x
-  ratio at ~11 us per block miss; 64 KiB/level 3 gives 14.5x at ~38 us —
-  smaller blocks trade ratio for per-miss cost, so 16 KiB became the
-  default for one version.
+  was tried and rejected, and was rejected for the right reason.** Smaller
+  blocks are cheaper to decompress per cache miss, so a 16 KiB default was
+  tried on the theory that it would cut the mining regression above. In
+  isolation the per-block-miss numbers looked promising: 16 KiB/level 3
+  gives an 11.4x ratio at ~11 us per block miss; 64 KiB/level 3 gives 14.5x
+  at ~38 us — smaller blocks trade ratio for per-miss cost, so 16 KiB became
+  the default for one version.
 
   **Measured end to end against a real table, the theory did not pan out,
   and 16 KiB was reverted before release rather than kept on the strength of
@@ -153,17 +173,14 @@ a length-prefixed JSON metadata blob; what follows the header depends on
   block measured 5x at 64 KiB on a slightly different 477 MB table; 6.5x
   here is the same class of regression, on different hardware/table.)
 
-  So the default was moved back to 64 KiB. A plausible explanation for why
-  decompression cost doesn't drive the regression, not yet confirmed by
-  profiling: `BlockCache`'s miss path (`src/core/format/block_cache.cpp`)
-  heap-allocates a fresh buffer and takes a mutex for every miss regardless
-  of block size, and that fixed per-miss bookkeeping cost may dominate over
-  the shrinking pure-decompress time, masking the benefit the isolated
-  block-level numbers predict. Treat that as an open, unconfirmed
-  hypothesis — the next step is profiling `BlockCache`'s miss path, not
-  guessing at another block size. Re-run `tools/bench_compression.py` (or
-  the `mine --count` reproduction above) against your own tables if this
-  matters for your workload.
+  So the default was moved back to 64 KiB — and that measurement has since
+  been explained rather than merely recorded. Block size was never the
+  variable: the regression was per-byte cache access on the scan and a cache
+  too small for the enumeration's working set, both described above and both
+  now fixed. 64 KiB remains the right default because it wins on ratio and
+  the thing it was suspected of costing turned out not to be its fault.
+  Re-run `tools/bench_compression.py` against your own tables if this matters
+  for your workload.
 
 **Older binaries and compressed tables.** A version-3 table is readable only
 by v0.7.5+. A pre-0.7.5 binary that encounters one does not report a generic
@@ -234,11 +251,10 @@ helpmate gen <MATERIAL> [--tables DIR] [--threads N] [--verbose] [--progress] [-
   a readable `/proc/meminfo` the guard is skipped.
 - `--compress`: write every table in this run as block-compressed (version
   3) instead of raw (version 1). Raw remains the default when the flag is
-  omitted. **If you plan to `mine --count`/`--starts` against these tables,
-  know that path runs ~6.5x slower on a compressed table than raw, at any
-  block size** (plain scans +14%, single probes +9% — see [Table
-  format](#table-format) above for the full measured numbers and why),
-  before deciding whether to compress this corpus.
+  omitted. Mining a compressed table is now close to raw speed (1.14x on
+  solution enumeration, 2.3x on a full plane scan — see [Table
+  format](#table-format) above for the measured numbers); the large penalty
+  documented here before v0.8.1 has been fixed.
 - `--block-size N`: only meaningful with `--compress`. Block size **in
   KiB** — `--block-size 64` means 64 KiB (65536 bytes), matching how the
   size/miss-cost trade-off is discussed in [Table format](#table-format)
@@ -597,11 +613,12 @@ A position whose count is saturated (255+) is never enumerated and never
 matches a theme filter; `mine` reports these in its skipped tally rather than
 dropping them silently.
 
-**Theme filters are slow on compressed tables.** Detection forces solution
-enumeration, which is exactly the random-access pattern that defeats the
-block cache — on a compressed table it compounds with the ~6.5x mining
-penalty measured in v0.7.5. Mine against raw tables when running theme
-searches over large material.
+**Theme filters used to be slow on compressed tables.** Detection forces
+solution enumeration, which is a random-access pattern — and with the 4 MB
+block cache shipped through v0.8.0 that defeated the cache entirely,
+costing 11.8x over raw. Raising the cache budget fixed it: the same query
+now measures 1.14x raw. The old advice to mine against raw tables for large
+theme searches no longer applies.
 
 ### Performance
 
@@ -630,10 +647,10 @@ still holds at every depth measured — the cost is enumeration, not the
 detectors — but "under 1%" is specific to the shallow case; expect low
 single digits generally. On scan work alone (subtracting the process floor
 from each `dtm=2` number above) a theme query runs at roughly **10.7x** a
-plain `--dtm` scan. This compounds with the ~6.5x mining penalty on
-block-compressed tables measured in v0.7.5 (see [Table
-format](#table-format) above), so the practical advice stands: mine against
-raw tables for large theme searches.
+plain `--dtm` scan. That is the cost of enumeration itself and applies to
+raw and compressed tables alike; the separate block-compression penalty
+these numbers used to compound with was fixed in v0.8.1 (see [Table
+format](#table-format) above).
 
 ### Two honest limitations
 
@@ -683,9 +700,8 @@ file for writing.
 With `--compress` (since v0.7.5), `compact` switches to a different mode
 entirely: instead of hunting for all-unsolvable tables, it rewrites every
 *raw* table in `DIR` as block-compressed at `--block-size` (default 64 KiB;
-see [Table format](#table-format) and [`gen`](#gen--generate-tables) above —
-in particular, if you actively `mine --count`/`--starts` this table, budget
-for ~6.5x slower there regardless of block size), skipping markers and —
+see [Table format](#table-format) and [`gen`](#gen--generate-tables) above),
+skipping markers and —
 always, not just under `--dry-run` — anything written in the last hour, so a
 generation run still writing into the same directory is never disturbed.
 `--compress` and the marker-compaction mode above are mutually exclusive.
