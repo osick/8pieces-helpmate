@@ -13,8 +13,8 @@ static Solution at(const std::string& fen) {
     return Solution{*b, {}};
 }
 
-TEST_CASE("the registry holds all sixteen entries", "[themes][registry]") {
-    REQUIRE(theme_registry().size() == 16);
+TEST_CASE("the registry holds all seventeen entries", "[themes][registry]") {
+    REQUIRE(theme_registry().size() == 17);
 }
 
 TEST_CASE("every entry has a name, a detector and a doc", "[themes][registry]") {
@@ -86,7 +86,7 @@ TEST_CASE("detect on an empty solution set finds nothing", "[themes][registry]")
 }
 
 TEST_CASE("every entry declares what input it needs", "[themes][registry]") {
-    for (const auto& t : theme_registry()) REQUIRE(t.needs == Needs::Solutions);
+    for (const auto& t : theme_registry()) REQUIRE(t.needs <= Needs::Solutions);
 }
 
 TEST_CASE("any_of finds a theme shown by only ONE of several solutions", "[themes][registry]") {

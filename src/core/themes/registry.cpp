@@ -2,11 +2,17 @@
 
 #include "themes/line_themes.h"
 #include "themes/mate_themes.h"
+#include "themes/position_themes.h"
 
 namespace hm::themes {
 
 const std::vector<ThemeDef>& theme_registry() {
     static const std::vector<ThemeDef> kRegistry = {
+        {"homebase", &is_homebase,
+         "Homebase: every unit stands on a square it occupies in the initial game "
+         "array for its own colour and type. Pawns count anywhere on their home "
+         "rank.",
+         Needs::Position},
         {"pure", &any_of<&is_pure>,
          "Pure mate: every square of the black king's field is unavailable for "
          "exactly one reason, and the king's square is attacked exactly once "
