@@ -111,7 +111,6 @@ unconditionally and run `"[themes]"` — this test MUST fail. Restore. A test
 that passes whether or not the code works is worse than no test: the first
 draft of this very case asserted `== names.end()` over two *empty* solutions,
 which passes trivially and was caught only in review.
-```
 
 - [ ] **Step 2: Run it and watch it fail to compile**
 
