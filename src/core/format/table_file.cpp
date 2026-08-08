@@ -558,8 +558,27 @@ std::optional<TableReader> TableReader::open(const std::string& path, OpenError*
         // retunable per file (up to kMaxBlockSize, enforced above), so "64
         // blocks" is only 4 MB at the default 64 KB block_size -- at a
         // larger, still-legal block_size it would be tens or hundreds of MB.
-        constexpr size_t kBlockCacheBytes = 4 * 1024 * 1024;
-        size_t capacity = std::max<size_t>(1, kBlockCacheBytes / hdr->block_size);
+        //
+        // 4 MB was the original budget and it was far too small. The
+        // enumeration path (mine --theme/--starts/--ends, which walks a
+        // position's optimal solutions) probes cells at effectively random
+        // indices, and its working set did not fit: `mine KRvkbn --dtm 8
+        // --theme model --max 200` took 10.74s against 0.91s on the raw
+        // table, because nearly every probe paid a full block decompression
+        // to read one byte. 16 MB already reaches parity (0.99s); 64 MB
+        // leaves headroom for larger materials. This budget is a ceiling,
+        // not a reservation -- the LRU only ever allocates blocks actually
+        // touched, and the run above peaked at 62 MB RSS in total.
+        //
+        // The ceiling is per TableReader, and a Tablebase holds one reader
+        // per material in a closure, so the aggregate bound is the sum over
+        // loaded slices of min(kBlockCacheBytes, that slice's logical size).
+        // The min() is what keeps a closure of small sub-slice tables from
+        // each claiming the full budget.
+        constexpr size_t kBlockCacheBytes = 64 * 1024 * 1024;
+        const uint64_t logical_bytes = 4 * hdr->plane_size;
+        const size_t budget = static_cast<size_t>(std::min<uint64_t>(kBlockCacheBytes, logical_bytes));
+        size_t capacity = std::max<size_t>(1, budget / hdr->block_size);
         r.cache_ = std::make_unique<BlockCache>(capacity, hdr->block_size);
     }
     return r;
@@ -579,6 +598,25 @@ ValuePair TableReader::get(Color stm, uint64_t cell) const {
         return {pay[o], pay[2 * ps_ + o]};
     }
     return {byte_at(o), byte_at(2 * ps_ + o)};
+}
+
+void TableReader::read_values(Color stm, uint64_t first_cell, size_t n, uint8_t* dtm, uint8_t* cnt) const {
+    if (n == 0) return;
+    // Same discipline as get()'s bounds check, and it has to happen before the
+    // marker short-circuit below so an out-of-range span is an error on every
+    // shape of table, not silently a plane full of DTM_UNSOLVABLE.
+    if (first_cell > ps_ || n > ps_ - first_cell)
+        throw std::out_of_range("TableReader::read_values: [" + std::to_string(first_cell) + ", " +
+                                std::to_string(first_cell + n) + ") out of range (plane size " +
+                                std::to_string(ps_) + ")");
+    if (all_unsolvable()) {  // no payload exists to read; get() answers the same way
+        std::memset(dtm, DTM_UNSOLVABLE, n);
+        if (cnt) std::memset(cnt, 0, n);
+        return;
+    }
+    const uint64_t o = (stm == Color::Black ? ps_ : 0) + first_cell;
+    read_range(o, n, dtm);
+    if (cnt) read_range(2 * ps_ + o, n, cnt);
 }
 
 uint8_t TableReader::byte_at(uint64_t logical) const {

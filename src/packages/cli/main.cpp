@@ -747,15 +747,28 @@ int cmd_compact(const std::vector<std::string>& args, bool compress, bool dry, u
             ++skipped;
             continue;
         }  // already compact
+        // Chunked, and with a null count buffer: this scan only ever looks at
+        // DTM, and on a compressed table asking for counts too would decompress
+        // a second set of blocks for nothing. Cell-at-a-time get() here would
+        // take the block cache's mutex once per byte over the whole plane.
         bool any_solvable = false;
-        for (uint64_t c = 0; c < r->plane_size() && !any_solvable; ++c)
-            for (Color stm : {Color::White, Color::Black}) {
-                uint8_t d = r->get(stm, c).dtm;
-                if (d != DTM_UNSOLVABLE && d != DTM_INVALID) {
-                    any_solvable = true;
-                    break;
+        {
+            constexpr size_t kScanChunk = 1 << 16;
+            const uint64_t plane_cells = r->plane_size();
+            std::vector<uint8_t> dtm(kScanChunk);
+            for (uint64_t base = 0; base < plane_cells && !any_solvable; base += kScanChunk) {
+                const size_t n = (size_t)std::min<uint64_t>(kScanChunk, plane_cells - base);
+                for (Color stm : {Color::White, Color::Black}) {
+                    r->read_values(stm, base, n, dtm.data(), nullptr);
+                    for (size_t i = 0; i < n; ++i)
+                        if (dtm[i] != DTM_UNSOLVABLE && dtm[i] != DTM_INVALID) {
+                            any_solvable = true;
+                            break;
+                        }
+                    if (any_solvable) break;
                 }
             }
+        }
         if (any_solvable) {
             ++skipped;
             continue;
