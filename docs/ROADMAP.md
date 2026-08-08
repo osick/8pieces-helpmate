@@ -119,12 +119,15 @@ new query endpoints. Starts with its own brainstorming session.
   geometric patterns, twins and set play. Permanently impossible: anything
   requiring castling, which the table format never supports.
 
-## Dropped — Windows support
+## Dropped — cross-platform support
 
-**Decided 2026-08-08: no Windows support. Linux is the supported platform;
-macOS is permitted but untested.** This entry previously called for native
-Windows / macOS / WSL builds and a CI release matrix. It is recorded as
-dropped rather than deleted so the survey behind it is not repeated.
+**Decided 2026-08-08: Linux only. No Windows, no macOS.** This entry
+previously called for native Windows / macOS / WSL builds and a CI release
+matrix. It is recorded as dropped rather than deleted so the survey behind it
+is not repeated.
+
+This matches reality rather than changing it: CI is `ubuntu-24.04` on every
+job in both workflows, and no other platform has ever been tested.
 
 What a Windows port would have cost, measured rather than estimated:
 
@@ -147,15 +150,15 @@ toolchain to keep green, libzstd with no system package, MSVC 2022 for the
 C++20 Python extension, and `taskset`/`touch -d`/bash across the Makefile,
 the ctest cases and `tools/`.
 
-### Known gap if macOS is ever taken seriously
+### Why the decision is load-bearing, not just paperwork
 
 `mem_available_bytes()` (`generator.cpp`) reads `/proc/meminfo` and returns
-`nullopt` when it cannot — which on macOS is always. The RAM guard that
-refuses to start a slice whose planes exceed memory is therefore **silently
-skipped on macOS**, exactly where it matters most: a 6-piece slice is 14-28
-GB of resident planes. CI runs Linux only, so this is untested rather than
-broken. Fixing it is small (`sysctl`/`host_statistics64`), but until someone
-does, "runs on macOS" means "builds and probes", not "safe to generate on".
+`nullopt` when it cannot. The RAM guard that refuses to start a slice whose
+planes exceed memory therefore **disappears silently on any non-Linux
+platform** — exactly where it matters most, since a 6-piece slice is 14-28 GB
+of resident planes. Deciding "Linux only" keeps that guard a guarantee
+instead of a coincidence. Any future port must restore it, not inherit the
+`nullopt`.
 
 ## v0.9 — Seven pieces ("humongous tablebases", part 1)
 
