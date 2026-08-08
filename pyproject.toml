@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "helpmate"
-version = "0.8.0"
+version = "0.8.1"
 description = "Helpmate tablebases: cooperative mate distances and solution counts"
 requires-python = ">=3.9"
 license = {text = "MIT"}

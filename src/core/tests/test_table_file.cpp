@@ -733,3 +733,83 @@ TEST_CASE("TableReader::read_range agrees with get() for both raw and compressed
     CHECK_THROWS_AS(z->read_range(total - 1, 5, nullptr), std::out_of_range);
     fs::remove_all(dir);
 }
+
+TEST_CASE("TableReader::read_values agrees with get() cell for cell") {
+    // read_values is what every plane-wide scan goes through (mine, compact),
+    // so it has to be exactly get() in bulk -- including at chunk boundaries
+    // that do not line up with block boundaries, which is the normal case:
+    // plane_size is a product of 462/1806 and 64/48 and rarely divides the
+    // block size.
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_read_values_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KQvk").value();
+    const uint64_t ps = 9999;  // deliberately coprime-ish with every chunk below
+    std::vector<uint8_t> dw(ps), db(ps), cw(ps), cb(ps);
+    for (uint64_t i = 0; i < ps; ++i) {
+        dw[i] = static_cast<uint8_t>((i * 7) % 253);
+        db[i] = static_cast<uint8_t>((i * 11) % 253);
+        cw[i] = static_cast<uint8_t>(i % 251);
+        cb[i] = static_cast<uint8_t>((i + 3) % 251);
+    }
+    std::string raw = (dir / "raw.hm").string();
+    std::string zip = (dir / "zip.hm").string();
+    TableWriter::write(raw, mat, ps, 9, "{}", dw.data(), db.data(), cw.data(), cb.data());
+    TableWriter::write_compressed(zip, mat, ps, 9, "{}", dw.data(), db.data(), cw.data(), cb.data(), 4096);
+
+    auto r = TableReader::open(raw);
+    auto z = TableReader::open(zip);
+    REQUIRE(r.has_value());
+    REQUIRE(z.has_value());
+
+    for (const TableReader* t : {&*r, &*z}) {
+        for (size_t chunk : {size_t(1), size_t(7), size_t(4096), size_t(5000), size_t(ps)}) {
+            for (Color stm : {Color::White, Color::Black}) {
+                std::vector<uint8_t> d(chunk), c(chunk);
+                for (uint64_t base = 0; base < ps; base += chunk) {
+                    const size_t n = (size_t)std::min<uint64_t>(chunk, ps - base);
+                    t->read_values(stm, base, n, d.data(), c.data());
+                    for (size_t i = 0; i < n; ++i) {
+                        ValuePair want = t->get(stm, base + i);
+                        REQUIRE(d[i] == want.dtm);
+                        REQUIRE(c[i] == want.count);
+                    }
+                }
+            }
+        }
+        // A null count buffer must leave DTM identical, not shift the plane.
+        std::vector<uint8_t> d(100);
+        t->read_values(Color::Black, 500, 100, d.data(), nullptr);
+        for (size_t i = 0; i < 100; ++i) REQUIRE(d[i] == t->get(Color::Black, 500 + i).dtm);
+        // Out of range is an error on both shapes, and n == 0 is a no-op.
+        std::vector<uint8_t> scratch(8);
+        CHECK_THROWS_AS(t->read_values(Color::White, ps - 1, 5, scratch.data(), scratch.data()),
+                        std::out_of_range);
+        CHECK_THROWS_AS(t->read_values(Color::White, ps + 1, 1, scratch.data(), nullptr), std::out_of_range);
+        CHECK_NOTHROW(t->read_values(Color::White, ps, 0, nullptr, nullptr));
+    }
+    fs::remove_all(dir);
+}
+
+TEST_CASE("read_values on a marker table matches get() without touching a payload") {
+    namespace fs = std::filesystem;
+    fs::path dir = fs::temp_directory_path() / ("hm_read_values_marker_" + std::to_string(::getpid()));
+    fs::remove_all(dir);
+    fs::create_directories(dir);
+    Material mat = Material::parse("KBvkb").value();
+    const uint64_t ps = 1234;
+    std::string path = (dir / "m.hm").string();
+    TableWriter::write_unsolvable(path, mat, ps, "{}");
+    auto t = TableReader::open(path);
+    REQUIRE(t.has_value());
+    REQUIRE(t->all_unsolvable());
+    std::vector<uint8_t> d(ps), c(ps);
+    t->read_values(Color::White, 0, ps, d.data(), c.data());
+    for (uint64_t i = 0; i < ps; ++i) {
+        REQUIRE(d[i] == DTM_UNSOLVABLE);
+        REQUIRE(c[i] == 0);
+    }
+    CHECK_THROWS_AS(t->read_values(Color::White, ps, 1, d.data(), c.data()), std::out_of_range);
+    fs::remove_all(dir);
+}

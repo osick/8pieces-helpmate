@@ -516,9 +516,9 @@ in this table while `--starts 1` matches only 2,977, so the theme query finds
 its ten hits far earlier in the sweep. Measured with `--max 100000` on both.
 Take these as this run's numbers on this material, not a universal ratio.
 
-This compounds with the block-compression mining penalty measured in v0.7.5
-(`mine --count`/`--starts` runs ~6.5x slower on a compressed table,
-regardless of block size — see [Table format](#table-format) above): a
+This is the cost of enumeration itself, on raw and compressed tables alike.
+The separate block-compression mining penalty measured in v0.7.5 was fixed
+in v0.8.1 (see [Table format](#table-format) above): a
 freshly generated, page-cache-resident `KQvk` (146 KB) showed no measurable
 difference between raw and compressed (163.0 ms vs 170.8 ms, both `--theme
 mirror --dtm 6`) — too small to show the effect the 462 MiB `KRvkbn`
@@ -599,10 +599,10 @@ the all-unsolvable marker: a **block-compressed** table (`version = 3`,
 `encoding = 2`) that cuts the four planes into fixed-size blocks (64 KiB by
 default, tunable per run with `--block-size`) compressed independently with
 zstd, keeping random-access probing cheap while shrinking real multi-piece
-tables by 9-14x on disk. Compressing a table you actively mine with
-`helpmate mine --count`/`--starts` costs ~6.5x on that path, regardless of
-block size (a 16 KiB default was tried and measured to help nothing there
-while compressing worse) — see [docs/USAGE.md's Table format
+tables by 9-14x on disk. Mining a compressed table costs 1.14x raw on
+solution enumeration and 2.3x on a full plane scan as of v0.8.1 — the much
+larger penalty documented through v0.8.0 was two fixable bugs, not a
+property of compression; see [docs/USAGE.md's Table format
 section](docs/USAGE.md#table-format) for the measured trade-off. It's opt-in
 (`gen --compress`, `compact --compress`), requires a v0.7.5+ reader, and an
 already-compressed table can be re-blocked to a new `--block-size` in place

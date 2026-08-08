@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.8.1] - 2026-08-07
+
+### Fixed
+
+- **Mining a block-compressed table is no longer several times slower than
+  mining the raw equivalent.** Measured on a real 462 MiB `KRvkbn` (70.8 MiB
+  compressed), `taskset -c 0-3`, warm: a full plane scan went from **14.2x
+  raw to 2.3x**, and solution enumeration (`mine --dtm 8 --theme model
+  --max 200`) from **11.8x raw to 1.14x**. Two independent causes, neither
+  of them block size — which is what the v0.7.5 experiment had suspected and
+  correctly acquitted:
+
+  - **`mine`'s plane scan read one byte per block-cache call.** It walked
+    the DTM and count planes cell by cell through `TableReader::get()`, and
+    on a compressed table each such call takes the cache mutex and copies a
+    single byte. Over a whole plane that, not the decompression, was the
+    cost: decompressing both planes accounts for ~0.2s of the 9.06s the scan
+    took. New `TableReader::read_values()` reads a span of cells with one
+    lock and one memcpy per block touched; `mine` and `compact`'s
+    all-unsolvable scan both use it. `compact`'s scan additionally passes a
+    null count buffer, so it no longer decompresses the count planes it
+    never reads.
+  - **The block cache was smaller than the enumeration working set.**
+    `--theme`/`--starts`/`--ends` probe cells at effectively random indices,
+    and with the 4 MB budget shipped through v0.8.0 nearly every probe paid
+    a full block decompression to read one byte. The budget is now 64 MB,
+    capped per table at its own logical size so a closure of small
+    sub-slices cannot each claim the full amount. It is a ceiling, not a
+    reservation — the LRU only allocates blocks actually touched, and the
+    theme run above peaked at 62 MB RSS in total. 16 MB already reached
+    parity; 64 MB leaves headroom for larger materials.
+
+  Verified byte-identical: `mine` output over raw and compressed tables
+  matches for `--dtm`/`--count`, `--starts` and `--theme` queries, and the
+  row counts match the generator's own `uniqueness` histogram in the stats
+  sidecar for five different `(dtm, count)` pairs on `KRvkbn`.
+
+### Changed
+
+- The `~6.5x` mining penalty documented in v0.7.5 is withdrawn from
+  `README.md` and `docs/USAGE.md`. Its benchmark
+  (`mine KRvkbn --dtm 8 --count 1 --max 20000`) **exits as soon as it has
+  20000 hits and never scans the plane**, understating the real scan cost by
+  3x; a full scan measured 14.2x. The advice to mine against raw tables for
+  large theme searches no longer applies.
+
 ## [0.8.0] - 2026-08-03
 
 ### Added
