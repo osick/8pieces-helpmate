@@ -513,7 +513,7 @@ In `src/core/probe/tablebase.cpp`, in `mine`, replace the detector-resolution bl
 
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
     // Enumerate only when something actually needs the solutions. A query whose
-    // themes read only the diagram runs at scan speed AND answers on saturated
+    // themes read only the diagram skips enumeration AND answers on saturated
     // positions, where enumeration is impossible and every other theme gives up.
     const bool want_solutions = want_shape || (!dets.empty() && need == themes::Needs::Solutions);
 ```
@@ -560,7 +560,7 @@ echo "--- homebase must now be fast and must not skip ---"
 taskset -c 0-3 /usr/bin/time -f "%e s" ./build/helpmate mine KRvkbn --dtm 8 --theme homebase --max 200 --tables ~/tb
 taskset -c 0-3 /usr/bin/time -f "%e s" ./build/helpmate mine KRvkbn --dtm 8 --theme model --max 200 --tables ~/tb >/dev/null
 ```
-Expected: the six hashes match Task 1's baseline; `homebase` runs at roughly plain-scan speed and prints no "skipped ... saturated" note, while `model` still does.
+Expected: the six hashes match Task 1's baseline; `homebase` prints no "skipped ... saturated" note, while `model` still does. `homebase` will NOT be sub-second -- it still decodes and materialises every candidate, which a diagram theme cannot avoid. Record the measured time; do not round it into "fast".
 
 - [ ] **Step 6: Gate and commit**
 
@@ -576,7 +576,7 @@ them. It now takes the maximum \`needs\` across the requested themes and
 enumerates only for Needs::Solutions, and the saturation guard applies only
 when solutions are wanted.
 
-So --theme homebase runs at scan speed and answers on saturated positions.
+So --theme homebase skips enumeration and answers on saturated positions.
 That is a capability difference, not a speed-up.
 
 Verified the sixteen solution-needing themes produce byte-identical output on
