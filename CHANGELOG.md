@@ -6,6 +6,52 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.8.2] - 2026-08-08
+
+### Added
+
+- **`helpmate stats` with no MATERIAL summarises a whole table directory** —
+  what is on disk, in what format, and what is in it. Covers the roadmap's
+  `helpmate list <dir>` backlog item. Header fields (format, block size,
+  plane size, `max_dtm`) come from each `.hm`; cell counts come from the
+  `<Material>.stats.json` sidecars. Reports files by format and piece count,
+  on-disk size, the whole-corpus compression ratio against `4 × plane_size`
+  of logical planes, the invalid/unsolvable/solvable/unique breakdown, the
+  deepest mate, the largest tables, and the generator versions that produced
+  them. `helpmate stats <MATERIAL>` is unchanged.
+
+  Three deliberate honesty properties, because a summary that quietly
+  under-reports is worse than no summary: markers are counted separately
+  (they have no payload to measure); a table whose sidecar is missing still
+  contributes its size and format but is excluded from the cell breakdown,
+  **and the header says how many such tables there were**; and an empty or
+  nonexistent `--tables` is an error (exit 3), not a report of a zero-table
+  corpus.
+
+- **`tools/compress-corpus.sh`** — converts a directory of raw tables into
+  compressed ones in a *different* directory. `compact --compress` only works
+  in place, so there was previously no way to do this without moving files by
+  hand. Stages one table at a time on the destination's filesystem, so peak
+  extra disk is one table plus its output rather than the size of the corpus.
+  The source is only ever read and nothing is deleted, and it applies the
+  same one-hour rule `compact --compress` uses, so a table a generation run
+  is still writing is never even opened.
+
+### Changed
+
+- `--block-size`'s CLI help no longer repeats the `~6.5x` mining claim
+  withdrawn in 0.8.1; it points at `docs/USAGE.md` for the measured
+  ratio/speed trade-off instead.
+- Query acceleration (indexing so `mine` stops scanning) is recorded in
+  `docs/ROADMAP.md` and specified in
+  `docs/superpowers/specs/2026-08-08-query-acceleration-design.md`, and is
+  **not scheduled**. The spec exists so the research behind it is not
+  repeated: no database should hold the cell array (SQLite, DuckDB, Parquet,
+  RocksDB, LMDB and ClickHouse were each measured out — the key is already
+  the array offset, and each charges 16-19 bytes of per-row structure for a
+  4-byte row), and zone maps and skip indexes are dead here because matching
+  cells do not cluster.
+
 ## [0.8.1] - 2026-08-07
 
 ### Fixed

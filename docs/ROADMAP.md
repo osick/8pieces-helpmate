@@ -167,6 +167,31 @@ workloads) vs extending ChessMG — outcome decides everything downstream.
 
 ## Backlog (unscheduled)
 
+### Query acceleration — indexing so `mine` stops scanning
+
+**Goal:** selective mining queries stop reading a whole plane. 97.1% of the
+corpus's 180,864 `(dtm, count)` buckets match under 0.1% of a plane; we read
+100% of it to find them.
+
+- Design: **not scheduled** —
+  `docs/superpowers/specs/2026-08-08-query-acceleration-design.md`
+- Settled by that design, and worth not re-litigating: **no database holds a
+  cell.** SQLite, DuckDB, Parquet, RocksDB, LMDB, ClickHouse were all
+  researched and measured out — the key is already the array offset, so there
+  is nothing to look up, and each charges 16-19 bytes of per-row structure for
+  a 4-byte row. Zone maps and skip indexes are dead here too: matching cells
+  do not cluster (measured). Syzygy, Nalimov, Gaviota and Lomonosov ship point
+  probers with no query layer at all, so there is no prior art to copy.
+- Three layers, in order: (0) defer the count plane in `mine`'s scan and
+  vectorise the predicate loop — no index, no new artifacts, and it speeds up
+  the queries no index could help; (1) SQLite catalogue and planner built from
+  the `uniqueness` histograms the generator already writes and nothing reads;
+  (2) a tiered index whose granularity follows selectivity.
+- Layers 1 and 2 are deliberately gated on Layer 0's measurements, so their
+  thresholds get set against an optimised scan rather than today's.
+- Subsumes the `helpmate list <dir>` item below (Layer 1's catalogue) and the
+  live-result-count problem the query-surface concept could not solve.
+
 ### `helpmate list <dir>` — what is actually on disk
 
 **Goal:** the local equivalent of the API's `/v1/materials`: material, table

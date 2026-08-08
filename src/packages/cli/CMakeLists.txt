@@ -340,3 +340,30 @@ set_tests_properties(cli_compact_reblock_noop PROPERTIES
     DEPENDS cli_compact_reblock)
 set_tests_properties(cli_probe_reblocked PROPERTIES
     PASS_REGULAR_EXPRESSION "dtm=2 .*h#1.*count=4" DEPENDS cli_compact_reblock_noop)
+
+# `stats` with no MATERIAL summarises every table in --tables DIR. CLI_TT holds
+# the KQvk closure gen wrote for cli_gen: KQvk (a real table) plus Kvk (an
+# all-unsolvable marker), which is exactly the mix the summary has to separate.
+add_test(NAME cli_stats_corpus COMMAND helpmate stats --tables ${CLI_TT})
+set_tests_properties(cli_stats_corpus PROPERTIES
+    PASS_REGULAR_EXPRESSION "all-unsolvable marker" DEPENDS cli_gen)
+# The cell breakdown must be present and grouped, not raw digits.
+add_test(NAME cli_stats_corpus_cells COMMAND helpmate stats --tables ${CLI_TT})
+set_tests_properties(cli_stats_corpus_cells PROPERTIES
+    PASS_REGULAR_EXPRESSION "unique \\(count==1\\)" DEPENDS cli_gen)
+# A directory with no .hm at all is an error, not an empty report claiming a
+# zero-table corpus -- the likeliest cause is a mistyped --tables.
+add_test(NAME cli_stats_corpus_empty_dir COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=stats --tables ${CMAKE_CURRENT_BINARY_DIR}"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=no readable"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+# And a --tables that isn't a directory must say so rather than report nothing.
+add_test(NAME cli_stats_corpus_not_a_dir COMMAND ${CMAKE_COMMAND}
+         -DHELPMATE=$<TARGET_FILE:helpmate>
+         "-DARGS=stats --tables ${CLI_TT}/KQvk.hm"
+         -DEXPECTED_RC=3
+         "-DPATTERN1=not a directory"
+         -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/assert_exit_and_output.cmake)
+set_tests_properties(cli_stats_corpus_not_a_dir PROPERTIES DEPENDS cli_gen)

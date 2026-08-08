@@ -4,7 +4,9 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <nlohmann/json.hpp>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -27,7 +29,7 @@ void usage() {
                  "               [--progress] [--force-ram] [--compress] [--block-size N]\n"
                  "  helpmate probe <FEN> [--tables DIR]\n"
                  "  helpmate line <FEN> [--tables DIR] [--all] [--max N]\n"
-                 "  helpmate stats <MATERIAL> [--tables DIR]\n"
+                 "  helpmate stats [MATERIAL] [--tables DIR]\n"
                  "  helpmate mine <MATERIAL> --dtm D [--count C] [--starts N] [--ends N]\n"
                  "                           [--theme NAME]...\n"
                  "               [--max N] [--tables DIR]\n"
@@ -50,8 +52,11 @@ void usage() {
                  "  line   Print one optimal mating line from FEN as SAN moves. With\n"
                  "         --all, print every optimal line (one per output line), capped\n"
                  "         at --max.\n"
-                 "  stats  Print the generation-time statistics JSON for MATERIAL (cell\n"
-                 "         counts, dtm histogram, deepest positions, ...).\n"
+                 "  stats  With MATERIAL, print its generation-time statistics JSON (cell\n"
+                 "         counts, dtm histogram, deepest positions, ...). With no\n"
+                 "         MATERIAL, print a summary of every table in --tables DIR:\n"
+                 "         formats and sizes, cell breakdown, deepest mate, largest\n"
+                 "         tables.\n"
                  "  mine   Print FENs of positions in MATERIAL matching --dtm exactly (and,\n"
                  "         if given, --count exactly), up to --max, one per line.\n"
                  "  themes List every theme detector this build knows, each with the\n"
@@ -77,8 +82,8 @@ void usage() {
                  "  --compress     gen: write block-compressed tables (v0.7.5+ readers only)\n"
                  "                 compact: rewrite existing tables as block-compressed\n"
                  "  --block-size N gen/compact --compress: block size in KiB (default 64,\n"
-                 "                 i.e. 64 KiB -- mine --count/--starts runs ~6.5x slower on a\n"
-                 "                 compressed table at any block size; see docs/USAGE.md).\n"
+                 "                 i.e. 64 KiB; see docs/USAGE.md for the measured\n"
+                 "                 ratio/speed trade-off at other sizes).\n"
                  "                 Must be >= 4 (4 KiB) and <= 16384 (16 MiB). compact\n"
                  "                 --compress can re-block an already-compressed table to a\n"
                  "                 new size in place, without regenerating it.\n"
@@ -104,6 +109,7 @@ void usage() {
                  "  helpmate probe \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt\n"
                  "  helpmate line  \"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1\" --tables tt --all\n"
                  "  helpmate stats KQvk --tables tt\n"
+                 "  helpmate stats --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --count 1 --max 5 --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --count 4 --starts 2 --ends 4 --tables tt\n"
                  "  helpmate mine KQvk --dtm 2 --theme mirror --max 5 --tables tt\n"
@@ -271,12 +277,218 @@ int cmd_line(const std::vector<std::string>& pos, const std::string& tables, boo
     return 0;
 }
 
-int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
-    if (pos.empty()) {
-        std::cerr << "error: stats needs a MATERIAL argument (e.g. KQvk)\n\n";
-        usage();
+// One row of the corpus summary. Header fields come from the .hm itself; the
+// cell breakdown comes from the <Material>.stats.json sidecar, which is
+// generation-time truth and cheap to read. A table with no sidecar still
+// contributes its size and format -- it just cannot contribute cell counts,
+// and the summary says how many such tables it found rather than quietly
+// reporting a smaller corpus.
+static std::string human_bytes(uint64_t n);  // defined with the compact commands below
+
+// Cell counts here run to eleven digits; unseparated they are unreadable.
+static std::string group(uint64_t n) {
+    std::string s = std::to_string(n), out;
+    int c = 0;
+    for (int i = (int)s.size() - 1; i >= 0; --i) {
+        out.push_back(s[(size_t)i]);
+        if (++c % 3 == 0 && i) out.push_back(',');
+    }
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+static std::string pct_of(uint64_t part, uint64_t whole) {
+    char b[32];
+    std::snprintf(b, sizeof b, "%.1f%%", whole ? 100.0 * double(part) / double(whole) : 0.0);
+    return b;
+}
+
+static std::string ratio_x(uint64_t from, uint64_t to) {
+    char b[32];
+    std::snprintf(b, sizeof b, "%.2fx", to ? double(from) / double(to) : 0.0);
+    return b;
+}
+
+struct CorpusEntry {
+    std::string stem;
+    int pieces = 0;
+    bool marker = false;
+    bool compressed = false;
+    uint32_t block_size = 0;
+    uint64_t plane_size = 0;
+    int max_dtm = -1;  // -1 when nothing is solvable
+    uint64_t file_bytes = 0;
+    bool has_sidecar = false;
+    uint64_t invalid = 0, unsolvable = 0, solvable = 0, unique = 0;
+    std::string generator_version;
+};
+
+static int piece_count(const std::string& material) {
+    int n = 0;
+    for (char c : material)
+        if (c != 'v') ++n;
+    return n;
+}
+
+static int cmd_stats_corpus(const std::string& tables) {
+    namespace fs = std::filesystem;
+    if (!fs::is_directory(tables)) {
+        std::cerr << "error: not a directory: " << tables << "\n";
         return 3;
     }
+    std::vector<CorpusEntry> es;
+    int unreadable = 0, future = 0;
+    for (auto& e : fs::directory_iterator(tables)) {
+        if (e.path().extension() != ".hm") continue;
+        TableReader::OpenError oe = TableReader::OpenError::None;
+        auto r = TableReader::open(e.path().string(), &oe);
+        if (!r) {
+            if (oe == TableReader::OpenError::UnsupportedVersion) ++future;
+            else ++unreadable;
+            continue;
+        }
+        CorpusEntry c;
+        c.stem = e.path().stem().string();
+        c.pieces = piece_count(r->material_name());
+        c.marker = r->all_unsolvable();
+        c.compressed = r->is_compressed();
+        c.block_size = r->block_size();
+        c.plane_size = r->plane_size();
+        c.max_dtm = r->max_dtm() > DTM_MAX ? -1 : (int)r->max_dtm();
+        c.file_bytes = fs::file_size(e.path());
+
+        std::ifstream sc(tables + "/" + c.stem + ".stats.json");
+        if (sc) {
+            try {
+                nlohmann::json j;
+                sc >> j;
+                c.has_sidecar = true;
+                c.generator_version = j.value("generator_version", "");
+                for (const char* side : {"wtm", "btm"}) {
+                    c.invalid += j["cells"]["invalid"].value(side, 0ull);
+                    c.unsolvable += j["cells"]["unsolvable"].value(side, 0ull);
+                    for (auto& [dtm, hist] : j["uniqueness"][side].items()) c.unique += hist.value("1", 0ull);
+                }
+                c.solvable = 2 * c.plane_size - c.invalid - c.unsolvable;
+            } catch (const std::exception&) {
+                c.has_sidecar = false;  // a malformed sidecar is a missing one
+            }
+        }
+        es.push_back(std::move(c));
+    }
+    if (es.empty()) {
+        std::cerr << "error: no readable .hm tables in " << tables << "\n";
+        return 3;
+    }
+    std::sort(es.begin(), es.end(),
+              [](const CorpusEntry& a, const CorpusEntry& b) { return a.file_bytes > b.file_bytes; });
+
+    int tables_n = 0, markers_n = 0, comp_n = 0, raw_n = 0, no_sidecar = 0;
+    uint64_t bytes = 0, logical = 0, comp_bytes = 0, comp_logical = 0;
+    uint64_t cells = 0, invalid = 0, unsolvable = 0, solvable = 0, unique = 0;
+    std::map<int, int> by_pieces;
+    std::map<uint32_t, int> by_block;
+    std::set<std::string> gens;
+    int deepest = -1;
+    std::string deepest_material;
+    for (const auto& c : es) {
+        bytes += c.file_bytes;
+        by_pieces[c.pieces]++;
+        if (c.marker) {
+            ++markers_n;
+        } else {
+            ++tables_n;
+            logical += 4 * c.plane_size;
+            if (c.compressed) {
+                ++comp_n;
+                by_block[c.block_size]++;
+                comp_bytes += c.file_bytes;
+                comp_logical += 4 * c.plane_size;
+            } else {
+                ++raw_n;
+            }
+        }
+        if (c.has_sidecar) {
+            cells += 2 * c.plane_size;
+            invalid += c.invalid;
+            unsolvable += c.unsolvable;
+            solvable += c.solvable;
+            unique += c.unique;
+            if (!c.generator_version.empty()) gens.insert(c.generator_version);
+        } else if (!c.marker) {
+            ++no_sidecar;
+        }
+        if (c.max_dtm > deepest) {
+            deepest = c.max_dtm;
+            deepest_material = c.stem;
+        }
+    }
+
+    std::cout << tables << "\n\n";
+    std::cout << "Files\n";
+    std::cout << "  " << es.size() << " readable .hm: " << tables_n << " table(s), " << markers_n
+              << " all-unsolvable marker(s)\n";
+    std::cout << "  format: " << comp_n << " block-compressed (v3)";
+    for (auto& [bs, n] : by_block) std::cout << " [" << n << " at " << bs / 1024 << " KiB]";
+    std::cout << ", " << raw_n << " raw (v1)\n";
+    std::cout << "  on disk: " << human_bytes(bytes) << "\n";
+    if (comp_logical) {
+        std::cout << "  compressed tables: " << human_bytes(comp_bytes) << " on disk from "
+                  << human_bytes(comp_logical) << " of planes (" << ratio_x(comp_logical, comp_bytes)
+                  << ")\n";
+    }
+    if (raw_n) {
+        std::cout << "  " << raw_n << " raw table(s) could be compressed"
+                  << " -- see tools/compress-corpus.sh\n";
+    }
+    std::cout << "  by piece count:";
+    for (auto& [p, n] : by_pieces) std::cout << "  " << p << ":" << n;
+    std::cout << "\n";
+    if (future) std::cout << "  " << future << " written by a newer helpmate (upgrade this build)\n";
+    if (unreadable) std::cout << "  " << unreadable << " unreadable\n";
+
+    std::cout << "\nPositions (from " << (es.size() - no_sidecar - unreadable - future) << " sidecar(s)";
+    if (no_sidecar) std::cout << "; " << no_sidecar << " table(s) have none, excluded";
+    std::cout << ")\n";
+    auto row = [](const char* label, uint64_t n, const std::string& of) {
+        char buf[128];
+        std::snprintf(buf, sizeof buf, "  %-22s %18s  %7s\n", label, group(n).c_str(), of.c_str());
+        std::cout << buf;
+    };
+    row("plane cells", cells, "");
+    row("invalid", invalid, pct_of(invalid, cells));
+    row("unsolvable", unsolvable, pct_of(unsolvable, cells));
+    row("solvable", solvable, pct_of(solvable, cells));
+    row("unique (count==1)", unique, pct_of(unique, solvable));
+    std::cout << "  (percentages are of plane cells, except unique, which is of solvable)\n";
+
+    std::cout << "\nMate length\n";
+    if (deepest >= 0) {
+        std::cout << "  deepest: dtm " << deepest << " ("
+                  << Tablebase::h_notation((uint8_t)deepest, deepest % 2 ? Color::White : Color::Black)
+                  << ") in " << deepest_material << "\n";
+    } else {
+        std::cout << "  no solvable position in any table\n";
+    }
+
+    std::cout << "\nLargest tables\n";
+    for (size_t i = 0; i < es.size() && i < 5; ++i) {
+        std::cout << "  " << es[i].stem << "  " << human_bytes(es[i].file_bytes);
+        if (es[i].compressed) std::cout << "  (compressed, " << es[i].block_size / 1024 << " KiB blocks)";
+        else if (es[i].marker) std::cout << "  (marker)";
+        else std::cout << "  (raw)";
+        std::cout << "\n";
+    }
+    if (!gens.empty()) {
+        std::cout << "\nGenerated by:";
+        for (const auto& g : gens) std::cout << " " << g;
+        std::cout << "\n";
+    }
+    return 0;
+}
+
+int cmd_stats(const std::vector<std::string>& pos, const std::string& tables) {
+    if (pos.empty()) return cmd_stats_corpus(tables);
     auto m = Material::parse(pos[0]);
     if (!m) {
         std::cerr << "error: not a valid material string: \"" << pos[0] << "\"\n";
