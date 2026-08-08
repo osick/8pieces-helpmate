@@ -1,8 +1,10 @@
 # Query acceleration — Design
 
 Date: 2026-08-08
-Status: **Layer 0 approved for implementation. Layers 1 and 2 are designed but
-explicitly conditional on Layer 0's measurements.**
+Status: **Not scheduled.** Deferred to the Backlog by the user on 2026-08-08,
+after the design was agreed. Nothing here is approved for implementation. When
+it is picked up, Layer 0 goes first and Layers 1 and 2 stay conditional on its
+measurements — that sequencing is the one decision already made.
 Origin: brainstorming session of 2026-08-08, opened by the user's proposal of a
 database layer (`helpmate gen --todb`, `helpmate mine --config`) with
 performance as the stated primary motivation.
