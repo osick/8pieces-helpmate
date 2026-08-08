@@ -73,15 +73,44 @@ TEST_CASE("every entry declares what input it needs", "[themes][registry]") {
     for (const auto& t : theme_registry()) REQUIRE(t.needs == Needs::Solutions);
 }
 
-TEST_CASE("any_of gives the same answer detect() used to give", "[themes][registry]") {
-    // Two solutions, only the second promoting: `any` must find it.
+TEST_CASE("any_of finds a theme shown by only ONE of several solutions",
+          "[themes][registry]") {
+    // This is the `any` path that any_of<> now owns, so the test must be able
+    // to fail if any_of<> is broken. Solution 1 shows nothing; solution 2
+    // really promotes -- built from a legal move the engine produced, never a
+    // Ply typed by hand.
     auto b = Board::from_fen("8/P6k/8/8/8/8/8/K7 w - - 0 1");
     REQUIRE(b);
-    std::vector<Solution> sols{Solution{*b, {}}, Solution{*b, {}}};
+    const Move* promo = nullptr;
+    auto legal = b->legal_moves();
+    for (const auto& m : legal)
+        if (m.promotion() == PieceType::Queen) promo = &m;
+    REQUIRE(promo != nullptr);  // the fixture FEN really does allow a promotion
+
+    Solution plain{*b, {}};
+    Solution promoting{*b, {}};
+    Ply p;
+    p.piece = {Color::White, PieceType::Pawn};
+    p.from = promo->from;
+    p.to = promo->to;
+    p.promotion = promo->promotion();
+    Board after = *b;
+    after.make(*promo);
+    p.after = after;
+    promoting.plies.push_back(p);
+
+    std::vector<Solution> sols{plain, promoting};
     ThemeInput in{*b, std::nullopt, sols};
     auto names = detect(in);
-    REQUIRE(std::find(names.begin(), names.end(), "promotion") == names.end());
+    REQUIRE(std::find(names.begin(), names.end(), "promotion") != names.end());
 }
+```
+
+**Then prove the test can fail.** Temporarily make `any_of<>` return `false`
+unconditionally and run `"[themes]"` — this test MUST fail. Restore. A test
+that passes whether or not the code works is worse than no test: the first
+draft of this very case asserted `== names.end()` over two *empty* solutions,
+which passes trivially and was caught only in review.
 ```
 
 - [ ] **Step 2: Run it and watch it fail to compile**
