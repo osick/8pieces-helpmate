@@ -119,12 +119,43 @@ new query endpoints. Starts with its own brainstorming session.
   geometric patterns, twins and set play. Permanently impossible: anything
   requiring castling, which the table format never supports.
 
-## Unscheduled — Cross-platform CLI builds
+## Dropped — Windows support
 
-Native Windows / macOS / WSL builds and a CI release matrix; formerly bundled
-into v0.7. Independent of everything else.
+**Decided 2026-08-08: no Windows support. Linux is the supported platform;
+macOS is permitted but untested.** This entry previously called for native
+Windows / macOS / WSL builds and a CI release matrix. It is recorded as
+dropped rather than deleted so the survey behind it is not repeated.
 
-- Open questions: Windows toolchain (MSVC vs MinGW) for the C++20 core.
+What a Windows port would have cost, measured rather than estimated:
+
+- **All POSIX usage sits in one file**, `src/core/format/table_file.cpp`
+  (`mmap`, `munmap`, `madvise`, `sysconf`, `open`/`fstat`/`close`). Nothing
+  else in the tree needs porting.
+- **The vendored move generator is portable** — ChessMG has zero
+  `__builtin_*` and zero POSIX includes, and neither does our own code. That
+  was the expected blocker and it is not one.
+- **Only the mapping itself is correctness-critical.** `madvise` appears
+  solely in `SequentialPageReleaser`, which bounds RSS during conversion; a
+  port could no-op it and stay correct at the cost of memory. The real work
+  is `CreateFileMapping`/`MapViewOfFile` behind an interface.
+- Windows' case-insensitive filesystem **cannot** collide two materials:
+  case encodes colour, but `v` is the separator and is not a piece letter, so
+  a case-folded name still splits unambiguously.
+
+So the code was never the hard part. The cost was the tail: a second
+toolchain to keep green, libzstd with no system package, MSVC 2022 for the
+C++20 Python extension, and `taskset`/`touch -d`/bash across the Makefile,
+the ctest cases and `tools/`.
+
+### Known gap if macOS is ever taken seriously
+
+`mem_available_bytes()` (`generator.cpp`) reads `/proc/meminfo` and returns
+`nullopt` when it cannot — which on macOS is always. The RAM guard that
+refuses to start a slice whose planes exceed memory is therefore **silently
+skipped on macOS**, exactly where it matters most: a 6-piece slice is 14-28
+GB of resident planes. CI runs Linux only, so this is untested rather than
+broken. Fixing it is small (`sysctl`/`host_statistics64`), but until someone
+does, "runs on macOS" means "builds and probes", not "safe to generate on".
 
 ## v0.9 — Seven pieces ("humongous tablebases", part 1)
 
