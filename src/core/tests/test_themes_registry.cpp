@@ -52,15 +52,22 @@ TEST_CASE("detect uses any semantics across solutions", "[themes][registry]") {
     auto model_mate = at("R5k1/8/6K1/8/8/8/8/8 b - - 0 1");
     auto not_mate = at("8/8/8/8/8/8/8/K6k w - - 0 1");
 
-    auto only_second = detect({not_mate, model_mate});
+    std::vector<Solution> both{not_mate, model_mate};
+    ThemeInput both_in{model_mate.start, std::nullopt, both};
+    auto only_second = detect(both_in);
     REQUIRE(std::find(only_second.begin(), only_second.end(), "model") != only_second.end());
 
-    auto neither = detect({not_mate});
+    std::vector<Solution> one{not_mate};
+    ThemeInput one_in{not_mate.start, std::nullopt, one};
+    auto neither = detect(one_in);
     REQUIRE(std::find(neither.begin(), neither.end(), "model") == neither.end());
 }
 
 TEST_CASE("detect returns names in registry order", "[themes][registry]") {
-    auto names = detect({at("R5k1/8/6K1/8/8/8/8/8 b - - 0 1")});
+    auto mate = at("R5k1/8/6K1/8/8/8/8/8 b - - 0 1");
+    std::vector<Solution> sols{mate};
+    ThemeInput in{mate.start, std::nullopt, sols};
+    auto names = detect(in);
     size_t prev = 0;
     for (const auto& n : names) {
         size_t idx = 0;
@@ -71,5 +78,23 @@ TEST_CASE("detect returns names in registry order", "[themes][registry]") {
 }
 
 TEST_CASE("detect on an empty solution set finds nothing", "[themes][registry]") {
-    REQUIRE(detect({}).empty());
+    auto b = Board::from_fen("8/8/8/8/8/8/8/K6k w - - 0 1");
+    REQUIRE(b);
+    std::vector<Solution> sols;
+    ThemeInput in{*b, std::nullopt, sols};
+    REQUIRE(detect(in).empty());
+}
+
+TEST_CASE("every entry declares what input it needs", "[themes][registry]") {
+    for (const auto& t : theme_registry()) REQUIRE(t.needs == Needs::Solutions);
+}
+
+TEST_CASE("any_of gives the same answer detect() used to give", "[themes][registry]") {
+    // Two solutions, only the second promoting: `any` must find it.
+    auto b = Board::from_fen("8/P6k/8/8/8/8/8/K7 w - - 0 1");
+    REQUIRE(b);
+    std::vector<Solution> sols{Solution{*b, {}}, Solution{*b, {}}};
+    ThemeInput in{*b, std::nullopt, sols};
+    auto names = detect(in);
+    REQUIRE(std::find(names.begin(), names.end(), "promotion") == names.end());
 }

@@ -278,13 +278,14 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         if (v.dtm != (uint8_t)f.dtm) continue;
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
-        std::string fen = Board::from_pieces(pp, stm).fen();
+        Board b = Board::from_pieces(pp, stm);
+        std::string fen = b.fen();
         if (want_solutions) {
             // v.count is this cell's own stored count -- the same number a
             // probe() of `fen` would return. Using it directly saves a
             // redundant table lookup per candidate; two things make that
             // safe, not "probe() cannot color-flip" (it can, in general):
-            // Board::from_pieces(pp, stm) below defaults ep_square to -1, so
+            // Board::from_pieces(pp, stm) above defaults ep_square to -1, so
             // eval_board's EP branch -- the only place probe()'s answer can
             // differ from this cell's raw value -- is inert for every FEN
             // built here; and load(m) already succeeded (this loop is
@@ -315,15 +316,10 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
             }
             if (!dets.empty()) {
                 auto sols = solutions(fen, (int)v.count);
+                themes::ThemeInput in{b, std::nullopt, sols};
                 bool all_present = true;
-                for (auto d : dets) {  // AND across themes...
-                    bool any = false;
-                    for (const auto& sol : sols)  // ...`any` within one
-                        if (d(sol)) {
-                            any = true;
-                            break;
-                        }
-                    if (!any) {
+                for (auto d : dets) {  // AND across themes; `any` within one is now
+                    if (!d(in)) {      // inside d itself (any_of<>)
                         all_present = false;
                         break;
                     }
@@ -333,6 +329,14 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         }
         if (!cb(fen)) return;
     }
+}
+
+std::vector<std::string> Tablebase::themes_of(const std::string& fen, int max) const {
+    auto b = Board::from_fen(fen);
+    if (!b) throw std::invalid_argument("bad FEN (or castling rights): " + fen);
+    std::vector<Solution> sols = solutions(fen, max);
+    themes::ThemeInput in{*b, std::nullopt, sols};
+    return themes::detect(in);
 }
 
 std::string Tablebase::stats_json(const Material& m) const {

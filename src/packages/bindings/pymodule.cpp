@@ -85,7 +85,7 @@ PYBIND11_MODULE(_helpmate, mod) {
                     auto p = t.probe(fen);
                     max = (!p) ? 100 : (p->count >= (int)COUNT_SAT ? 100 : p->count);
                 }
-                return themes::detect(t.solutions(fen, max));
+                return t.themes_of(fen, max);
             },
             py::arg("fen"), py::arg("max") = -1)
         .def(
