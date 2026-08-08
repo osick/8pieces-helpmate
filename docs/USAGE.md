@@ -242,6 +242,20 @@ deliberately, so that it never burns a decompress-and-recompress pass to
 produce byte-for-byte the same blocks. Re-running the conversion over a
 directory that is already done costs a header read per file and nothing else.
 
+**Running it by accident is safe.** All four ways of misfiring it were tested:
+
+| what you run | what happens |
+|---|---|
+| the same directory for `SRC` and `DST` | refuses, exit 3 |
+| a `SRC` that is already compressed | copies it — `compact --compress` no-ops, so the result is byte-identical |
+| the two directories reversed | every file already exists in `DST`, so all are skipped and nothing is touched |
+| `-b` differing from the source's block size | re-blocks; correct, but can come out **larger**, since smaller blocks compress worse |
+
+The property that makes those safe is that **a file already present in `DST`
+is never overwritten** — it is skipped. The per-table line says which of
+`compressing` / `copying` / `re-blocking` actually happened, so a run that
+merely copied does not read as one that compressed.
+
 ## Getting the binary
 
 Build per [BUILD.md](BUILD.md); the CLI lands at `./build/helpmate`. Running

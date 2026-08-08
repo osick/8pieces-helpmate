@@ -35,6 +35,20 @@
 # Safety: SRC is only ever read. Nothing is deleted. The converter writes
 # <path>.tmp and atomically renames, and reopens the result to verify it before
 # the rename, so an interrupted run cannot leave a corrupt table behind.
+#
+# What happens if you run it by accident (all four tested):
+#
+#   SRC and DST the same directory   refuses, exit 3
+#   SRC already compressed           copies it; `compact --compress` is a true
+#                                    no-op at the same block size, so the
+#                                    result is byte-identical
+#   the two directories reversed     every file already exists in DST, so all
+#                                    are skipped and nothing is touched
+#   -b differs from the source's     re-blocks, which is correct but can come
+#                                    out LARGER (smaller blocks compress worse)
+#
+# The property that makes those safe is that a file already present in DST is
+# never overwritten -- it is skipped. Nothing here can damage either directory.
 
 set -euo pipefail
 
@@ -129,14 +143,30 @@ for src in "$SRC"/*.hm; do
     continue
   fi
 
+  # Say what is actually about to happen. A version-3 source is already
+  # compressed: at the same block size `compact --compress` is a true no-op and
+  # this degenerates to a copy, and at a different one it re-blocks (which can
+  # come out LARGER -- smaller blocks compress worse). Labelling all three
+  # "compressing" would be a lie, and this script exists partly to be run by
+  # accident safely.
+  verb="compressing   " verb_dry="would compress          "
+  if [ "$version" = "3" ]; then
+    src_block=$(od -An -tu4 -j46 -N4 "$src" | tr -d ' ')
+    if [ "$src_block" = "$((BLOCK_KIB * 1024))" ]; then
+      verb="copying       " verb_dry="would copy (already done)"
+    else
+      verb="re-blocking   " verb_dry="would re-block          "
+    fi
+  fi
+
   if [ "$DRY" = "1" ]; then
-    printf 'would compress  %-12s %s\n' "$stem" "$(numfmt --to=iec --suffix=B "$size_in")"
+    printf '%s %-12s %s\n' "$verb_dry" "$stem" "$(numfmt --to=iec --suffix=B "$size_in")"
     n_done=$((n_done + 1))
     bytes_in=$((bytes_in + size_in))
     continue
   fi
 
-  printf 'compressing     %-12s %s ... ' "$stem" "$(numfmt --to=iec --suffix=B "$size_in")"
+  printf '%s%-12s %s ... ' "$verb" "$stem" "$(numfmt --to=iec --suffix=B "$size_in")"
   if ! cp -p "$src" "$STAGE/$stem.hm"; then
     echo "FAILED (copy)"; n_fail=$((n_fail + 1)); rm -f "$STAGE/$stem.hm"; continue
   fi
