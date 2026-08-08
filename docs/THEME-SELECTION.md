@@ -54,7 +54,7 @@ Readable from the starting position alone, so they run at **scan speed** and ans
 
 | Theme | Tier | Note |
 |---|---|---|
-| Homebase | A | the diagram alone |
+| Homebase | A | the diagram alone | Y |
 | Kindergarten problem | A | material of the diagram |
 | Obtrusive piece | A | static reading of the diagram's pawn structure |
 | Promoted force | A | static reading of the diagram |
@@ -68,8 +68,8 @@ Needs one solution, but only its last ply and final board -- not the whole set.
 |---|---|---|
 | Blocking piece replacement | A | diagram against mating board on one flight square |
 | Home-coming | A | mating board against the game-array squares |
-| Mating piece | A | the last ply's mover; battery cases are genuinely ambiguous |
-| Mating square | A | the last ply's destination, or the mated king's square |
+| Mating piece | A | the last ply's mover; battery cases are genuinely ambiguous | Y |
+| Mating square | A | the last ply's destination, or the mated king's square | Y |
 
 ## A3 -- The other side-to-move plane (set play)  (3)
 
@@ -78,7 +78,7 @@ One O(1) table lookup. Cheap here precisely because both side-to-move planes are
 | Theme | Tier | Note |
 |---|---|---|
 | Apparent mate | A | the other plane of the diagram mates in one |
-| Set play | A | the other plane of the same position |
+| Set play | A | the other plane of the same position | Y |
 | Short set play | A | the other plane, at a shorter distance |
 
 ## A4 -- Within one solution -- plies, captures, promotions  (42)
@@ -109,7 +109,7 @@ Exactly the pattern of the eight ply-detectors already shipped. No new machinery
 | FML | A | repeated arrival on the square one enemy unit just left |
 | Helsinki theme | A | sacrifice then two vacations, all inside one solution |
 | Hyvinkaa theme | A | every ply of one solution lands on one square |
-| Kniest theme | A | capture on the square where the king is later mated |
+| Kniest theme | A | capture on the square where the king is later mated | Y |
 | Kozhakin theme | A | first and last white ply on the same square |
 | Meerane theme | A | first and last ply compared inside one solution |
 | Mihajloski theme | A | collinear order swapped twice inside one solution |
@@ -118,8 +118,8 @@ Exactly the pattern of the eight ply-detectors already shipped. No new machinery
 | Nissl theme | A | sacrifice, then promotion to the same type |
 | Oudot task | A | three black queen promotions in one solution; the table could settle it for reachable material |
 | Pawn-Zajic | A | Zajic with a pawn as the capturing unit |
-| Phoenix | A | capture, then promotion to the same type |
-| Schnoebelen theme | A | promoted unit captured before it ever moves |
+| Phoenix | A | capture, then promotion to the same type | Y |
+| Schnoebelen theme | A | promoted unit captured before it ever moves | Y |
 | Slow Excelsior | A | excelsior that opens with a single step |
 | Square-clearance by capture | A | capture, vacate, enemy unit follows onto the square |
 | Super Durbar | A | both sides move only their kings |
@@ -128,7 +128,7 @@ Exactly the pattern of the eight ply-detectors already shipped. No new machinery
 | Unblocking sacrifice | A | capture, vacate, enemy unit captures on the square |
 | White Kniest theme | A | capture on the square the white king later occupies |
 | White Zajic theme | A | from/to and captures beside the white king |
-| Zajic theme | A | capture on the mating square, then recapture by the king |
+| Zajic theme | A | capture on the mating square, then recapture by the king | Y |
 
 ## A5 -- Within one solution -- trajectory shape  (10)
 
@@ -141,7 +141,7 @@ Shape predicates over one unit's path. `themes::trajectories()` already exists a
 | Cyclic place exchange | A | trajectory endpoints inside one solution |
 | Linear cycle | A | one unit's trajectory |
 | Long-trip | A | one officer moving three or more times |
-| Pendulum | A | one unit's trajectory |
+| Pendulum | A | one unit's trajectory | Y |
 | Place exchange | A | trajectory endpoints inside one solution |
 | Staircase | A | trajectory shape |
 | Wigwag | A | a slider recrossing its own start square along one line |
@@ -171,7 +171,7 @@ Kept so the arithmetic reconciles.
 | Theme | Tier | Note |
 |---|---|---|
 | Albino | B | union of one white pawn's four home-square moves across phases |
-| Allumwandlung | B | all four promotion types across the solution set |
+| Allumwandlung | B | all four promotion types across the solution set | Y |
 | Anti-Albino | B | union of a white pawn's moves arriving on its fourth rank |
 | Anti-Loshinsky theme | B | collinearity plus from/to arithmetic across phases |
 | Anti-magnet | B | same, with the distance growing phase by phase |
