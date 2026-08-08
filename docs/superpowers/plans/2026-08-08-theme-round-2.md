@@ -39,6 +39,12 @@
      fixture that drifts fails on the `REQUIRE`, not silently on the `CHECK`.
      Each task below names the exact shape assertions for its theme.
   4. `$TT` is a scratch table dir: `TT=$(mktemp -d) && taskset -c 0-3 ./build/helpmate gen KQvk --tables $TT`. Never `~/tb`.
+
+  **`FEN` and `MOVES` in the test code below are stand-ins, not identifiers.**
+  Where a task shows `play(FEN, MOVES)`, you write the actual FEN string and
+  the actual `{{"e2","e4",std::nullopt}, …}` move list you constructed and
+  verified. Code that literally contains `FEN` will not compile, which is the
+  intended failure — it is not a name you should define.
 - **Mutation rule, from the same post-mortem: three detector branches survived deletion and two survived inversion with the suite green.** For each new detector, delete its central condition and run the tests, then invert it and run again. Both must fail. Record in the commit that you did it.
 
 ---
