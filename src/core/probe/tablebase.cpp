@@ -1,5 +1,6 @@
 #include "probe/tablebase.h"
 
+#include <algorithm>
 #include <set>
 #include <utility>
 
@@ -284,7 +285,13 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
         Board b = Board::from_pieces(pp, stm);
-        std::string fen = b.fen();
+        // fen is built lazily -- only where it is actually consumed
+        // (lines()/solutions() below, or cb() on an actual match). A
+        // Needs::Position theme (e.g. homebase) never touches it, and
+        // b.fen() is not free: skipping it is most of the point of this
+        // function honouring `needs` at all, since evaluating a
+        // Needs::Position detector never requires it.
+        std::string fen;
         // v.count is this cell's own stored count -- the same number a
         // probe() of `fen` would return. Using it directly saves a
         // redundant table lookup per candidate; two things make that
@@ -318,13 +325,17 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
             // Changing --ends's meaning as a side effect of adding themes is not
             // acceptable, so this goes through lines()/shape_of exactly like
             // v0.6.2 did, not through solutions().
+            fen = b.fen();
             SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
             if (f.starts >= 0 && sh.starts != f.starts) continue;
             if (f.ends >= 0 && sh.ends != f.ends) continue;
         }
         if (!dets.empty()) {
             std::vector<Solution> sols;
-            if (need == themes::Needs::Solutions) sols = solutions(fen, (int)v.count);
+            if (need == themes::Needs::Solutions) {
+                if (fen.empty()) fen = b.fen();
+                sols = solutions(fen, (int)v.count);
+            }
             themes::ThemeInput in{b, std::nullopt, sols};
             bool all_present = true;
             for (auto d : dets) {  // AND across themes; `any` within one is now
@@ -335,6 +346,7 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
             }
             if (!all_present) continue;
         }
+        if (fen.empty()) fen = b.fen();  // only reached by an actual match
         if (!cb(fen)) return;
     }
 }

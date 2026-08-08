@@ -431,13 +431,38 @@ TEST_CASE("mine --ends stays SAN-keyed, not (from,to,promotion)-keyed", "[themes
 
 TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide it", "[themes][mine]") {
     Tablebase tb(gen_kqvk());
+    auto m = Material::parse("KQvk");
+    REQUIRE(m);
+
+    // Make the fixture dependency loud, not hidden: a Needs::Solutions theme
+    // on the SAME filter must itself skip at least one saturated cell, or
+    // the "skipped == 0" check below would hold for the wrong reason
+    // (nothing to skip, rather than nothing enumerated) -- and a future
+    // generator change that removes the saturated cell would let this test
+    // keep passing while proving nothing. dtm=8 is used, not dtm=2: per
+    // KQvk.stats.json's uniqueness histogram, KQvk's dtm=2 pool (580
+    // positions) never saturates at all (max solution count observed there
+    // is 7), while dtm=8 has 5273 saturated (count>=255) cells out of ~9000,
+    // measured directly with an unbounded callback (3743 mirror matches, well
+    // under the 10000 cap below, so the scan runs to completion either way).
+    uint64_t skipped_solutions = 0;
+    int solutions_hits = 0;
+    tb.mine(
+        *m, MineFilter{.dtm = 8, .themes = {"mirror"}},
+        [&](const std::string&) {
+            ++solutions_hits;
+            return solutions_hits < 10000;
+        },
+        &skipped_solutions);
+    REQUIRE(skipped_solutions > 0);
+
     MineFilter f;
-    f.dtm = 2;
+    f.dtm = 8;
     f.themes = {"homebase"};
     uint64_t skipped = 0;
     int hits = 0;
     tb.mine(
-        *Material::parse("KQvk"), f,
+        *m, f,
         [&](const std::string&) {
             ++hits;
             return hits < 50;
