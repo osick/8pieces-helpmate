@@ -249,14 +249,19 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     // Resolve theme names ONCE, before the scan: a typo must be an error that
     // names the valid options, not millions of positions filtered by nothing.
     std::vector<themes::Detector> dets;
+    themes::Needs need = themes::Needs::Position;
     for (const auto& n : f.themes) {
         const auto* d = themes::find_theme(n);
         if (!d) throw std::invalid_argument("unknown theme: \"" + n + "\"");
         dets.push_back(d->fn);
+        need = std::max(need, d->needs);
     }
 
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
-    const bool want_solutions = want_shape || !dets.empty();
+    // Enumerate only when something actually needs the solutions. A query whose
+    // themes read only the diagram runs at scan speed AND answers on saturated
+    // positions, where enumeration is impossible and every other theme gives up.
+    const bool want_solutions = want_shape || (!dets.empty() && need == themes::Needs::Solutions);
     std::vector<PlacedPiece> pp;
     // Read the two planes in block-sized chunks instead of one cell at a time.
     // get() on a compressed table takes the block cache's mutex and memcpys a
@@ -280,52 +285,55 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         if (!s->index.decode(c, pp)) continue;
         Board b = Board::from_pieces(pp, stm);
         std::string fen = b.fen();
-        if (want_solutions) {
-            // v.count is this cell's own stored count -- the same number a
-            // probe() of `fen` would return. Using it directly saves a
-            // redundant table lookup per candidate; two things make that
-            // safe, not "probe() cannot color-flip" (it can, in general):
-            // Board::from_pieces(pp, stm) above defaults ep_square to -1, so
-            // eval_board's EP branch -- the only place probe()'s answer can
-            // differ from this cell's raw value -- is inert for every FEN
-            // built here; and load(m) already succeeded (this loop is
-            // iterating `s`, a slice it returned), so probe()'s color-flip
-            // fallback, which only triggers when the PRIMARY load fails,
-            // never runs for `fen`. Mining pawn material with reconstructed
-            // en-passant positions is a plausible next rung -- if that ever
-            // makes fen carry a real ep_square, the first load-bearer above
-            // stops holding and this shortcut needs revisiting.
-            if (v.count >= COUNT_SAT) {  // unknowable, never guessed at
-                if (skipped_saturated) ++*skipped_saturated;
-                continue;
-            }
-            if (want_shape) {
-                // --starts/--ends are a released v0.6.2 feature (see CHANGELOG.md)
-                // keyed on SAN, not on (from, to, promotion): SAN disambiguates a
-                // capture from a quiet move sharing the same (from, to) (Qxa4# vs
-                // Qa4#: v0.6.2 counts 2 distinct mating moves), and distinguishes
-                // two moves that happen to share a destination square but render
-                // identically otherwise (Qb4-b1# vs Qe4-b1#, both SAN "Qb1#": v0.6.2
-                // counts 1). A (from, to, promotion) key gets both cases backwards.
-                // Changing --ends's meaning as a side effect of adding themes is not
-                // acceptable, so this goes through lines()/shape_of exactly like
-                // v0.6.2 did, not through solutions().
-                SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
-                if (f.starts >= 0 && sh.starts != f.starts) continue;
-                if (f.ends >= 0 && sh.ends != f.ends) continue;
-            }
-            if (!dets.empty()) {
-                auto sols = solutions(fen, (int)v.count);
-                themes::ThemeInput in{b, std::nullopt, sols};
-                bool all_present = true;
-                for (auto d : dets) {  // AND across themes; `any` within one is now
-                    if (!d(in)) {      // inside d itself (any_of<>)
-                        all_present = false;
-                        break;
-                    }
+        // v.count is this cell's own stored count -- the same number a
+        // probe() of `fen` would return. Using it directly saves a
+        // redundant table lookup per candidate; two things make that
+        // safe, not "probe() cannot color-flip" (it can, in general):
+        // Board::from_pieces(pp, stm) above defaults ep_square to -1, so
+        // eval_board's EP branch -- the only place probe()'s answer can
+        // differ from this cell's raw value -- is inert for every FEN
+        // built here; and load(m) already succeeded (this loop is
+        // iterating `s`, a slice it returned), so probe()'s color-flip
+        // fallback, which only triggers when the PRIMARY load fails,
+        // never runs for `fen`. Mining pawn material with reconstructed
+        // en-passant positions is a plausible next rung -- if that ever
+        // makes fen carry a real ep_square, the first load-bearer above
+        // stops holding and this shortcut needs revisiting.
+        //
+        // Only applies when solutions are actually wanted: a Position-only
+        // theme query answers on saturated positions too, since it never
+        // asks a saturated cell for the very thing it cannot give.
+        if (want_solutions && v.count >= COUNT_SAT) {  // unknowable, never guessed at
+            if (skipped_saturated) ++*skipped_saturated;
+            continue;
+        }
+        if (want_shape) {
+            // --starts/--ends are a released v0.6.2 feature (see CHANGELOG.md)
+            // keyed on SAN, not on (from, to, promotion): SAN disambiguates a
+            // capture from a quiet move sharing the same (from, to) (Qxa4# vs
+            // Qa4#: v0.6.2 counts 2 distinct mating moves), and distinguishes
+            // two moves that happen to share a destination square but render
+            // identically otherwise (Qb4-b1# vs Qe4-b1#, both SAN "Qb1#": v0.6.2
+            // counts 1). A (from, to, promotion) key gets both cases backwards.
+            // Changing --ends's meaning as a side effect of adding themes is not
+            // acceptable, so this goes through lines()/shape_of exactly like
+            // v0.6.2 did, not through solutions().
+            SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
+            if (f.starts >= 0 && sh.starts != f.starts) continue;
+            if (f.ends >= 0 && sh.ends != f.ends) continue;
+        }
+        if (!dets.empty()) {
+            std::vector<Solution> sols;
+            if (need == themes::Needs::Solutions) sols = solutions(fen, (int)v.count);
+            themes::ThemeInput in{b, std::nullopt, sols};
+            bool all_present = true;
+            for (auto d : dets) {  // AND across themes; `any` within one is now
+                if (!d(in)) {      // inside d itself (any_of<>)
+                    all_present = false;
+                    break;
                 }
-                if (!all_present) continue;
             }
+            if (!all_present) continue;
         }
         if (!cb(fen)) return;
     }

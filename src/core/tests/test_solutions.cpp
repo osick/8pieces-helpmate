@@ -428,3 +428,22 @@ TEST_CASE("mine --ends stays SAN-keyed, not (from,to,promotion)-keyed", "[themes
     // them into ends=2.
     check_ends("8/8/8/8/8/8/2q5/K1k1Q3 b - - 0 1", 1, 2);
 }
+
+TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide it", "[themes][mine]") {
+    Tablebase tb(gen_kqvk());
+    MineFilter f;
+    f.dtm = 2;
+    f.themes = {"homebase"};
+    uint64_t skipped = 0;
+    int hits = 0;
+    tb.mine(
+        *Material::parse("KQvk"), f,
+        [&](const std::string&) {
+            ++hits;
+            return hits < 50;
+        },
+        &skipped);
+    // The whole point: nothing was skipped for saturation, because nothing was
+    // enumerated. A solutions-needing theme on the same table does skip.
+    CHECK(skipped == 0);
+}
