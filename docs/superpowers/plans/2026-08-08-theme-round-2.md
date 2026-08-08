@@ -411,7 +411,15 @@ Register it in `src/core/themes/registry.cpp` (add `#include "themes/position_th
  Needs::Position},
 ```
 
-Update the registry-size test in `test_themes_registry.cpp` from 16 to 17, and relax the "every entry declares what input it needs" test written in Task 1 to `REQUIRE(t.needs <= Needs::Solutions)`.
+Update the registry-size test in `test_themes_registry.cpp` from 16 to 17, and
+**delete** the "every entry declares what input it needs" test written in
+Task 1. It asserted `t.needs == Needs::Solutions`, which is no longer true now
+that `homebase` exists. Do not "relax" it to `t.needs <= Needs::Solutions`:
+`Solutions` is the maximum enumerator, so that assertion holds for every
+possible value and can never fail — a theme wrongly declared `Needs::Position`
+while actually reading solutions would sail straight through it. Each theme's
+own test asserts its own `needs` (this task does so for `homebase`), which is
+the check that can actually fail.
 
 - [ ] **Step 4: Run the tests**
 
