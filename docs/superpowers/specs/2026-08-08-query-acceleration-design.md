@@ -85,8 +85,19 @@ compressed table, and nearly all of it for a rare `dtm`.
 
 **Vectorise the predicate.** The scan is a scalar byte-at-a-time loop
 (`tablebase.cpp`), measured at 757 M cells/s ≈ 1.5 GB/s single-threaded.
-Published AVX2 byte-column scan rates are 3–5 G values/s. A `memchr`-shaped
-compare plus parallelism across cores is plausibly 10–40×.
+Published AVX2 byte-column scan rates are 3–5 G values/s, so a `memchr`-shaped
+compare plus parallelism across cores is plausibly 10–40× — an estimate from
+those published rates, not a measurement of this code, and the first thing the
+implementation must establish rather than assume.
+
+**Portability is a constraint, not an afterthought.** Cross-platform CLI builds
+are an open roadmap item, so no unconditional AVX2 may enter a shipped binary.
+The scan needs a scalar path that is always correct and always built, with any
+wider path selected at runtime or guarded at compile time — and the two must be
+proven to agree, not assumed to. Reach for portable constructs first (a
+`memchr`-shaped search, `std::execution::par_unseq`, or simply letting the
+compiler vectorise a clean loop) and only hand-write intrinsics if measurement
+shows they are needed.
 
 This layer ships first precisely so that Layers 1 and 2 are sized against an
 *optimised* scan rather than against today's.
