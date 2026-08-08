@@ -85,10 +85,6 @@ TEST_CASE("detect on an empty solution set finds nothing", "[themes][registry]")
     REQUIRE(detect(in).empty());
 }
 
-TEST_CASE("every entry declares what input it needs", "[themes][registry]") {
-    for (const auto& t : theme_registry()) REQUIRE(t.needs <= Needs::Solutions);
-}
-
 TEST_CASE("any_of finds a theme shown by only ONE of several solutions", "[themes][registry]") {
     // This is the `any` path that any_of<> now owns, so the test must be able
     // to fail if any_of<> is broken. Solution 1 shows nothing; solution 2

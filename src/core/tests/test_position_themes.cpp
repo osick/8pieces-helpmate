@@ -41,9 +41,14 @@ TEST_CASE("homebase: a black pawn on rank 7 counts, on rank 6 does not", "[theme
     CHECK_FALSE(homebase("4k3/8/3p4/8/8/8/8/4K3 b - - 0 1"));
 }
 
-TEST_CASE("homebase: a queen on the wrong colour's square breaks it", "[themes][position]") {
+TEST_CASE("homebase: a queen on the wrong file breaks it", "[themes][position]") {
     CHECK(homebase("3qk3/8/8/8/8/8/8/3QK3 b - - 0 1"));
     CHECK_FALSE(homebase("4k3/8/8/8/8/8/8/4KQ2 b - - 0 1"));
+}
+
+TEST_CASE("homebase: a queen on the other colour's home square breaks it", "[themes][position]") {
+    // Right file, wrong back rank: distinct from the wrong-file case above.
+    CHECK_FALSE(homebase("3Qk3/8/8/8/8/8/8/4K3 b - - 0 1"));
 }
 
 TEST_CASE("homebase is registered and needs only the position", "[themes][registry]") {
