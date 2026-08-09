@@ -829,6 +829,10 @@ int cmd_compact(const std::vector<std::string>& args, bool compress, bool dry, u
 int cmd_themes() {
     for (const auto& t : themes::theme_registry()) {
         std::cout << t.name << "\n";
+        const char* n = t.needs == themes::Needs::Position ? "position"
+                        : t.needs == themes::Needs::Plane  ? "plane"
+                                                           : "solutions";
+        std::cout << "    needs: " << n << "\n";
         // Wrap the doc at ~72 columns under a 4-space indent.
         std::string doc(t.doc);
         size_t pos = 0;

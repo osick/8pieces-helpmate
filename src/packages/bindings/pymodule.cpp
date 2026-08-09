@@ -159,11 +159,15 @@ PYBIND11_MODULE(_helpmate, mod) {
                 py::dict d;
                 d["name"] = std::string(t.name);
                 d["doc"] = std::string(t.doc);
+                const char* n = t.needs == themes::Needs::Position ? "position"
+                                : t.needs == themes::Needs::Plane  ? "plane"
+                                                                   : "solutions";
+                d["needs"] = n;
                 out.append(std::move(d));
             }
             return out;
         },
-        "Every theme detector this build knows: [{name, doc}, ...], in display order.");
+        "Every theme detector this build knows: [{name, doc, needs}, ...], in display order.");
     mod.def("_perft", [](const std::string& fen, int depth) {
         auto b = Board::from_fen(fen);
         if (!b) throw std::invalid_argument("bad fen");

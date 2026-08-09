@@ -1,7 +1,7 @@
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { encodeState } from "./lib/state.js";
 import { toFenList, toCsv } from "./lib/export.js";
-import { selectedThemes } from "./lib/themes.js";
+import { selectedThemes, answersOnSaturated, themeOptionTitle } from "./lib/themes.js";
 
 let rows = [];
 
@@ -80,7 +80,11 @@ export function initMine() {
       const o = document.createElement("option");
       o.value = t.name;
       o.textContent = t.name;
-      o.title = t.doc;
+      o.title = themeOptionTitle(t);
+      // Data-driven marker: any theme whose `needs` isn't "solutions" still
+      // answers on positions whose stored solution count saturates, where
+      // Needs::Solutions themes are silently skipped -- see themeOptionTitle.
+      if (answersOnSaturated(t)) o.classList.add("theme-answers-saturated");
       themeSel.appendChild(o);
     }
   }).catch(() => { /* leave the picker empty; the numeric filters still work */ });

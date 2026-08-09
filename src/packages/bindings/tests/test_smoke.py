@@ -78,6 +78,19 @@ def test_theme_registry_is_exposed():
     assert all(t["doc"] for t in reg)
 
 
+def test_theme_registry_exposes_needs():
+    # Task 10: `needs` is how a caller tells which themes answer without
+    # enumerating solutions -- and so still answer on positions whose stored
+    # solution count saturates (capped at 255). homebase/set-play are the two
+    # non-Solutions themes among the 23 in this build.
+    entries = helpmate.themes()
+    assert all("needs" in e for e in entries)
+    by_name = {e["name"]: e for e in entries}
+    assert by_name["homebase"]["needs"] == "position"
+    assert by_name["set-play"]["needs"] == "plane"
+    assert by_name["model"]["needs"] == "solutions"
+
+
 def test_probe_themes_and_mine_theme_filter(tables):
     tb = helpmate.Tablebase(tables)
     golden = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"

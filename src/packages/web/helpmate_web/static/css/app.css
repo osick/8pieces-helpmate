@@ -234,3 +234,9 @@ label.inline { display: inline-flex; align-items: center; gap: .35rem; color: va
 #mine-form select[multiple] { min-width: 14rem; }
 #mine-form .hint { display: block; opacity: 0.7; font-size: 0.85em; }
 #position-themes { margin-top: 0.25rem; opacity: 0.85; }
+
+/* Themes whose `needs` isn't "solutions" still answer on positions whose
+   stored solution count has saturated (see lib/themes.js answersOnSaturated).
+   The title attribute carries the explanation; this just makes the option
+   findable at a glance. */
+#mine-form select[multiple] option.theme-answers-saturated { font-style: italic; }

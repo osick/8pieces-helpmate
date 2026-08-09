@@ -24,6 +24,14 @@ def test_themes_endpoint_lists_the_registry(client):
         assert t["doc"]          # every entry carries its definition
 
 
+def test_themes_endpoint_reports_needs(client):
+    # Task 10: /v1/themes returns helpmate.themes() verbatim, so `needs`
+    # should flow through with no code change on this side -- confirmed here
+    # rather than assumed.
+    body = client.get("/v1/themes").json()
+    assert all("needs" in t for t in body["themes"])
+
+
 def test_mine_accepts_a_repeatable_theme_parameter(client):
     r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5,
                                        "theme": ["mirror"]})
