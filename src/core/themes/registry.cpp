@@ -82,6 +82,10 @@ const std::vector<ThemeDef>& theme_registry() {
          "Schnoebelen: a promoted unit is captured on its promotion square without "
          "ever having moved.",
          Needs::Solutions},
+        {"pendulum", &any_of<&has_pendulum>,
+         "Pendulum: a unit oscillates between exactly two squares, returning at "
+         "least twice.",
+         Needs::Solutions},
     };
     return kRegistry;
 }

@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <set>
 
 #include "probe/solution.h"
 #include "themes/line_themes.h"
@@ -754,6 +755,97 @@ TEST_CASE("schnoebelen: a promotion with no later capture at all is not schnoebe
     CHECK_FALSE(has_schnoebelen(s));
 }
 
+// All four pendulum fixtures share one skeleton: White Kb6, Ng1, Rh1; black
+// Ka8; White to move. Material KRNvk (4 men) -- `~/tb` (a pre-built,
+// read-only 190-table corpus, never written to) already holds KRNvk.hm.
+// Probing this exact start FEN against it gives:
+//   $ taskset -c 0-3 ./build/helpmate probe "k7/8/1K6/8/8/8/8/6NR w - - 0 1" --tables ~/tb
+//   dtm=1 (h#0.5) count=1
+//   $ taskset -c 0-3 ./build/helpmate line "k7/8/1K6/8/8/8/8/6NR w - - 0 1" --tables ~/tb --all
+//   Rh8#
+// Kb6 already covers a7/b7/c7 and Rh1-h8# alone mates along the eighth --
+// this position is mate in ONE ply. Every fixture below instead has the
+// knight shuffle back and forth (and, in the switchback/pendulum cases, the
+// black king shuffle a8-b8 as its only legal replies) for several ply pairs
+// before White finally plays the same Rh1-h8# -- legal cooperative chess
+// that is NOT among the dtm-optimal lines (which mate immediately), stated
+// plainly rather than left implicit. Legality of every move comes from
+// `play()`, which REQUIREs each move be found among Board::legal_moves() --
+// an impossible fixture fails loudly; genuine mate (where claimed) comes
+// from REQUIRE(fin.state() == PosState::Checkmate) via the real Board class.
+
+TEST_CASE("pendulum: a unit oscillating between two squares", "[themes][line]") {
+    // Knight g1-f3-g1-f3: two distinct squares, four entries (A,B,A,B).
+    // Black's only unit is its king, so its three replies are forced to be
+    // king moves; a8-b8-a8-b8 happens to be a pendulum in its own right too
+    // (Kb6 covers a7/b7/c7, so b8 stays a safe, non-adjacent reply each
+    // time) -- that does not undermine the shape check below, which asks
+    // only whether SOME trajectory matches, and the knight's alone already
+    // does.
+    Solution s = play("k7/8/1K6/8/8/8/8/6NR w - - 0 1", {{"g1", "f3", {}},
+                                                         {"a8", "b8", {}},
+                                                         {"f3", "g1", {}},
+                                                         {"b8", "a8", {}},
+                                                         {"g1", "f3", {}},
+                                                         {"a8", "b8", {}},
+                                                         {"h1", "h8", {}}});
+    const Board& fin = final_board(s);
+    REQUIRE(fin.state() == PosState::Checkmate);
+    // Shape first: one trajectory of exactly two distinct squares, length >= 4.
+    bool found = false;
+    for (const auto& t : trajectories(s)) {
+        std::set<uint8_t> d(t.squares.begin(), t.squares.end());
+        if (t.squares.size() >= 4 && d.size() == 2) found = true;
+    }
+    REQUIRE(found);
+    CHECK(has_pendulum(s));
+}
+
+TEST_CASE("pendulum: a single out-and-back is a switchback, not a pendulum", "[themes][line]") {
+    // Knight g1-f3-g1 only: a single out-and-back, three squares, two
+    // distinct -- the shape the brief calls a switchback, not a pendulum.
+    // No mating move here; the rook never fires, so this is not checkmate,
+    // matching the structural-only negative fixtures already used for
+    // zajic/phoenix/schnoebelen in this file.
+    Solution s =
+        play("k7/8/1K6/8/8/8/8/6NR w - - 0 1", {{"g1", "f3", {}}, {"a8", "b8", {}}, {"f3", "g1", {}}});
+    for (const auto& t : trajectories(s)) REQUIRE(t.squares.size() <= 3);
+    CHECK(has_pendulum(s) == false);
+    CHECK(has_switchback(s));  // the overlap rule, stated in the spec
+}
+
+TEST_CASE("pendulum and switchback are NOT exclusive", "[themes][line]") {
+    // Spec decision: a pendulum trajectory contains a switchback, and both
+    // are reported -- exactly as ideal implies model implies pure. The v0.8
+    // closed-walk bug came from leaving an overlap rule unstated. Reuses the
+    // full four-move knight oscillation from the positive case above.
+    Solution s = play("k7/8/1K6/8/8/8/8/6NR w - - 0 1", {{"g1", "f3", {}},
+                                                         {"a8", "b8", {}},
+                                                         {"f3", "g1", {}},
+                                                         {"b8", "a8", {}},
+                                                         {"g1", "f3", {}},
+                                                         {"a8", "b8", {}},
+                                                         {"h1", "h8", {}}});
+    CHECK(has_pendulum(s));
+    CHECK(has_switchback(s));
+}
+
+TEST_CASE("pendulum: three distinct squares is a walk, not a pendulum", "[themes][line]") {
+    // Knight g1-f3-h4-f3: three distinct squares (g1, f3, h4), the shape
+    // A,B,C,B -- a walk, not a pendulum. No mating move; the rook never
+    // fires, so no checkmate is asserted, same as the case above.
+    Solution s =
+        play("k7/8/1K6/8/8/8/8/6NR w - - 0 1",
+             {{"g1", "f3", {}}, {"a8", "b8", {}}, {"f3", "h4", {}}, {"b8", "a8", {}}, {"h4", "f3", {}}});
+    bool three = false;
+    for (const auto& t : trajectories(s)) {
+        std::set<uint8_t> d(t.squares.begin(), t.squares.end());
+        if (d.size() >= 3) three = true;
+    }
+    REQUIRE(three);
+    CHECK_FALSE(has_pendulum(s));
+}
+
 TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     // Black Kg8 mated by Ra8 along the eighth with white Kg6 covering f7/g7/h7:
     // a position that is already mate, hence a solution with no plies at all.
@@ -770,4 +862,5 @@ TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     REQUIRE_FALSE(has_en_passant(s));
     REQUIRE_FALSE(is_single_piece(s));  // no side moved at all
     REQUIRE_FALSE(has_schnoebelen(s));  // no plies at all, so certainly no promotion on one
+    REQUIRE_FALSE(has_pendulum(s));     // no plies at all, so certainly no unit trajectory
 }

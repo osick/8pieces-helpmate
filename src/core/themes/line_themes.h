@@ -53,4 +53,10 @@ bool has_phoenix(const Solution& s);
 // having moved.
 bool has_schnoebelen(const Solution& s);
 
+// One unit's trajectory visits exactly two distinct squares and has length
+// >= 4 -- A,B,A,B, at least two returns. Deliberately NOT exclusive with
+// switchback: a pendulum trajectory contains a switchback (A,B,A), and both
+// are reported.
+bool has_pendulum(const Solution& s);
+
 }  // namespace hm::themes

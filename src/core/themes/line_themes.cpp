@@ -190,4 +190,32 @@ bool has_schnoebelen(const Solution& s) {
     return false;
 }
 
+// One unit's trajectory visits exactly two distinct squares and has length
+// >= 4 -- A,B,A,B, at least two returns. Deliberately NOT exclusive with
+// switchback: a pendulum trajectory contains a switchback (A,B,A), and both
+// are reported -- exactly as ideal implies model implies pure already does.
+bool has_pendulum(const Solution& s) {
+    for (const auto& t : trajectories(s)) {
+        if (t.squares.size() < 4) continue;
+        std::set<uint8_t> distinct(t.squares.begin(), t.squares.end());
+        // `== 2`, not `<= 2`: relaxing this to `<= 2` cannot be killed by any
+        // fixture built from real plies, so it is worth being explicit about
+        // why. `trajectories()` (trajectory.cpp) pushes p.to for every ply,
+        // and a chess move always has p.from != p.to -- there is no null
+        // move -- so any two SUCCESSIVE entries in `squares` already differ.
+        // With size() >= 4 guaranteed by the guard above, that alone forces
+        // distinct.size() >= 2 for every trajectory this loop ever sees:
+        // distinct.size() == 1 would need every entry equal, which the
+        // successive-differ property rules out. So `<= 2` and `== 2` accept
+        // exactly the same trajectories over the whole domain of legal
+        // Solutions -- an equivalent mutant, not a weaker check -- and no
+        // amount of fixture-writing can tell them apart. `== 2` is kept
+        // because it states the theme's own two-square definition directly,
+        // the same reasoning excelsior_for's rank check above uses for a
+        // defensive-but-unkillable-by-deletion condition.
+        if (distinct.size() == 2) return true;
+    }
+    return false;
+}
+
 }  // namespace hm::themes
