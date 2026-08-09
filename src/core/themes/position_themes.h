@@ -3,9 +3,12 @@
 
 namespace hm::themes {
 
-// Detectors that read the DIAGRAM only -- no solutions, no table. These are
-// the themes a query can answer without enumerating, which also makes them
-// the only themes that can answer on a saturated position.
+// Detectors that never enumerate solutions -- no walking the optimal-line
+// tree -- which is what makes them the themes a query can answer on a
+// saturated position. Two kinds live here: is_homebase reads the diagram
+// only (Needs::Position, no table access at all); has_set_play reads one
+// extra table value the caller already fetched for it (Needs::Plane) but
+// still never touches `solutions`.
 
 // Every unit stands on a square it occupies in the initial game array for its
 // own colour and type. Pawns count anywhere on their home rank: requiring the

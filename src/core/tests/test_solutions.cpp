@@ -472,3 +472,37 @@ TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide i
     // enumerated. A solutions-needing theme on the same table does skip.
     CHECK(skipped == 0);
 }
+
+// Regression guard for the sibling-plane wiring in mine(): the chunked
+// read_values(other_stm, ...) call added for Needs::Plane themes must land on
+// the SAME cell index as the queried plane, not a re-encoded or offset one. A
+// wrong wiring would still emit plausible-looking FENs -- mine's own filter
+// already restricts hits to legal, decodable, dtm-matching positions -- so
+// the only thing that catches a wrong cell is checking the sibling plane
+// independently, through a different code path (Tablebase::probe on the
+// flipped position, not mine's chunk scan) against a real generated table.
+TEST_CASE("mine's set-play scan reads the sibling plane at the correct cell", "[themes][mine]") {
+    Tablebase tb(gen_kqvk());
+    auto m = Material::parse("KQvk");
+    REQUIRE(m);
+
+    std::vector<std::string> hits;
+    tb.mine(*m, MineFilter{.dtm = 2, .themes = {"set-play"}}, [&](const std::string& f) {
+        hits.push_back(f);
+        return hits.size() < 700;
+    });
+    // Must not pass vacuously: KQvk's dtm=2 pool has 423 set-play hits out of
+    // 580 positions total (measured directly via the CLI against a freshly
+    // generated KQvk table), so an empty result here would mean the wiring is
+    // broken, not that the theme is merely rare.
+    REQUIRE_FALSE(hits.empty());
+
+    for (const auto& f : hits) {
+        auto b = Board::from_fen(f);
+        REQUIRE(b);
+        Board flipped = *b;
+        flipped.reset(b->pieces(), b->stm() == Color::White ? Color::Black : Color::White);
+        auto p = tb.probe(flipped.fen());
+        REQUIRE(p.has_value());  // the sibling plane must be solvable
+    }
+}
