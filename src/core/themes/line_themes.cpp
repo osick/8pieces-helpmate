@@ -159,4 +159,20 @@ bool has_zajic(const Solution& s) {
     return false;
 }
 
+// A unit of type T belonging to side C is captured, and a LATER ply promotes
+// a pawn of side C to type T -- the captured unit is reborn.
+bool has_phoenix(const Solution& s) {
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        const Ply& cap = s.plies[i];
+        if (!cap.captured) continue;
+        // The captured unit belongs to the side that did NOT move.
+        const Color owner = cap.piece.color == Color::White ? Color::Black : Color::White;
+        for (size_t j = i + 1; j < s.plies.size(); ++j) {
+            const Ply& pr = s.plies[j];
+            if (pr.promotion && *pr.promotion == *cap.captured && pr.piece.color == owner) return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace hm::themes

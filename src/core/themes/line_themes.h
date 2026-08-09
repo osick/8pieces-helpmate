@@ -44,4 +44,8 @@ bool has_kniest(const Solution& s);
 // king, and the black king is mated standing on S.
 bool has_zajic(const Solution& s);
 
+// A unit of type T belonging to side C is captured, and a LATER ply promotes
+// a pawn of side C to type T -- the captured unit is reborn.
+bool has_phoenix(const Solution& s);
+
 }  // namespace hm::themes

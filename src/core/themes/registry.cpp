@@ -74,6 +74,10 @@ const std::vector<ThemeDef>& theme_registry() {
          "Zajic: a unit is captured on the square where the black king is mated, "
          "and the king recaptures there.",
          Needs::Solutions},
+        {"phoenix", &any_of<&has_phoenix>,
+         "Phoenix: a unit is captured and a pawn of the same colour later promotes "
+         "to that same type.",
+         Needs::Solutions},
     };
     return kRegistry;
 }

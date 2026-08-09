@@ -518,6 +518,86 @@ TEST_CASE("zajic: the king's own capture on S is not also its own recapture", "[
     CHECK_FALSE(has_zajic(s));  // one capture is not a capture AND a later recapture
 }
 
+TEST_CASE("phoenix: a captured knight reborn by a black pawn's promotion", "[themes][line]") {
+    // White Kb6, Rh1; black Ka8, Nh7, Pb2; White to move. White plays
+    // Rh1xh7, capturing the black knight (owner: the side that did NOT
+    // move, i.e. Black -- the definition's subtlety). Black promotes
+    // b2-b1=N, a LATER ply, a black pawn to the same type just captured.
+    // White then plays Rh7-h8#: the same Kb6+R corner mate geometry as the
+    // kniest/zajic fixtures (rook checks along the eighth, king covers
+    // a7/b7), reached after the capture-then-promotion detour.
+    //
+    // Material KRvknp (5 men) took over 170s to fully generate for `helpmate
+    // gen` and was killed per the 180s single-command limit; see
+    // task-7-report.md for the exact log. Legality of every move comes from
+    // `play()`, which REQUIREs each move be found among Board::legal_moves()
+    // -- an impossible fixture fails loudly. Mate comes from
+    // REQUIRE(fin.state() == PosState::Checkmate) below, computed by the
+    // same real Board class the rest of the engine uses.
+    Solution s = play("k7/7n/1K6/8/8/8/1p6/7R w - - 0 1",
+                      {{"h1", "h7", {}}, {"b2", "b1", PieceType::Knight}, {"h7", "h8", {}}});
+    const Board& fin = final_board(s);
+    REQUIRE(fin.state() == PosState::Checkmate);
+    REQUIRE(s.plies.size() == 3);
+    const Ply& cap = s.plies[0];
+    const Ply& promo = s.plies[1];
+    REQUIRE(cap.captured);
+    REQUIRE(*cap.captured == PieceType::Knight);  // the captured unit really is a knight
+    REQUIRE(promo.promotion);
+    REQUIRE(*promo.promotion == PieceType::Knight);  // ... and the LATER promotion is to the same type
+    REQUIRE(promo.piece.color == Color::Black);      // ... by a black pawn
+    CHECK(has_phoenix(s));
+}
+
+TEST_CASE("phoenix: promotion to a different type is not phoenix", "[themes][line]") {
+    // Same fixture as the positive up to the promotion, but Black promotes
+    // to a queen instead of a knight -- the captured type and the promoted
+    // type differ. (No third, mating move here: the queen delivers check
+    // to White's own king, so Rh7-h8 is no longer legal -- irrelevant to
+    // this predicate, which only inspects the capture and promotion plies.)
+    Solution s = play("k7/7n/1K6/8/8/8/1p6/7R w - - 0 1", {{"h1", "h7", {}}, {"b2", "b1", PieceType::Queen}});
+    REQUIRE(s.plies.size() == 2);
+    REQUIRE(s.plies[0].captured);
+    REQUIRE(*s.plies[0].captured == PieceType::Knight);
+    REQUIRE(s.plies[1].promotion);
+    REQUIRE(*s.plies[0].captured != *s.plies[1].promotion);  // knight captured, queen promoted -- differ
+    CHECK_FALSE(has_phoenix(s));
+}
+
+TEST_CASE("phoenix: the promoting side must be the captured unit's owner, not the capturer",
+          "[themes][line]") {
+    // White Kb6, Rh1, Pe7; black Ka8, Nh7; White to move. White plays
+    // Rh1xh7, capturing the black knight (owner: Black, same shape as the
+    // positive). Black shuffles Ka8-b8 (a spacer move so the promotion is a
+    // LATER, distinct ply -- b8 is not covered by White's remaining force,
+    // so this is a genuinely free reply, not a forced one). White then
+    // promotes its OWN pawn, e7-e8=N -- a knight reborn, but on the WRONG
+    // side: the promoter is White, the same side that did the capturing,
+    // not Black, the side that lost the knight. A detector that derives
+    // owner from the mover's own colour instead of the opponent's would
+    // wrongly call this phoenix.
+    //
+    // Legality of every move verified with `play()`, same as above. Material
+    // KRPvkn (5 men) was also killed after exceeding the 180s single-command
+    // limit during `helpmate gen`; see task-7-report.md. This fixture does
+    // not end in checkmate (White still has a pawn's worth of decisions
+    // left to make to actually mate an escaping king from b8), so no
+    // REQUIRE(Checkmate) is made here -- the shape assertions below are the
+    // evidence, matching kniest's and zajic's negative fixtures.
+    Solution s = play("k7/4P2n/1K6/8/8/8/8/7R w - - 0 1",
+                      {{"h1", "h7", {}}, {"a8", "b8", {}}, {"e7", "e8", PieceType::Knight}});
+    REQUIRE(s.plies.size() == 3);
+    const Ply& cap = s.plies[0];
+    const Ply& promo = s.plies[2];
+    REQUIRE(cap.captured);
+    REQUIRE(*cap.captured == PieceType::Knight);
+    REQUIRE(promo.promotion);
+    REQUIRE(*promo.promotion == PieceType::Knight);
+    // The promoter is the side that did the capturing, not the side that lost the unit:
+    REQUIRE(promo.piece.color == cap.piece.color);
+    CHECK_FALSE(has_phoenix(s));
+}
+
 TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     // Black Kg8 mated by Ra8 along the eighth with white Kg6 covering f7/g7/h7:
     // a position that is already mate, hence a solution with no plies at all.
