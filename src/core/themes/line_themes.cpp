@@ -128,4 +128,15 @@ bool has_en_passant(const Solution& s) {
     return false;
 }
 
+bool has_kniest(const Solution& s) {
+    const Board& fin = final_board(s);
+    int bk = -1;
+    for (const auto& pp : fin.pieces())
+        if (pp.piece.type == PieceType::King && pp.piece.color == Color::Black) bk = pp.square;
+    if (bk < 0) return false;
+    for (const auto& p : s.plies)
+        if (p.captured && (int)p.to == bk) return true;
+    return false;
+}
+
 }  // namespace hm::themes

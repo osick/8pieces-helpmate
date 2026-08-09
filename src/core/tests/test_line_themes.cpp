@@ -321,6 +321,59 @@ TEST_CASE("a position with no black king self-blocks nothing", "[themes][line]")
     REQUIRE_FALSE(has_self_block(s));
 }
 
+// The black king's square on a board, or -1.
+static int bk_of(const Board& b) {
+    for (const auto& pp : b.pieces())
+        if (pp.piece.type == PieceType::King && pp.piece.color == Color::Black) return pp.square;
+    return -1;
+}
+
+TEST_CASE("kniest: a capture on the square the king is later mated on", "[themes][line]") {
+    // Black Kb8, white Na8 (undefended), white Kb6, white Rh1. Black plays
+    // Kb8xa8, capturing the knight; White answers Rh1-h8#. The corner mate is
+    // a textbook R+K pattern: Rh8 checks along the rank and covers b8, Kb6
+    // covers a7 and b7 -- verified with the real tablebase (material KRNvk):
+    // probing the start FEN gives dtm=2 (h#1), and `helpmate line` returns
+    // exactly "Kxa8 Rh8#".
+    Solution s = play("Nk6/8/1K6/8/8/8/8/7R b - - 0 1", {{"b8", "a8", {}}, {"h1", "h8", {}}});
+    const Board& fin = final_board(s);
+    REQUIRE(fin.state() == PosState::Checkmate);  // it really is mate
+    const int bk = bk_of(fin);
+    REQUIRE(bk >= 0);
+    bool captured_on_bk = false;
+    for (const auto& p : s.plies)
+        if (p.captured && (int)p.to == bk) captured_on_bk = true;
+    REQUIRE(captured_on_bk);  // the fixture really shows it
+    CHECK(has_kniest(s));
+}
+
+TEST_CASE("kniest: a capture elsewhere is not kniest", "[themes][line]") {
+    // Black Kh8 (never moves), black Na7, white Ke1, white Ra1. White plays
+    // Ra1xa7, a capture far from the black king's square. Verified with the
+    // real tablebase (material KRvkn): both the start FEN and the FEN after
+    // Rxa7 probe to finite, non-error dtm values (9 and 10 respectively), so
+    // the position and the move are legal chess, not just accepted by
+    // Board::legal_moves() in isolation.
+    Solution s = play("7k/n7/8/8/8/8/8/R3K3 w - - 0 1", {{"a1", "a7", {}}});
+    const int bk = bk_of(final_board(s));
+    bool any_capture = false, on_bk = false;
+    for (const auto& p : s.plies) {
+        if (p.captured) any_capture = true;
+        if (p.captured && (int)p.to == bk) on_bk = true;
+    }
+    REQUIRE(any_capture);  // a fixture with no capture would pass for the wrong reason
+    REQUIRE_FALSE(on_bk);
+    CHECK_FALSE(has_kniest(s));
+}
+
+TEST_CASE("kniest: the king merely ending on a square is not enough", "[themes][line]") {
+    // White king walks e1-e2; black king shuffles a8-b8. No captures at all,
+    // the same quiet-walk fixture shape used by the trajectory tests above.
+    Solution s = play("k7/8/8/8/8/8/8/4K3 w - - 0 1", {{"e1", "e2", {}}, {"a8", "b8", {}}});
+    for (const auto& p : s.plies) REQUIRE_FALSE(p.captured);
+    CHECK_FALSE(has_kniest(s));
+}
+
 TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     // Black Kg8 mated by Ra8 along the eighth with white Kg6 covering f7/g7/h7:
     // a position that is already mate, hence a solution with no plies at all.

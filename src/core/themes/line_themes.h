@@ -36,4 +36,8 @@ bool is_single_piece(const Solution& s);  // either side
 
 bool has_en_passant(const Solution& s);  // any ply is an en-passant capture
 
+// Some ply captures on square S, and in the mating position the black king
+// stands on S.
+bool has_kniest(const Solution& s);
+
 }  // namespace hm::themes

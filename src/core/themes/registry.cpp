@@ -66,6 +66,10 @@ const std::vector<ThemeDef>& theme_registry() {
          "the Analyzer's 'BK moves only'.",
          Needs::Solutions},
         {"en-passant", &any_of<&has_en_passant>, "A ply is an en-passant capture.", Needs::Solutions},
+        {"kniest", &any_of<&has_kniest>,
+         "Kniest: a unit is captured on the square where the black king is later "
+         "mated.",
+         Needs::Solutions},
     };
     return kRegistry;
 }
