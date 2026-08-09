@@ -32,6 +32,16 @@
      `taskset -c 0-3 ./build/helpmate probe "<FEN>" --tables $TT`
      A position that does not parse, or is not solvable when you expected a
      mate in *n*, is wrong — fix it now, not after the test goes green.
+
+     **If the material is too expensive to generate** (5-piece slices can take
+     tens of minutes), this check may be skipped — but then you must say so, in
+     both the report and the test comment, in those words. `play()`'s
+     engine-enforced legality plus `REQUIRE(final_board(s).state() ==
+     PosState::Checkmate)` is adequate evidence for a predicate test; it is not
+     evidence about solvability, optimality or uniqueness, and must not be
+     described as if it were. **Never write that a fixture was verified against
+     a tablebase unless it was.** A false verification claim in committed source
+     is worse than no claim: a later reader has no reason to doubt it.
   2. Build the solution with `play()`, which rejects an illegal move.
   3. **Assert the fixture's shape before asserting the detector.** Every
      positive test must first `REQUIRE` the facts the theme depends on — that
