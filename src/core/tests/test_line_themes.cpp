@@ -527,18 +527,23 @@ TEST_CASE("phoenix: a captured knight reborn by a black pawn's promotion", "[the
     // kniest/zajic fixtures (rook checks along the eighth, king covers
     // a7/b7), reached after the capture-then-promotion detour.
     //
-    // Material KRvknp (5 men): `helpmate gen` was attempted under the 180s
-    // single-command limit and did not complete. By the time it was killed
-    // it had generated every 4-piece sub-slice (KRvkb, KRvkn, KRvkp, KRvkq,
-    // KRvkr and their Kvk* promotion-only sub-slices) but had not started the
-    // 5-piece root; a backgrounded re-run was still deep inside a further
-    // sub-slice, KRvkbn, minutes later and was killed rather than left to run
-    // indefinitely. No `probe` or `line` output exists for this FEN; see
-    // task-7-report.md for the full log. Legality of every move comes from
-    // `play()`, which REQUIREs each move be found among Board::legal_moves()
-    // -- an impossible fixture fails loudly. Mate comes from
-    // REQUIRE(fin.state() == PosState::Checkmate) below, computed by the
-    // same real Board class the rest of the engine uses.
+    // Material KRvknp (5 men): task 7's own scratch `helpmate gen` attempt
+    // under the 180s single-command limit did not complete (see
+    // task-7-report.md). But `~/tb` -- a pre-built, read-only 190-table
+    // corpus, never written to -- already holds KRvknp.hm, and probing this
+    // exact start FEN against it confirms the fixture directly:
+    //   $ ./build/helpmate probe "k7/7n/1K6/8/8/8/1p6/7R w - - 0 1" --tables ~/tb
+    //   dtm=3 (h#1.5) count=27
+    //   $ ./build/helpmate line "k7/7n/1K6/8/8/8/1p6/7R w - - 0 1" --tables ~/tb --all --max 30
+    //   ... (27 lines total, including) ...
+    //   Rxh7 b1=N Rh8#
+    // `Rxh7 b1=N Rh8#` is this fixture's exact three-ply line, and it is one
+    // of the 27 optimal (dtm=3) solutions from this position -- not merely
+    // legal chess, but a genuine optimal helpmate line. Legality of every
+    // move also comes from `play()`, which REQUIREs each move be found
+    // among Board::legal_moves() -- an impossible fixture fails loudly.
+    // Mate comes from REQUIRE(fin.state() == PosState::Checkmate) below,
+    // computed by the same real Board class the rest of the engine uses.
     Solution s = play("k7/7n/1K6/8/8/8/1p6/7R w - - 0 1",
                       {{"h1", "h7", {}}, {"b2", "b1", PieceType::Knight}, {"h7", "h8", {}}});
     const Board& fin = final_board(s);
@@ -618,7 +623,7 @@ TEST_CASE("schnoebelen: a promoted queen captured on S without ever having moved
     // 3. Ka8-b8 (black filler; b8 is not covered by Kb6, so it is legal, not
     //    forced). 4. Nc2xa1 (the knight recaptures on S -- the LATER capture
     //    the theme requires; note the two filler plies in between, ply1 and
-    //    ply3, neither of which has from == a1, so this is a genuine
+    //    ply2, neither of which has from == a1, so this is a genuine
     //    "nothing moved from S in between" case, not just trivial adjacency
     //    of promotion-then-immediate-capture). 5. Kb8-a8 (black returns to
     //    the corner). 6. Rh4-h8# -- the familiar Kb6+R corner mate (rook
@@ -631,17 +636,26 @@ TEST_CASE("schnoebelen: a promoted queen captured on S without ever having moved
     // below, computed by the same real Board class the rest of the engine
     // uses.
     //
-    // Tablebase verification: attempted, not completed -- material too
-    // expensive. `helpmate gen KRNvkp` (5 men: White K,R,N; black k,p) was
-    // run under `taskset -c 0-3` with a 170s timeout. It returned with no
-    // KRNvkp.hm and no partially-built 5-piece sub-slice at all; the only
-    // files it had produced were the small 3- and 4-piece slices reachable
-    // by a single capture or promotion (KRvk, KNvk, KNvkb, KNvkn, KNvkq and
-    // the bare Kvk* endings). The KRN-combined slices themselves, let alone
-    // the KRNvkp root, never started. No `probe` or `line` output exists for
-    // this FEN; the evidence for this fixture is `play()` legality plus the
-    // real `Checkmate` state, per the brief's explicit allowance for
-    // material too expensive to generate.
+    // Tablebase cross-check: `~/tb` already holds KRNvkp.hm (a pre-built,
+    // read-only 190-table corpus; never written to). Probing this exact
+    // start FEN against it gives:
+    //   $ ./build/helpmate probe "k7/8/1K6/8/8/8/p1N5/7R b - - 0 1" --tables ~/tb
+    //   dtm=2 (h#1) count=3
+    //   $ ./build/helpmate line "k7/8/1K6/8/8/8/p1N5/7R b - - 0 1" --tables ~/tb --all
+    //   Kb8 Rh8#
+    //   a1=N Rh8#
+    //   a1=R Rh8#
+    // So the position's real optimal solutions are all h#1 (2 plies: Black
+    // has three tying replies, White always mates Rh8# next), none of them
+    // this fixture's 6-ply line. That is expected and not a problem: the
+    // fixture below is a hand-built LEGAL sequence built to exhibit the
+    // schnoebelen shape (a genuine gap between promotion and recapture),
+    // not a claim that it is what the engine would actually solve this
+    // position with. `has_schnoebelen` is a pure predicate over a
+    // `Solution`'s plies; it has no opinion on optimality, and this test
+    // does not need one either. The evidence for THIS fixture being legal
+    // chess is `play()`'s REQUIREs plus the real Checkmate state below, not
+    // the tablebase.
     Solution s = play("k7/8/1K6/8/8/8/p1N5/7R b - - 0 1", {{"a2", "a1", PieceType::Queen},
                                                            {"h1", "h4", {}},
                                                            {"a8", "b8", {}},
@@ -689,11 +703,15 @@ TEST_CASE("schnoebelen: moved away and back before being captured on S is not sc
           "[themes][line]") {
     // The case the "no ply in between moves FROM S" clause exists for. Same
     // skeleton again. 1. a2-a1=Q (promotion, S=a1). 2. Kb6-b5 (filler).
-    // 3. Qa1-a4 (the queen leaves S -- `from == a1`). 4. Kb5-b6 (filler,
-    // does not touch a1 or a4). 5. Qa4-a1 (the queen returns to S -- `to ==
-    // a1`, but note `from == a4`, NOT `from == a1`, so this ply itself is
-    // not a second departure from S). 6. Nc2xa1: the knight recaptures on S,
-    // a LATER ply with `captured` and `to == a1`.
+    // 3. Qa1-a4 (the queen leaves S -- `from == a1` -- and this also gives
+    // check: a4 and b5 are diagonally adjacent). 4. Kb5-b6 is therefore NOT
+    // filler but White's forced reply to that check -- one of several legal
+    // responses (White could equally have captured, Kb5xa4, since a4 is
+    // undefended); it happens not to touch a1 or a4 either way. 5. Qa4-a1
+    // (the queen returns to S -- `to == a1`, but note `from == a4`, NOT
+    // `from == a1`, so this ply itself is not a second departure from S).
+    // 6. Nc2xa1: the knight recaptures on S, a LATER ply with `captured`
+    // and `to == a1`.
     //
     // A naive detector that only checks "promoted on S, later a capture on
     // S" passes this fixture wrongly: ply0 promotes on a1 and ply5 captures
@@ -722,6 +740,20 @@ TEST_CASE("schnoebelen: moved away and back before being captured on S is not sc
     CHECK_FALSE(has_schnoebelen(s));  // but the unit was NOT on S continuously until that capture
 }
 
+TEST_CASE("schnoebelen: a promotion with no later capture at all is not schnoebelen", "[themes][line]") {
+    // Cheap to add (unlike the KRNvkp-scale skeleton above, this needs no
+    // mating material at all), covering the gap the other predicate tests
+    // in this file (kniest, zajic, phoenix) also leave: a promotion that is
+    // simply never followed by any capture on its square. White Kb1, Pg7;
+    // black Ka8. g7-g8=Q, then the position is left as-is -- one ply, no
+    // capture anywhere.
+    Solution s = play("k7/6P1/8/8/8/8/8/1K6 w - - 0 1", {{"g7", "g8", PieceType::Queen}});
+    REQUIRE(s.plies.size() == 1);
+    REQUIRE(s.plies[0].promotion);
+    REQUIRE_FALSE(s.plies[0].captured);
+    CHECK_FALSE(has_schnoebelen(s));
+}
+
 TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     // Black Kg8 mated by Ra8 along the eighth with white Kg6 covering f7/g7/h7:
     // a position that is already mate, hence a solution with no plies at all.
@@ -737,4 +769,5 @@ TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     REQUIRE_FALSE(has_self_block(s));
     REQUIRE_FALSE(has_en_passant(s));
     REQUIRE_FALSE(is_single_piece(s));  // no side moved at all
+    REQUIRE_FALSE(has_schnoebelen(s));  // no plies at all, so certainly no promotion on one
 }
