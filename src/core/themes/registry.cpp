@@ -8,11 +8,6 @@ namespace hm::themes {
 
 const std::vector<ThemeDef>& theme_registry() {
     static const std::vector<ThemeDef> kRegistry = {
-        {"homebase", &is_homebase,
-         "Homebase: every unit stands on a square it occupies in the initial game "
-         "array for its own colour and type. Pawns count anywhere on their home "
-         "rank.",
-         Needs::Position},
         {"set-play", &has_set_play,
          "Set play: the same position with the other side to move is also solvable.", Needs::Plane},
         {"pure", &any_of<&is_pure>,

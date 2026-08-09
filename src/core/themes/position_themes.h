@@ -5,16 +5,8 @@ namespace hm::themes {
 
 // Detectors that never enumerate solutions -- no walking the optimal-line
 // tree -- which is what makes them the themes a query can answer on a
-// saturated position. Two kinds live here: is_homebase reads the diagram
-// only (Needs::Position, no table access at all); has_set_play reads one
-// extra table value the caller already fetched for it (Needs::Plane) but
-// still never touches `solutions`.
-
-// Every unit stands on a square it occupies in the initial game array for its
-// own colour and type. Pawns count anywhere on their home rank: requiring the
-// file would make the theme useless, and the sense of the name is "nothing has
-// left home yet".
-bool is_homebase(const ThemeInput& in);
+// saturated position. has_set_play reads one extra table value the caller
+// already fetched for it (Needs::Plane) but still never touches `solutions`.
 
 // The same position with the OTHER side to move is solvable. Cheap for a
 // reason specific to this project: a cell index is independent of side to

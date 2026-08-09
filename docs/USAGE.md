@@ -608,7 +608,7 @@ comparable with established practice. `helpmate themes` always prints the
 authoritative, in-build list below — read that if this table and the binary
 you're running ever disagree.
 
-Twenty-three registry entries cover nineteen themes. Four themes exist in
+Twenty-two registry entries cover eighteen themes. Four themes exist in
 both a broad and a colour-specific form (`excelsior`/`excelsior:white`/
 `excelsior:black`, `single-piece`/`single-piece:white`/`single-piece:black`)
 because a detector only ever answers yes/no — it cannot itself report *which*
@@ -619,11 +619,6 @@ Real output, `./build/helpmate themes` on this checkout:
 
 ```
 $ helpmate themes
-homebase
-    needs: position
-    Homebase: every unit stands on a square it occupies in the initial game
-    array for its own colour and type. Pawns count anywhere on their home
-    rank.
 set-play
     needs: plane
     Set play: the same position with the other side to move is also
@@ -723,34 +718,36 @@ order of what a query has to do to answer it:
 | `plane` | One extra byte already read during the scan: the sibling side-to-move plane's value at the same cell index. | Same as `position` — no enumeration, saturation is not a problem. |
 | `solutions` | The full set of optimal solutions, which must be enumerated. | This is the pre-v0.9 behaviour: enumeration is forced, and a saturated position can never be answered because its exact solution set is unknowable. |
 
-Currently `homebase` is the only `position` theme and `set-play` is the only
-`plane` theme; every other theme, including all seven new ones except
-`homebase` and `set-play` themselves, needs `solutions`. When **every**
-theme named in a query needs only `position` and/or `plane`, `mine` skips
-solution enumeration entirely for that query — this is a capability change,
-not a speed optimisation: it makes `mine --theme homebase` answer on
-positions that `mine --theme pure` (or any other solutions-needing theme)
-silently skips via the saturation cap, described further under [Two things
-to know before you trust a result](#two-things-to-know-before-you-trust-a-result)
+Currently `set-play` is the only `plane` theme; every other theme needs
+`solutions`. No theme in the registry currently needs only `position`: the
+one candidate, `homebase`, was added and then removed during this same
+release, because it is not invariant under the tablebase index's symmetry
+group (see the CHANGELOG's "Fixed (branch review)" entry for the full
+mechanism). That failure establishes a real constraint on any future
+`Needs::Position` theme: it must be invariant under the index's symmetry
+group, or `mine` cannot answer it correctly. When **every** theme named in a
+query needs only `position` and/or `plane`, `mine` skips solution
+enumeration entirely for that query — this is a capability change, not a
+speed optimisation: it makes `mine --theme set-play` answer on positions
+that `mine --theme pure` (or any other solutions-needing theme) silently
+skips via the saturation cap, described further under [Two things to know
+before you trust a result](#two-things-to-know-before-you-trust-a-result)
 below. It does **not** mean these queries run at "scan speed" — evaluating
-a diagram or plane theme still requires materialising the position (decode
-+ `Board::from_pieces`), so the floor is decode speed. Measured on
+a plane theme still requires materialising the position (decode +
+`Board::from_pieces`), so the floor is decode speed. Measured on
 `KRvkbn --dtm 8` (31.5M candidates, zero matches): 26 seconds, down from an
 initial 51 seconds once `fen` construction was made lazy for the
 non-matching path. The number that matters is the comparison against
 actually enumerating those same 31.5M candidates' solutions, which was
-measured at over 100 hours — `homebase`/`set-play` turn a query that was
-previously unanswerable at any speed into one that finishes in well under a
-minute, which is the headline, not the seconds-level speed figure itself.
-That mechanism is real and verified for `set-play` — see the worked
-examples below — but for `homebase` specifically, see the flagged
-limitation in the next section: `mine --theme homebase` currently never
-returns a match on any material, for a structural reason unrelated to
-saturation.
+measured at over 100 hours — `set-play` turns a query that was previously
+unanswerable at any speed into one that finishes in well under a minute,
+which is the headline, not the seconds-level speed figure itself. That
+mechanism is real and verified for `set-play` — see the worked examples
+below.
 
-### The seven v0.9 themes: real examples, honestly reported
+### The six v0.9 themes: real examples, honestly reported
 
-Real, verified output for four of the seven — real, hand-derived FENs
+Real, verified output for three of the six — real, hand-derived FENs
 against `~/tb`, cross-checked with `probe --themes` the same way the
 pre-v0.9 table above was built:
 
@@ -772,26 +769,8 @@ themes: set-play pure model mirror promotion underpromotion single-piece single-
 
 $ helpmate probe "4k3/8/8/8/8/8/8/3QK3 b - - 0 1" --themes --tables ~/tb
 dtm=8 (h#4) count=78
-themes: homebase set-play pure model ideal mirror single-piece single-piece:black
+themes: set-play pure model ideal mirror single-piece single-piece:black
 ```
-
-**`mine --theme homebase` never returns a match, on any material, at any
-depth — a real limitation, not a gap in this table.** The last example above
-proves `homebase` genuinely fires for a real position (via `probe`, which
-evaluates the exact FEN supplied). But `mine`'s scan (`Board::from_pieces`
-over `s->index.decode(c, pp)`, `src/core/probe/tablebase.cpp`) only ever
-constructs the *canonical*, symmetry-reduced representative of each position
-class — and by construction (`src/core/indexing/kk.h`) the White king's file
-in that representative is always confined to files a-d (the a1-d1-d4
-triangle for pawnless material, the same a-d half for material with pawns),
-never file e. `homebase` requires the White king on its own home square,
-e1 — a condition `mine`'s canonical output can never satisfy, for any
-material, confirmed empirically: `helpmate mine KQvk --dtm 8 --theme
-homebase --max 5 --tables ~/tb` (12 ms) returns nothing, and no combination
-of material/dtm tried during this pass returned a match either. Flagged for
-the branch review — `set-play` shares `homebase`'s `needs: position`/`plane`
-speed characteristics without sharing this problem, since it has no
-absolute-square precondition.
 
 **`kniest`, `zajic` and `schnoebelen` have no verified real example in this
 pass.** All three need `solutions`, which forces full enumeration; several
@@ -838,7 +817,7 @@ discoverable without the docs, and never drifts from the binary.
 
   ```
   $ curl -s http://127.0.0.1:8642/v1/themes
-  {"themes":[{"name":"homebase","doc":"Homebase: every unit stands on a square it occupies in the initial game array for its own colour and type. Pawns count anywhere on their home rank.","needs":"position"},{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: ...","needs":"solutions"}, ...]}
+  {"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: ...","needs":"solutions"}, ...]}
   ```
 
   Each entry now carries a `needs` field (`"position"`, `"plane"` or
@@ -876,6 +855,26 @@ discoverable without the docs, and never drifts from the binary.
   For a color-flipped probe, `themes` is `null` (not an empty array — that
   would mean "no themes found") with a sibling `themes_note` explaining why;
   see [Two honest limitations](#two-honest-limitations) below.
+
+  For a **saturated** position (stored `count` == 255, the cap), `themes` is
+  still a real list — detection falls back to the first 100 of the
+  (unknowably larger) true solution set — but the list is
+  representative-dependent, not merely incomplete: two mirror-image FENs of
+  the same position class can enumerate a different first 100 and so report
+  different themes, while full enumeration would report the same theme for
+  both. `themes_note` says so, alongside the (non-null) list:
+
+  ```
+  $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/8/8/8/8/8/K1k2Q2 b - - 0 1" \
+      --data-urlencode "themes=true"
+  {"dtm":8,"count":255,"flipped":false,"notation":"h#4","themes":["pure","model","ideal","mirror","switchback","closed-walk","single-piece","single-piece:black"],"themes_note":"this position's solution count is saturated (255+); themes were detected from the first 100 solutions only, and the list may differ between mirror-image representatives of the same position."}
+  ```
+
+  The Python binding makes the same disclosure with a `RuntimeWarning`
+  instead of a sibling field, since `helpmate.Tablebase.themes()` returns a
+  plain list with no room for one: `tb.themes(fen)` on a saturated position
+  (with the auto-cap, i.e. no explicit `max=`) issues a `RuntimeWarning`
+  before returning, catchable with `pytest.warns`/`warnings.catch_warnings`.
 
 ### Two things to know before you trust a result
 
@@ -935,17 +934,17 @@ table cannot answer a walk of the *original* (unflipped) FEN. Flipping the
 position ourselves and detecting on *that* is not a fix: every detector is
 hard-coded to the black king, so the four colour-labelled themes
 (`single-piece:white`/`:black`, `excelsior:white`/`:black`) would come out
-swapped — a wrong answer dressed as a right one. The other nineteen registry
+swapped — a wrong answer dressed as a right one. The other eighteen registry
 entries, including `pure`/`model`/`ideal`/`mirror` and the two v0.9 line
 themes that reference the mated king (`kniest`, `zajic`), are in fact
 flip-invariant (they read from the black king's field the same way
 regardless of which side of the board it's on) and could, in principle,
 still be answered on a flipped board — that selective re-detection is a
 known follow-up, not something v0.9.0 ships; today the whole `themes` field
-is withheld rather than risk the four that aren't. `homebase` and `set-play`
-never reference a specific colour at all — they read the diagram/plane
-generically by each unit's own colour — so they carry no asymmetry to begin
-with; `phoenix`, `schnoebelen` and `pendulum` are likewise colour-generic in
+is withheld rather than risk the four that aren't. `set-play` never
+references a specific colour at all — it reads the plane generically by
+each unit's own colour — so it carries no asymmetry to begin with;
+`phoenix`, `schnoebelen` and `pendulum` are likewise colour-generic in
 their source. The CLI prints a note and exits 0; the API returns `"themes":
 null` with a `themes_note` field explaining why, distinct from `[]` (no
 themes found).
@@ -1217,7 +1216,15 @@ Reference:
   which can under-count themes relative to the CLI/API defaults for a
   position with more solutions than the `max` given. Raises
   `helpmate.MissingTableError` if a solution walk needs a table this
-  `Tablebase` doesn't have (e.g. a capture into missing sub-material).
+  `Tablebase` doesn't have (e.g. a capture into missing sub-material). When
+  the auto-cap engages on a saturated position (stored count == 255), the
+  returned list is representative-dependent, not merely incomplete (two
+  mirror-image FENs of the same position class can enumerate a different
+  first 100 solutions and report different themes) — `tb.themes()` issues a
+  `RuntimeWarning` saying so before returning, the same disclosure
+  `GET /v1/probe?themes=true`'s `themes_note` and `probe --themes`'s stderr
+  note make on their own surfaces. Passing an explicit `max` is treated as
+  an intentional override and does not warn.
 - `helpmate.themes()` — the theme registry as a list of `{"name": ...,
   "doc": ...}` dicts, in display order; the same data `helpmate themes` and
   `GET /v1/themes` print, generated from the in-build registry so it never
@@ -1382,13 +1389,13 @@ stats sidecar hasn't been read).
 ### `GET /v1/themes`
 
 The theme registry — name, definition, and `needs` for every one of the
-twenty-three entries in [Themes](#themes) above — served straight from the
+twenty-two entries in [Themes](#themes) above — served straight from the
 C++ build so the dashboard's theme picker never hard-codes a list that can
 drift from the binary it's talking to:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/themes
-{"themes":[{"name":"homebase","doc":"Homebase: every unit stands on a square it occupies in the initial game array for its own colour and type. Pawns count anywhere on their home rank.","needs":"position"},{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure).","needs":"solutions"}, ...]}
+{"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure).","needs":"solutions"}, ...]}
 ```
 
 ### `GET /v1/materials/{name}/stats`

@@ -221,12 +221,10 @@ def test_explorer_shows_detected_themes(page, server):
     # landed): {"themes": ["set-play", "pure", "model", "ideal", "mirror",
     # "single-piece", "single-piece:white", "single-piece:black"]}. set-play
     # (Needs::Plane, sorts first in registry order) legitimately fires here:
-    # the same position with the other side to move is solvable. homebase
-    # does NOT fire -- none of White king f6, Black king h7, White queen g1
-    # sit on that piece's own game-array square. Assert the actual rendered
-    # content, not just that something is there -- a smoke check here would
-    # pass with the themes_note/themeSummary priority reversed, or with an
-    # entirely wrong theme list.
+    # the same position with the other side to move is solvable. Assert the
+    # actual rendered content, not just that something is there -- a smoke
+    # check here would pass with the themes_note/themeSummary priority
+    # reversed, or with an entirely wrong theme list.
     assert text == ("set-play · pure · model · ideal · mirror · single-piece · "
                      "single-piece:white · single-piece:black")
 

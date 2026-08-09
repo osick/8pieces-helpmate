@@ -297,10 +297,10 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
         Board b = Board::from_pieces(pp, stm);
         // fen is built lazily -- only where it is actually consumed
         // (lines()/solutions() below, or cb() on an actual match). A
-        // Needs::Position theme (e.g. homebase) never touches it, and
-        // b.fen() is not free: skipping it is most of the point of this
-        // function honouring `needs` at all, since evaluating a
-        // Needs::Position detector never requires it.
+        // Needs::Position theme (the diagram alone, no table access) never
+        // touches it, and b.fen() is not free: skipping it is most of the
+        // point of this function honouring `needs` at all, since evaluating
+        // a Needs::Position detector never requires it.
         std::string fen;
         // v.count is this cell's own stored count -- the same number a
         // probe() of `fen` would return. Using it directly saves a

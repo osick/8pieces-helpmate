@@ -343,7 +343,6 @@ verbatim from its real output on this checkout (`helpmate 0.9.0`):
 
 | Theme | Needs | Definition |
 |---|---|---|
-| `homebase` | position | Every unit stands on a square it occupies in the initial game array for its own colour and type. Pawns count anywhere on their home rank. |
 | `set-play` | plane | The same position with the other side to move is also solvable. |
 | `pure` | solutions | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
 | `model` | solutions | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
@@ -367,7 +366,7 @@ verbatim from its real output on this checkout (`helpmate 0.9.0`):
 | `schnoebelen` | solutions | A promoted unit is captured on its promotion square without ever having moved. |
 | `pendulum` | solutions | A unit oscillates between exactly two squares, returning at least twice. |
 
-Nineteen themes, twenty-three registry entries: `excelsior` and
+Eighteen themes, twenty-two registry entries: `excelsior` and
 `single-piece` each carry a broad form plus `:white`/`:black` variants,
 because a detector only answers yes/no and can't itself report which side
 showed it. See [USAGE.md](docs/USAGE.md#themes) for naming provenance (the
@@ -453,8 +452,8 @@ That covers the pre-v0.9 sixteen registry entries with a verified real
 position — none omitted. `mine`ing `en-passant`/`excelsior`/`promotion`/
 `underpromotion` needs a material with pawns on both sides, so all four went
 against `KPvkp` (16 MB); some depths took over a minute to scan (`KPvkp
---dtm 8` in particular), most returned in well under a second. The seven
-v0.9 themes (`homebase`, `set-play`, `kniest`, `zajic`, `phoenix`,
+--dtm 8` in particular), most returned in well under a second. The six
+v0.9 themes (`set-play`, `kniest`, `zajic`, `phoenix`,
 `schnoebelen`, `pendulum`) are not in this table; see [USAGE.md](docs/USAGE.md#themes)
 for what has and hasn't been verified for those, honestly reported.
 

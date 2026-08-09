@@ -182,9 +182,15 @@ set_tests_properties(cli_themes PROPERTIES PASS_REGULAR_EXPRESSION "closed-walk"
 # Task 10: every entry's `needs` (Position/Plane/Solutions) must be printed --
 # it is how a user tells which themes answer without enumerating solutions,
 # and so still answer on positions whose stored solution count saturates.
+# `needs: plane` is asserted, not `needs: solutions`: `set-play` is the only
+# non-Solutions entry in the registry (homebase, the one Needs::Position
+# theme, was removed by the branch review -- see CHANGELOG -- because it is
+# not invariant under the tablebase index's symmetry group), so `plane` is
+# the value most likely to silently vanish from the printed output if this
+# field regressed, exactly like `position` was before the removal.
 add_test(NAME cli_themes_shows_needs COMMAND helpmate themes)
 set_tests_properties(cli_themes_shows_needs PROPERTIES
-    PASS_REGULAR_EXPRESSION "needs: position")
+    PASS_REGULAR_EXPRESSION "needs: plane")
 add_test(NAME cli_missing COMMAND helpmate probe "8/8/8/8/3n4/4k3/8/4K3 w - - 0 1" --tables ${CLI_TT})
 # v0.5.0: --verbose lifecycle lines go to stderr (ctest matches merged output);
 # on a re-run every slice is already on disk, so "cached" must appear.

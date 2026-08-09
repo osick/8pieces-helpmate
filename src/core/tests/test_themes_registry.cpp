@@ -13,8 +13,8 @@ static Solution at(const std::string& fen) {
     return Solution{*b, {}};
 }
 
-TEST_CASE("the registry holds all twenty-three entries", "[themes][registry]") {
-    REQUIRE(theme_registry().size() == 23);
+TEST_CASE("the registry holds all twenty-two entries", "[themes][registry]") {
+    REQUIRE(theme_registry().size() == 22);
 }
 
 TEST_CASE("every entry has a name, a detector and a doc", "[themes][registry]") {

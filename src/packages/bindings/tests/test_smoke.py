@@ -81,14 +81,41 @@ def test_theme_registry_is_exposed():
 def test_theme_registry_exposes_needs():
     # Task 10: `needs` is how a caller tells which themes answer without
     # enumerating solutions -- and so still answer on positions whose stored
-    # solution count saturates (capped at 255). homebase/set-play are the two
-    # non-Solutions themes among the 23 in this build.
+    # solution count saturates (capped at 255). set-play is the one
+    # non-Solutions theme among the 22 in this build.
     entries = helpmate.themes()
     assert all("needs" in e for e in entries)
     by_name = {e["name"]: e for e in entries}
-    assert by_name["homebase"]["needs"] == "position"
     assert by_name["set-play"]["needs"] == "plane"
     assert by_name["model"]["needs"] == "solutions"
+
+
+def test_themes_on_saturated_position_warns_about_truncation(tables):
+    # Same disclosure app.py's /v1/probe?themes=true makes via themes_note,
+    # and the CLI's `probe --themes` stderr note: on a saturated position
+    # (stored count == 255, the cap) tb.themes()'s auto-cap falls back to the
+    # first 100 of an unknowably larger true solution set, and the result is
+    # representative-dependent, not merely incomplete. A Python return value
+    # has no sibling-field slot for a note, so this is a warnings.warn(),
+    # catchable with pytest.warns.
+    #
+    # FEN measured directly against a freshly generated KQvk table (dtm=8,
+    # `helpmate mine KQvk --dtm 8 --count 255` picks this FEN out of 5273
+    # saturated dtm=8 cells; `helpmate probe ... --themes` confirms
+    # count=255).
+    saturated_fen = "8/8/8/8/8/8/8/K1k2Q2 b - - 0 1"
+    tb = helpmate.Tablebase(tables)
+    assert tb.probe(saturated_fen)[1] == 255  # count
+    with pytest.warns(RuntimeWarning, match="satur"):
+        names = tb.themes(saturated_fen)
+    assert isinstance(names, list) and names  # still answered, not empty/None
+
+    # An explicit max= is the caller overriding the auto-cap on purpose --
+    # no surprise-truncation note to give in that case.
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        tb.themes(saturated_fen, max=50)
 
 
 def test_probe_themes_and_mine_theme_filter(tables):

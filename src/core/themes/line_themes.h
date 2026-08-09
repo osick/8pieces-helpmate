@@ -37,11 +37,20 @@ bool is_single_piece(const Solution& s);  // either side
 bool has_en_passant(const Solution& s);  // any ply is an en-passant capture
 
 // Some ply captures on square S, and in the mating position the black king
-// stands on S.
+// stands on S. S is read as `p.to`, the capture ply's destination square.
+// For an en-passant capture the victim actually stands BESIDE `p.to` (see
+// trajectory.cpp's `gone` computation), not on it -- this detector does not
+// correct for that. Deliberate, not an oversight: `p.to` is where the
+// capturing unit ends up, and kniest asks whether the king is later mated on
+// that square, which is well-defined for ep captures too. Behaviour is
+// unchanged; this is a documented reading, not a bug.
 bool has_kniest(const Solution& s);
 
 // A unit is captured on square S, a later ply recaptures on S with the black
-// king, and the black king is mated standing on S.
+// king, and the black king is mated standing on S. Same `p.to`-as-S reading
+// as has_kniest above, including for an en-passant first capture: S is the
+// capturing pawn's destination square, not the (adjacent) square the ep
+// victim actually stood on. Deliberate, not an oversight.
 bool has_zajic(const Solution& s);
 
 // A unit of type T belonging to side C is captured, and a LATER ply promotes

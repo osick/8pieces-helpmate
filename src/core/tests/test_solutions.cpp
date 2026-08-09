@@ -429,7 +429,7 @@ TEST_CASE("mine --ends stays SAN-keyed, not (from,to,promotion)-keyed", "[themes
     check_ends("8/8/8/8/8/8/2q5/K1k1Q3 b - - 0 1", 1, 2);
 }
 
-TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide it", "[themes][mine]") {
+TEST_CASE("a solutions-free theme does not enumerate, so saturation cannot hide it", "[themes][mine]") {
     Tablebase tb(gen_kqvk());
     auto m = Material::parse("KQvk");
     REQUIRE(m);
@@ -458,7 +458,7 @@ TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide i
 
     MineFilter f;
     f.dtm = 8;
-    f.themes = {"homebase"};
+    f.themes = {"set-play"};
     uint64_t skipped = 0;
     int hits = 0;
     tb.mine(
@@ -469,7 +469,8 @@ TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide i
         },
         &skipped);
     // The whole point: nothing was skipped for saturation, because nothing was
-    // enumerated. A solutions-needing theme on the same table does skip.
+    // enumerated -- set-play is Needs::Plane, one sibling-plane byte, never
+    // `solutions`. A solutions-needing theme on the same table does skip.
     CHECK(skipped == 0);
 }
 
@@ -482,18 +483,23 @@ TEST_CASE("a position-only theme does not enumerate, so saturation cannot hide i
 // independently, through a different code path (Tablebase::probe on the
 // flipped position, not mine's chunk scan) against a real generated table.
 TEST_CASE("mine's set-play scan reads the sibling plane at the correct cell", "[themes][mine]") {
-    Tablebase tb(gen_kqvk());
-    auto m = Material::parse("KQvk");
+    // KPvk, not KQvk: KPvk's 86,688 cells span two 65,536-cell scan chunks,
+    // so chunk_base is nonzero for part of the scan -- a chunk-boundary bug
+    // in the sibling-plane read (the other_stm read_values() call) would be
+    // invisible on a single-chunk material like KQvk (29,568 cells) but not
+    // here.
+    Tablebase tb(gen_kpvk());
+    auto m = Material::parse("KPvk");
     REQUIRE(m);
 
     std::vector<std::string> hits;
     tb.mine(*m, MineFilter{.dtm = 2, .themes = {"set-play"}}, [&](const std::string& f) {
         hits.push_back(f);
-        return hits.size() < 700;
+        return hits.size() < 200;
     });
-    // Must not pass vacuously: KQvk's dtm=2 pool has 423 set-play hits out of
-    // 580 positions total (measured directly via the CLI against a freshly
-    // generated KQvk table), so an empty result here would mean the wiring is
+    // Must not pass vacuously: KPvk's dtm=2 pool has 57 set-play hits out of
+    // 69 positions total (measured directly via the CLI against a freshly
+    // generated KPvk table), so an empty result here would mean the wiring is
     // broken, not that the theme is merely rare.
     REQUIRE_FALSE(hits.empty());
 

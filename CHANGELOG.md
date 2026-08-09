@@ -10,12 +10,9 @@ bumps may change behavior).
 
 ### Added
 
-- **Seven new themes, registry 16 → 23 entries.** `helpmate themes` is the
+- **Six new themes, registry 16 → 22 entries.** `helpmate themes` is the
   authoritative source (definitions below are copied verbatim from its real
   output on this checkout):
-  - `homebase` (needs: position) — "Homebase: every unit stands on a square
-    it occupies in the initial game array for its own colour and type. Pawns
-    count anywhere on their home rank."
   - `set-play` (needs: plane) — "Set play: the same position with the other
     side to move is also solvable."
   - `kniest` (needs: solutions) — "Kniest: a unit is captured on the square
@@ -42,32 +39,40 @@ bumps may change behavior).
   only the diagram or the plane.** Previously `mine --theme NAME` always
   enumerated a candidate's optimal solutions before running any detector,
   which caps out at a saturated (255+) solution count and silently skips
-  that position. Position-only and plane-only themes (`homebase`,
-  `set-play`) now answer without enumerating, so they also answer on
-  positions whose solution count saturates — positions every
-  solutions-needing theme (`pure`, `model`, …) still skips. **This is a
-  capability change, not a speed-up**: it does not make `mine --theme
-  homebase` "scan speed" — evaluating a diagram theme still requires
-  materialising the position (decode + `Board::from_pieces`), so its floor
-  is decode speed, not scan speed. Measured on `KRvkbn --dtm 8` (31.5M
-  candidates, zero matches): 26 seconds, down from an initial 51 seconds
-  once `fen` construction was made lazy for the non-matching path. The
-  comparison that matters is against actually enumerating those same
-  candidates' solutions, measured at over 100 hours — `homebase`/`set-play`
-  make queries answerable on saturated material that were previously
-  unanswerable at any speed, not merely faster.
+  that position. The plane-only theme (`set-play`) now answers without
+  enumerating, so it also answers on positions whose solution count
+  saturates — positions every solutions-needing theme (`pure`, `model`, …)
+  still skips. A `Needs::Position` theme (the diagram alone, no table access)
+  would get the same treatment, but every candidate considered for this
+  release turned out not to be invariant under the tablebase index's
+  symmetry group — see the branch review fix for `homebase`'s removal,
+  below. **This is a capability change, not a speed-up**: it does not make
+  `mine --theme set-play` "scan speed" — evaluating the sibling plane still
+  requires materialising the position (decode + `Board::from_pieces`), so
+  its floor is decode speed, not scan speed. Measured on `KRvkbn --dtm 8`
+  (31.5M candidates, zero matches): 26 seconds, down from an initial 51
+  seconds once `fen` construction was made lazy for the non-matching path.
+  The comparison that matters is against actually enumerating those same
+  candidates' solutions, measured at over 100 hours — `set-play` makes
+  queries answerable on saturated material that were previously unanswerable
+  at any speed, not merely faster.
 
-### Known limitations
+### Fixed (branch review)
 
-- **`mine --theme homebase` never returns a match, on any material, at any
-  depth.** Discovered while writing this release's docs, not fixed here:
-  `mine`'s scan only ever constructs the *canonical*, symmetry-reduced
-  representative of each position class, and the White king's file in that
-  representative is always confined to files a-d (`src/core/indexing/kk.h`)
-  — never file e, the king's own home file, which `homebase` requires. `probe
-  --themes` is unaffected — it evaluates the exact FEN supplied, not a
-  canonicalised one — so `homebase` correctly fires there. Flagged for the
-  branch review; see `docs/USAGE.md#themes` for the empirical evidence.
+- **`homebase` removed: not invariant under the tablebase index's symmetry
+  group.** Added earlier in this same unreleased version, then removed
+  before release. `mine`'s index quotients positions by a symmetry group —
+  a cell stores an *equivalence class*, not a position — and the White
+  king's file in the stored representative is always confined to files a-d
+  (`src/core/indexing/kk.cpp`), with no inverse transform on decode
+  (`slice_index.cpp`). `homebase` is not invariant under that group (the
+  file mirror maps the king's e-file to d and the queen's d-file to e), so
+  the answer would depend on which representative was decoded — in practice
+  `mine --theme homebase` returned zero rows on every material. This is
+  deeper than a missing case, and not fixable by special-casing the decode:
+  a `Needs::Position` theme must be invariant under the index's symmetry
+  group, or it cannot be mined at all. All other themes in this release were
+  checked against this constraint and are invariant.
 
 ## [0.8.2] - 2026-08-08
 

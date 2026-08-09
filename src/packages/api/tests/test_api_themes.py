@@ -114,6 +114,27 @@ def test_probe_themes_missing_subtable_is_404_not_500(client_partial):
     assert r.json()["error"]["code"] == "unknown_material"
 
 
+def test_probe_themes_on_saturated_position_carries_a_truncation_note(kqvk_dir, client):
+    # A saturated position (stored count == 255, the cap) is not merely an
+    # incomplete theme list -- it is representative-dependent: tb.themes()
+    # falls back to detecting from the first 100 of the (unknowably larger)
+    # true solution set, and which 100 you get depends on which mirror-image
+    # FEN you probed. Measured directly against a freshly generated KQvk
+    # table (dtm=8, `helpmate mine KQvk --dtm 8 --count 255` picks this FEN
+    # out of 5273 saturated dtm=8 cells; `helpmate probe ... --themes`
+    # confirms count=255 and the same CLI stderr note this test's API
+    # equivalent is for).
+    saturated_fen = "8/8/8/8/8/8/8/K1k2Q2 b - - 0 1"
+    r = client.get("/v1/probe", params={"fen": saturated_fen, "themes": "true"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["count"] == 255
+    assert isinstance(body["themes"], list) and body["themes"]  # still answered, not None
+    assert "themes_note" in body
+    assert "satur" in body["themes_note"].lower()
+    assert "100" in body["themes_note"]
+
+
 def test_cli_and_api_agree_on_themes_above_100(kqvk_dir, client):
     # I-2 regression: the CLI caps enumeration at the position's own count;
     # the API used to always ask the binding for its fixed max=100 default.

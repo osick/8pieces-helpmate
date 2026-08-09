@@ -14,8 +14,8 @@ of what a detector would need.
 
 | Group | What it needs | Themes |
 |---|---|---|
-| **DONE** | Already shipped | 17 |
-| **A1** | Diagram only | 4 |
+| **DONE** | Already shipped | 16 |
+| **A1** | Diagram only | 5 |
 | **A2** | Mating position only | 4 |
 | **A3** | The other side-to-move plane (set play) | 2 |
 | **A4** | Within one solution | 38 |
@@ -31,9 +31,9 @@ of what a detector would need.
 | **ALIAS** | Aliases | 11 |
 | | **Total** | **295** |
 
-## DONE -- Already shipped  (17)
+## DONE -- Already shipped  (16)
 
-Seventeen of the glossary's names. Two more shipped detectors -- `pure` and `underpromotion` -- are **not** glossary entries, so they do not appear anywhere in this document; that is 19 detectors, 23 registry entries counting the colour variants.
+Sixteen of the glossary's names. Two more shipped detectors -- `pure` and `underpromotion` -- are **not** glossary entries, so they do not appear anywhere in this document; that is 18 detectors, 22 registry entries counting the colour variants.
 
 | Theme | Tier | Note |
 |---|---|---|
@@ -41,7 +41,6 @@ Seventeen of the glossary's names. Two more shipped detectors -- `pure` and `und
 | Closed walk | A | implemented |
 | En passant | A | implemented; the format supports ep exactly |
 | Excelsior | A | implemented |
-| Homebase | A | implemented; needs: position (answers on saturated positions, where the count-255+ cap skips enumerating themes) |
 | Ideal mate | A | implemented |
 | Kniest theme | A | implemented |
 | Mirror mate | A | implemented |
@@ -51,16 +50,17 @@ Seventeen of the glossary's names. Two more shipped detectors -- `pure` and `und
 | Promotion | A | implemented |
 | Schnoebelen theme | A | implemented |
 | Self-block | A | implemented |
-| Set play | A | implemented; needs: plane (answers on saturated positions, same as homebase) |
+| Set play | A | implemented; needs: plane (answers on saturated positions without enumerating solutions) |
 | Switchback | A | implemented |
 | Zajic theme | A | implemented |
 
-## A1 -- Diagram only -- no solutions needed  (4)
+## A1 -- Diagram only -- no solutions needed  (5)
 
-Readable from the starting position alone. Note corrected 2026-08: this does *not* run at "scan speed" -- evaluating a diagram theme still requires materialising the position (decode + `Board::from_pieces`), so the floor is decode speed, not scan speed. What it does deliver is answering on saturated positions where every solutions-needing theme today gives up (see Homebase in DONE above).
+Readable from the starting position alone. Note corrected 2026-08: this does *not* run at "scan speed" -- evaluating a diagram theme still requires materialising the position (decode + `Board::from_pieces`), so the floor is decode speed, not scan speed. What it does deliver is answering on saturated positions where every solutions-needing theme today gives up.
 
 | Theme | Tier | Note |
 |---|---|---|
+| Homebase | A | built and then **removed** 2026-08: the tablebase index quotients positions by a symmetry group (see `src/core/indexing/kk.cpp`), and Homebase is not invariant under it -- a cell stores an equivalence class, not a position, so the answer would depend on which mirror representative was decoded. A `Needs::Position` theme must be invariant under the index's symmetry group, or it cannot be mined at all; Homebase is the only one of the four in this group known to fail that test |
 | Kindergarten problem | A | material of the diagram |
 | Obtrusive piece | A | static reading of the diagram's pawn structure |
 | Promoted force | A | static reading of the diagram |
