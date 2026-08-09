@@ -6,7 +6,7 @@ COVBUILD ?= build-cov
 # `make coverage GCOV=/path/to/gcov-N` if your compiler isn't gcc-13.
 GCOV ?= gcov-13
 .PHONY: configure build test slowtest stress coverage clean jstest \
-	install install-dev test-core test-cli test-api test-web test-bindings test-repo test-all \
+	install install-dev install-bin uninstall-bin test-core test-cli test-api test-web test-bindings test-repo test-all \
 	lint typecheck format-check format
 configure:
 	cmake -S . -B $(BUILD)
@@ -38,6 +38,31 @@ install:
 install-dev:
 	python -m pip install ".[dev]"
 	python -m pip install "./src/packages/api[dev]" "./src/packages/web[dev]"
+
+# Install just the `helpmate` CLI binary, with no Python involved. `make
+# install` above already puts it on PATH as part of the wheel, so this is for
+# people who want the binary alone -- a system package, a container layer, or
+# a machine with no Python.
+#
+# PREFIX defaults to /usr/local (the GNU convention), which needs root:
+#
+#   sudo make install-bin                  # /usr/local/bin/helpmate
+#   make install-bin PREFIX=$$HOME/.local  # rootless; already on PATH on most distros
+#   make install-bin DESTDIR=/tmp/stage    # stage into a package root
+#
+# This wraps `cmake --install`, which is the mechanism -- there is no bespoke
+# install script to keep in sync with the build. DESTDIR is honoured by cmake
+# --install directly, so packagers get the usual two-step.
+PREFIX ?= /usr/local
+
+install-bin: build
+	cmake --install $(BUILD) --prefix "$(PREFIX)"
+
+# CMake generates no uninstall rule, and inventing one that deletes paths from
+# a manifest is how packaging accidents happen. The binary is the only
+# installed artifact, so removing it is a one-liner:
+uninstall-bin:
+	rm -f "$(DESTDIR)$(PREFIX)/bin/helpmate"
 
 test-core: build
 	$(BUILD)/helpmate_tests "~[slow]"
