@@ -332,36 +332,47 @@ which `helpmate gen` command builds it, `3` bad usage/unparseable input).
 
 Since v0.8.0, `mine --theme NAME` (repeatable) and `probe --themes` search and
 annotate by named composition theme — a property of a mate (`pure`, `model`,
-…) or of the moves in a solution (`promotion`, `switchback`, …). `helpmate
-themes` is the authoritative source for the vocabulary and always matches
-this build exactly; the table below is copied verbatim from its real output
-on this checkout (`helpmate 0.8.0`):
+…) or of the moves in a solution (`promotion`, `switchback`, …). Since v0.9.0
+every theme also declares `needs` — `position`, `plane` or `solutions` — the
+input it actually reads; see [Two things to know before you trust a
+result](#two-things-to-know-before-you-trust-a-result) below and
+[USAGE.md](docs/USAGE.md#needs-what-a-theme-actually-reads) for the full
+explanation. `helpmate themes` is the authoritative source for the
+vocabulary and always matches this build exactly; the table below is copied
+verbatim from its real output on this checkout (`helpmate 0.9.0`):
 
-| Theme | Definition |
-|---|---|
-| `pure` | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
-| `model` | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
-| `ideal` | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
-| `mirror` | Every square adjacent to the black king is empty, of either colour. |
-| `promotion` | A pawn promotes during the solution. |
-| `underpromotion` | A pawn promotes to rook, bishop or knight. |
-| `excelsior` | A pawn standing on its own second rank at the start of the solution promotes during it (either colour). |
-| `excelsior:white` | Excelsior by a white pawn. |
-| `excelsior:black` | Excelsior by a black pawn. |
-| `switchback` | A unit leaves a square and returns to it, having visited exactly one intermediate square. |
-| `closed-walk` | Rundlauf: a unit returns to its departure square having visited two or more distinct intermediate squares, so it traverses a circuit rather than retracing its path. |
-| `self-block` | A black unit other than the king moves onto a square of its own king's field and stands there unattacked in the mating position, blocking a flight square. |
-| `single-piece` | Every move by one side is made by the same unit (either side). |
-| `single-piece:white` | Every white move is made by the same unit. |
-| `single-piece:black` | Every black move is made by the same unit; with the king, this is the Analyzer's "BK moves only". |
-| `en-passant` | A ply is an en-passant capture. |
+| Theme | Needs | Definition |
+|---|---|---|
+| `homebase` | position | Every unit stands on a square it occupies in the initial game array for its own colour and type. Pawns count anywhere on their home rank. |
+| `set-play` | plane | The same position with the other side to move is also solvable. |
+| `pure` | solutions | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
+| `model` | solutions | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
+| `ideal` | solutions | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
+| `mirror` | solutions | Every square adjacent to the black king is empty, of either colour. |
+| `promotion` | solutions | A pawn promotes during the solution. |
+| `underpromotion` | solutions | A pawn promotes to rook, bishop or knight. |
+| `excelsior` | solutions | A pawn standing on its own second rank at the start of the solution promotes during it (either colour). |
+| `excelsior:white` | solutions | Excelsior by a white pawn. |
+| `excelsior:black` | solutions | Excelsior by a black pawn. |
+| `switchback` | solutions | A unit leaves a square and returns to it, having visited exactly one intermediate square. |
+| `closed-walk` | solutions | Rundlauf: a unit returns to its departure square having visited two or more distinct intermediate squares, so it traverses a circuit rather than retracing its path. |
+| `self-block` | solutions | A black unit other than the king moves onto a square of its own king's field and stands there unattacked in the mating position, blocking a flight square. |
+| `single-piece` | solutions | Every move by one side is made by the same unit (either side). |
+| `single-piece:white` | solutions | Every white move is made by the same unit. |
+| `single-piece:black` | solutions | Every black move is made by the same unit; with the king, this is the Analyzer's "BK moves only". |
+| `en-passant` | solutions | A ply is an en-passant capture. |
+| `kniest` | solutions | A unit is captured on the square where the black king is later mated. |
+| `zajic` | solutions | A unit is captured on the square where the black king is mated, and the king recaptures there. |
+| `phoenix` | solutions | A unit is captured and a pawn of the same colour later promotes to that same type. |
+| `schnoebelen` | solutions | A promoted unit is captured on its promotion square without ever having moved. |
+| `pendulum` | solutions | A unit oscillates between exactly two squares, returning at least twice. |
 
-Twelve themes, sixteen registry entries: `excelsior` and `single-piece` each
-carry a broad form plus `:white`/`:black` variants, because a detector only
-answers yes/no and can't itself report which side showed it. See
-[USAGE.md](docs/USAGE.md#themes) for naming provenance (the [Helpmate
-Analyzer glossary](https://helpman.komtera.lt/themes.html)) and the API
-surfaces.
+Nineteen themes, twenty-three registry entries: `excelsior` and
+`single-piece` each carry a broad form plus `:white`/`:black` variants,
+because a detector only answers yes/no and can't itself report which side
+showed it. See [USAGE.md](docs/USAGE.md#themes) for naming provenance (the
+[Helpmate Analyzer glossary](https://helpman.komtera.lt/themes.html)) and the
+API surfaces.
 
 ### Worked example: mine, probe, line
 
@@ -438,11 +449,14 @@ verification command works for every row).
 | `excelsior:black` | `8/3p4/8/8/1P6/8/8/K1k5 b - - 0 1` | `KPvkp` (`--dtm 10`) |
 | `en-passant`, `single-piece:white` | `8/p7/8/1P6/8/8/8/k1K5 b - - 0 1` | `KPvkp` (`--dtm 6`) |
 
-That covers all sixteen registry entries with a verified real position — none
-omitted. `mine`ing `en-passant`/`excelsior`/`promotion`/`underpromotion` needs
-a material with pawns on both sides, so all four went against `KPvkp` (16 MB);
-some depths took over a minute to scan (`KPvkp --dtm 8` in particular), most
-returned in well under a second.
+That covers the pre-v0.9 sixteen registry entries with a verified real
+position — none omitted. `mine`ing `en-passant`/`excelsior`/`promotion`/
+`underpromotion` needs a material with pawns on both sides, so all four went
+against `KPvkp` (16 MB); some depths took over a minute to scan (`KPvkp
+--dtm 8` in particular), most returned in well under a second. The seven
+v0.9 themes (`homebase`, `set-play`, `kniest`, `zajic`, `phoenix`,
+`schnoebelen`, `pendulum`) are not in this table; see [USAGE.md](docs/USAGE.md#themes)
+for what has and hasn't been verified for those, honestly reported.
 
 ### Two things to know before you trust a result
 

@@ -6,6 +6,69 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.9.0] - 2026-08-09
+
+### Added
+
+- **Seven new themes, registry 16 → 23 entries.** `helpmate themes` is the
+  authoritative source (definitions below are copied verbatim from its real
+  output on this checkout):
+  - `homebase` (needs: position) — "Homebase: every unit stands on a square
+    it occupies in the initial game array for its own colour and type. Pawns
+    count anywhere on their home rank."
+  - `set-play` (needs: plane) — "Set play: the same position with the other
+    side to move is also solvable."
+  - `kniest` (needs: solutions) — "Kniest: a unit is captured on the square
+    where the black king is later mated."
+  - `zajic` (needs: solutions) — "Zajic: a unit is captured on the square
+    where the black king is mated, and the king recaptures there."
+  - `phoenix` (needs: solutions) — "Phoenix: a unit is captured and a pawn of
+    the same colour later promotes to that same type."
+  - `schnoebelen` (needs: solutions) — "Schnoebelen: a promoted unit is
+    captured on its promotion square without ever having moved."
+  - `pendulum` (needs: solutions) — "Pendulum: a unit oscillates between
+    exactly two squares, returning at least twice."
+
+### Changed
+
+- **Detector signature: `ThemeInput` instead of a bare `Solution`.** Every
+  detector now takes a `ThemeInput` (the diagram, the sibling side-to-move
+  plane's value, and the solutions) and declares which of those three it
+  actually reads via a `needs` field (`Position`, `Plane`, or `Solutions`).
+  The CLI, Python bindings, and the dashboard all report each theme's
+  `needs`; `GET /v1/themes` needed no source change since it already passes
+  the registry through verbatim.
+- **`mine` no longer enumerates solutions when every requested theme needs
+  only the diagram or the plane.** Previously `mine --theme NAME` always
+  enumerated a candidate's optimal solutions before running any detector,
+  which caps out at a saturated (255+) solution count and silently skips
+  that position. Position-only and plane-only themes (`homebase`,
+  `set-play`) now answer without enumerating, so they also answer on
+  positions whose solution count saturates — positions every
+  solutions-needing theme (`pure`, `model`, …) still skips. **This is a
+  capability change, not a speed-up**: it does not make `mine --theme
+  homebase` "scan speed" — evaluating a diagram theme still requires
+  materialising the position (decode + `Board::from_pieces`), so its floor
+  is decode speed, not scan speed. Measured on `KRvkbn --dtm 8` (31.5M
+  candidates, zero matches): 26 seconds, down from an initial 51 seconds
+  once `fen` construction was made lazy for the non-matching path. The
+  comparison that matters is against actually enumerating those same
+  candidates' solutions, measured at over 100 hours — `homebase`/`set-play`
+  make queries answerable on saturated material that were previously
+  unanswerable at any speed, not merely faster.
+
+### Known limitations
+
+- **`mine --theme homebase` never returns a match, on any material, at any
+  depth.** Discovered while writing this release's docs, not fixed here:
+  `mine`'s scan only ever constructs the *canonical*, symmetry-reduced
+  representative of each position class, and the White king's file in that
+  representative is always confined to files a-d (`src/core/indexing/kk.h`)
+  — never file e, the king's own home file, which `homebase` requires. `probe
+  --themes` is unaffected — it evaluates the exact FEN supplied, not a
+  canonicalised one — so `homebase` correctly fires there. Flagged for the
+  branch review; see `docs/USAGE.md#themes` for the empirical evidence.
+
 ## [0.8.2] - 2026-08-08
 
 ### Added
