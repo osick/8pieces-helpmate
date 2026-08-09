@@ -175,4 +175,19 @@ bool has_phoenix(const Solution& s) {
     return false;
 }
 
+// A pawn promotes on square S; a later ply captures on S; and no ply in
+// between moves a unit FROM S. The promoted unit is captured without ever
+// having moved.
+bool has_schnoebelen(const Solution& s) {
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        if (!s.plies[i].promotion) continue;
+        const int sq = (int)s.plies[i].to;
+        for (size_t j = i + 1; j < s.plies.size(); ++j) {
+            if ((int)s.plies[j].from == sq) break;  // it moved: not Schnoebelen
+            if (s.plies[j].captured && (int)s.plies[j].to == sq) return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace hm::themes

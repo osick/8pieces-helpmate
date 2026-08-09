@@ -78,6 +78,10 @@ const std::vector<ThemeDef>& theme_registry() {
          "Phoenix: a unit is captured and a pawn of the same colour later promotes "
          "to that same type.",
          Needs::Solutions},
+        {"schnoebelen", &any_of<&has_schnoebelen>,
+         "Schnoebelen: a promoted unit is captured on its promotion square without "
+         "ever having moved.",
+         Needs::Solutions},
     };
     return kRegistry;
 }

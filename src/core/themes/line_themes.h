@@ -48,4 +48,9 @@ bool has_zajic(const Solution& s);
 // a pawn of side C to type T -- the captured unit is reborn.
 bool has_phoenix(const Solution& s);
 
+// A pawn promotes on square S; a later ply captures on S; and no ply in
+// between moves a unit FROM S. The promoted unit is captured without ever
+// having moved.
+bool has_schnoebelen(const Solution& s);
+
 }  // namespace hm::themes

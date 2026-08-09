@@ -527,9 +527,14 @@ TEST_CASE("phoenix: a captured knight reborn by a black pawn's promotion", "[the
     // kniest/zajic fixtures (rook checks along the eighth, king covers
     // a7/b7), reached after the capture-then-promotion detour.
     //
-    // Material KRvknp (5 men) took over 170s to fully generate for `helpmate
-    // gen` and was killed per the 180s single-command limit; see
-    // task-7-report.md for the exact log. Legality of every move comes from
+    // Material KRvknp (5 men): `helpmate gen` was attempted under the 180s
+    // single-command limit and did not complete. By the time it was killed
+    // it had generated every 4-piece sub-slice (KRvkb, KRvkn, KRvkp, KRvkq,
+    // KRvkr and their Kvk* promotion-only sub-slices) but had not started the
+    // 5-piece root; a backgrounded re-run was still deep inside a further
+    // sub-slice, KRvkbn, minutes later and was killed rather than left to run
+    // indefinitely. No `probe` or `line` output exists for this FEN; see
+    // task-7-report.md for the full log. Legality of every move comes from
     // `play()`, which REQUIREs each move be found among Board::legal_moves()
     // -- an impossible fixture fails loudly. Mate comes from
     // REQUIRE(fin.state() == PosState::Checkmate) below, computed by the
@@ -568,10 +573,10 @@ TEST_CASE("phoenix: the promoting side must be the captured unit's owner, not th
           "[themes][line]") {
     // White Kb6, Rh1, Pe7; black Ka8, Nh7; White to move. White plays
     // Rh1xh7, capturing the black knight (owner: Black, same shape as the
-    // positive). Black shuffles Ka8-b8 (a spacer move so the promotion is a
-    // LATER, distinct ply -- b8 is not covered by White's remaining force,
-    // so this is a genuinely free reply, not a forced one). White then
-    // promotes its OWN pawn, e7-e8=N -- a knight reborn, but on the WRONG
+    // positive). Black plays Ka8-b8, a spacer move so the promotion is a
+    // LATER, distinct ply -- but it is not a free choice: the white king on
+    // b6 covers both a7 and b7, so b8 is Black's only legal move here. White
+    // then promotes its OWN pawn, e7-e8=N -- a knight reborn, but on the WRONG
     // side: the promoter is White, the same side that did the capturing,
     // not Black, the side that lost the knight. A detector that derives
     // owner from the mover's own colour instead of the opponent's would
@@ -596,6 +601,125 @@ TEST_CASE("phoenix: the promoting side must be the captured unit's owner, not th
     // The promoter is the side that did the capturing, not the side that lost the unit:
     REQUIRE(promo.piece.color == cap.piece.color);
     CHECK_FALSE(has_phoenix(s));
+}
+
+// All three schnoebelen fixtures share one skeleton: White Kb6, Nc2; black
+// Ka8, Pa2; black to move. Black's pawn promotes on a1 (S=a1); the knight on
+// c2 is placed so it can recapture there (c2-a1 is a legal knight move) once
+// the fixture calls for it. The corner geometry (Kb6 covering a7/b7) is the
+// same one used by kniest/zajic/phoenix, reused here for the positive
+// fixture's mate so the mating pattern is already load-bearing precedent,
+// not a new invention.
+
+TEST_CASE("schnoebelen: a promoted queen captured on S without ever having moved", "[themes][line]") {
+    // White Kb6, Rh1, Nc2; black Ka8, Pa2; black to move.
+    // 1. a2-a1=Q (promotion, S=a1; not check -- a1 shares no file/rank/
+    //    diagonal with b6). 2. Rh1-h4 (white filler, does not touch a1).
+    // 3. Ka8-b8 (black filler; b8 is not covered by Kb6, so it is legal, not
+    //    forced). 4. Nc2xa1 (the knight recaptures on S -- the LATER capture
+    //    the theme requires; note the two filler plies in between, ply1 and
+    //    ply3, neither of which has from == a1, so this is a genuine
+    //    "nothing moved from S in between" case, not just trivial adjacency
+    //    of promotion-then-immediate-capture). 5. Kb8-a8 (black returns to
+    //    the corner). 6. Rh4-h8# -- the familiar Kb6+R corner mate (rook
+    //    checks along the eighth, king covers a7/b7; the knight sitting on
+    //    a1 plays no further part).
+    //
+    // Legality of every move comes from `play()`, which REQUIREs each move
+    // be found among Board::legal_moves() -- an impossible fixture fails
+    // loudly. Mate comes from REQUIRE(fin.state() == PosState::Checkmate)
+    // below, computed by the same real Board class the rest of the engine
+    // uses.
+    //
+    // Tablebase verification: attempted, not completed -- material too
+    // expensive. `helpmate gen KRNvkp` (5 men: White K,R,N; black k,p) was
+    // run under `taskset -c 0-3` with a 170s timeout. It returned with no
+    // KRNvkp.hm and no partially-built 5-piece sub-slice at all; the only
+    // files it had produced were the small 3- and 4-piece slices reachable
+    // by a single capture or promotion (KRvk, KNvk, KNvkb, KNvkn, KNvkq and
+    // the bare Kvk* endings). The KRN-combined slices themselves, let alone
+    // the KRNvkp root, never started. No `probe` or `line` output exists for
+    // this FEN; the evidence for this fixture is `play()` legality plus the
+    // real `Checkmate` state, per the brief's explicit allowance for
+    // material too expensive to generate.
+    Solution s = play("k7/8/1K6/8/8/8/p1N5/7R b - - 0 1", {{"a2", "a1", PieceType::Queen},
+                                                           {"h1", "h4", {}},
+                                                           {"a8", "b8", {}},
+                                                           {"c2", "a1", {}},
+                                                           {"b8", "a8", {}},
+                                                           {"h4", "h8", {}}});
+    const Board& fin = final_board(s);
+    REQUIRE(fin.state() == PosState::Checkmate);
+    REQUIRE(s.plies.size() == 6);
+
+    const Ply& promo = s.plies[0];
+    REQUIRE(promo.promotion);
+    REQUIRE((int)promo.to == sq("a1"));  // promotes on S
+
+    const Ply& recap = s.plies[3];
+    REQUIRE(recap.captured);             // Nxa1
+    REQUIRE((int)recap.to == sq("a1"));  // ... a LATER capture on S
+
+    for (size_t k = 1; k < 3; ++k) REQUIRE((int)s.plies[k].from != sq("a1"));  // nothing left S first
+    CHECK(has_schnoebelen(s));
+}
+
+TEST_CASE("schnoebelen: moved away and captured elsewhere is not schnoebelen", "[themes][line]") {
+    // Same skeleton, no rook needed since this fixture does not reach mate.
+    // 1. a2-a1=Q (promotion, S=a1). 2. Kb6-b5 (white filler). 3. Qa1-a3 (the
+    // queen itself leaves S -- `from == a1`). 4. Nc2xa3: White captures the
+    // queen, but on a3, not on S (c2-a3 is a legal knight move; c2-a1's
+    // sibling). There is no capture on a1 anywhere in this fixture.
+    Solution s = play("k7/8/1K6/8/8/8/p1N5/8 b - - 0 1",
+                      {{"a2", "a1", PieceType::Queen}, {"b6", "b5", {}}, {"a1", "a3", {}}, {"c2", "a3", {}}});
+    REQUIRE(s.plies.size() == 4);
+    REQUIRE(s.plies[0].promotion);
+    REQUIRE((int)s.plies[0].to == sq("a1"));
+
+    const Ply& leaves = s.plies[2];
+    REQUIRE((int)leaves.from == sq("a1"));  // the promoted queen moves away from S
+
+    const Ply& cap = s.plies[3];
+    REQUIRE(cap.captured);
+    REQUIRE((int)cap.to != sq("a1"));  // ... and is captured elsewhere, not on S
+    CHECK_FALSE(has_schnoebelen(s));
+}
+
+TEST_CASE("schnoebelen: moved away and back before being captured on S is not schnoebelen",
+          "[themes][line]") {
+    // The case the "no ply in between moves FROM S" clause exists for. Same
+    // skeleton again. 1. a2-a1=Q (promotion, S=a1). 2. Kb6-b5 (filler).
+    // 3. Qa1-a4 (the queen leaves S -- `from == a1`). 4. Kb5-b6 (filler,
+    // does not touch a1 or a4). 5. Qa4-a1 (the queen returns to S -- `to ==
+    // a1`, but note `from == a4`, NOT `from == a1`, so this ply itself is
+    // not a second departure from S). 6. Nc2xa1: the knight recaptures on S,
+    // a LATER ply with `captured` and `to == a1`.
+    //
+    // A naive detector that only checks "promoted on S, later a capture on
+    // S" passes this fixture wrongly: ply0 promotes on a1 and ply5 captures
+    // on a1, and that is all such a detector looks at. The correct detector
+    // must stop scanning the instant it finds ply2 (`from == a1`), well
+    // before it ever reaches the capture on ply5, and so must answer false.
+    Solution s = play("k7/8/1K6/8/8/8/p1N5/8 b - - 0 1", {{"a2", "a1", PieceType::Queen},
+                                                          {"b6", "b5", {}},
+                                                          {"a1", "a4", {}},
+                                                          {"b5", "b6", {}},
+                                                          {"a4", "a1", {}},
+                                                          {"c2", "a1", {}}});
+    REQUIRE(s.plies.size() == 6);
+    REQUIRE(s.plies[0].promotion);
+    REQUIRE((int)s.plies[0].to == sq("a1"));
+
+    bool left_s = false;
+    for (size_t k = 1; k < s.plies.size(); ++k)
+        if ((int)s.plies[k].from == sq("a1")) left_s = true;
+    REQUIRE(left_s);  // the promoted queen really does leave S at some point
+
+    const Ply& recap = s.plies[5];
+    REQUIRE(recap.captured);
+    REQUIRE((int)recap.to == sq("a1"));  // ... and S really is captured on again, later still
+
+    CHECK_FALSE(has_schnoebelen(s));  // but the unit was NOT on S continuously until that capture
 }
 
 TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
