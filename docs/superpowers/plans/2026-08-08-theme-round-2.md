@@ -28,13 +28,25 @@
   vacuously. Construct each fixture with this procedure instead:
 
   1. Write the position you intend, then **check it is legal and is what you
-     think** before using it:
+     think** before using it. **Probe against `~/tb` first** — it already holds
+     190 generated tables including most 5-piece materials, and reading it is
+     free and instant:
+     `taskset -c 0-3 ./build/helpmate probe "<FEN>" --tables ~/tb`
+     `~/tb` is READ-ONLY: probing and mining it are fine, writing to it is
+     never allowed. Only if the material is genuinely absent there should you
+     generate a scratch table:
      `taskset -c 0-3 ./build/helpmate probe "<FEN>" --tables $TT`
      A position that does not parse, or is not solvable when you expected a
      mate in *n*, is wrong — fix it now, not after the test goes green.
 
-     **If the material is too expensive to generate** (5-piece slices can take
-     tens of minutes), this check may be skipped — but then you must say so, in
+     **If the material is absent from `~/tb` AND too expensive to generate**
+     (5-piece slices can take tens of minutes), this check may be skipped.
+     Check `~/tb` before concluding this: three tasks in this round wrongly
+     wrote "no probe or line output exists for this FEN" when the table was
+     sitting in `~/tb` all along, because the instructions said to generate a
+     scratch table and they never tried simply reading the corpus. A claim that
+     evidence is unavailable is still a claim, and must be checked before it is
+     written down — but then you must say so, in
      both the report and the test comment, in those words. `play()`'s
      engine-enforced legality plus `REQUIRE(final_board(s).state() ==
      PosState::Checkmate)` is adequate evidence for a predicate test; it is not
