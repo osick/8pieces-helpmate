@@ -159,10 +159,7 @@ PYBIND11_MODULE(_helpmate, mod) {
                 py::dict d;
                 d["name"] = std::string(t.name);
                 d["doc"] = std::string(t.doc);
-                const char* n = t.needs == themes::Needs::Position ? "position"
-                                : t.needs == themes::Needs::Plane  ? "plane"
-                                                                   : "solutions";
-                d["needs"] = n;
+                d["needs"] = std::string(themes::needs_name(t.needs));
                 out.append(std::move(d));
             }
             return out;

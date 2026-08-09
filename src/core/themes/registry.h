@@ -13,6 +13,21 @@ namespace hm::themes {
 // most expensive input any of its themes asks for.
 enum class Needs : uint8_t { Position = 0, Plane = 1, Solutions = 2 };
 
+// The wire/display name of a Needs value. Defined once: every surface that
+// reports `needs` uses this, so adding a fourth value cannot silently fall
+// through to "solutions" in one surface and not another.
+constexpr std::string_view needs_name(Needs n) {
+    switch (n) {
+        case Needs::Position:
+            return "position";
+        case Needs::Plane:
+            return "plane";
+        case Needs::Solutions:
+            return "solutions";
+    }
+    return "solutions";
+}
+
 // Everything a detector may read. The CALLER fetches; the detector stays a
 // pure function, so it is still testable against a hand-built position with
 // no .hm file on disk. `solutions` is empty unless some theme needs it, and
