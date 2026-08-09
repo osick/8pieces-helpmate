@@ -13,4 +13,12 @@ namespace hm::themes {
 // left home yet".
 bool is_homebase(const ThemeInput& in);
 
+// The same position with the OTHER side to move is solvable. Cheap for a
+// reason specific to this project: a cell index is independent of side to
+// move -- side to move selects the PLANE, not the index -- so this is the
+// same cell in the sibling plane, one extra byte from a read the scan is
+// already doing. Absent input means the caller did not fetch it, and is
+// answered "no": never guess a yes.
+bool has_set_play(const ThemeInput& in);
+
 }  // namespace hm::themes

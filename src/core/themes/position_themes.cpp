@@ -32,4 +32,8 @@ bool is_homebase(const ThemeInput& in) {
     return true;
 }
 
+bool has_set_play(const ThemeInput& in) {
+    return in.other_plane.has_value() && in.other_plane->dtm <= DTM_MAX;
+}
+
 }  // namespace hm::themes

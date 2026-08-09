@@ -13,6 +13,8 @@ const std::vector<ThemeDef>& theme_registry() {
          "array for its own colour and type. Pawns count anywhere on their home "
          "rank.",
          Needs::Position},
+        {"set-play", &has_set_play,
+         "Set play: the same position with the other side to move is also solvable.", Needs::Plane},
         {"pure", &any_of<&is_pure>,
          "Pure mate: every square of the black king's field is unavailable for "
          "exactly one reason, and the king's square is attacked exactly once "

@@ -56,3 +56,26 @@ TEST_CASE("homebase is registered and needs only the position", "[themes][regist
     REQUIRE(t != nullptr);
     REQUIRE(t->needs == Needs::Position);
 }
+
+static bool setplay(std::optional<ValuePair> other) {
+    auto b = Board::from_fen("4k3/8/8/8/8/8/8/4K3 b - - 0 1");
+    REQUIRE(b);
+    std::vector<Solution> none;
+    ThemeInput in{*b, other, none};
+    return has_set_play(in);
+}
+
+TEST_CASE("set-play: the other plane being solvable is the whole definition", "[themes][position]") {
+    CHECK(setplay(ValuePair{4, 1}));
+    CHECK(setplay(ValuePair{0, 1}));
+    CHECK_FALSE(setplay(ValuePair{DTM_UNSOLVABLE, 0}));
+    CHECK_FALSE(setplay(ValuePair{DTM_INVALID, 0}));
+    // Absent means "the caller did not fetch it" -- never guess a yes.
+    CHECK_FALSE(setplay(std::nullopt));
+}
+
+TEST_CASE("set-play is registered and needs the plane", "[themes][registry]") {
+    const auto* t = find_theme("set-play");
+    REQUIRE(t != nullptr);
+    REQUIRE(t->needs == Needs::Plane);
+}

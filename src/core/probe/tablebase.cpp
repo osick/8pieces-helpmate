@@ -260,8 +260,9 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
 
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
     // Enumerate only when something actually needs the solutions. A query whose
-    // themes read only the diagram runs at scan speed AND answers on saturated
-    // positions, where enumeration is impossible and every other theme gives up.
+    // themes read only the diagram skips enumeration and answers on saturated
+    // positions too, at the cost of one decode plus one Board construction per
+    // candidate -- measured at 26s over a 31.5M-candidate query.
     const bool want_solutions = want_shape || (!dets.empty() && need == themes::Needs::Solutions);
     std::vector<PlacedPiece> pp;
     // Read the two planes in block-sized chunks instead of one cell at a time.
@@ -272,6 +273,14 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     constexpr size_t kScanChunk = 1 << 16;
     const uint64_t plane_cells = s->index.size();
     std::vector<uint8_t> dtm_buf(kScanChunk), cnt_buf(kScanChunk);
+    // Third buffer for the sibling side-to-move plane, filled only when some
+    // requested theme needs it (Needs::Plane). A cell index is independent of
+    // side to move -- side to move selects the plane, not the index -- so the
+    // sibling value for candidate cell c is the same cell c read from the
+    // other plane, one extra read_values() call over the same chunk.
+    const Color other_stm = stm == Color::White ? Color::Black : Color::White;
+    const bool want_plane = !dets.empty() && need >= themes::Needs::Plane;
+    std::vector<uint8_t> other_buf(want_plane ? kScanChunk : 0);
     uint64_t chunk_base = 0;
     size_t chunk_n = 0;
     for (uint64_t c = 0; c < plane_cells; ++c) {
@@ -279,6 +288,7 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
             chunk_base = c;
             chunk_n = (size_t)std::min<uint64_t>(kScanChunk, plane_cells - c);
             s->reader.read_values(stm, chunk_base, chunk_n, dtm_buf.data(), cnt_buf.data());
+            if (want_plane) s->reader.read_values(other_stm, chunk_base, chunk_n, other_buf.data(), nullptr);
         }
         ValuePair v{dtm_buf[c - chunk_base], cnt_buf[c - chunk_base]};
         if (v.dtm != (uint8_t)f.dtm) continue;
@@ -336,7 +346,9 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
                 if (fen.empty()) fen = b.fen();
                 sols = solutions(fen, (int)v.count);
             }
-            themes::ThemeInput in{b, std::nullopt, sols};
+            std::optional<ValuePair> other;
+            if (want_plane) other = ValuePair{other_buf[c - chunk_base], 0};
+            themes::ThemeInput in{b, other, sols};
             bool all_present = true;
             for (auto d : dets) {  // AND across themes; `any` within one is now
                 if (!d(in)) {      // inside d itself (any_of<>)
@@ -355,7 +367,15 @@ std::vector<std::string> Tablebase::themes_of(const std::string& fen, int max) c
     auto b = Board::from_fen(fen);
     if (!b) throw std::invalid_argument("bad FEN (or castling rights): " + fen);
     std::vector<Solution> sols = solutions(fen, max);
-    themes::ThemeInput in{*b, std::nullopt, sols};
+    std::optional<ValuePair> other;
+    Board flipped = *b;
+    flipped.reset(b->pieces(), b->stm() == Color::White ? Color::Black : Color::White);
+    try {
+        other = value_of(flipped);
+    } catch (const MissingTableError&) {
+        other = std::nullopt;  // no table for the sibling plane: answer "no"
+    }
+    themes::ThemeInput in{*b, other, sols};
     return themes::detect(in);
 }
 
