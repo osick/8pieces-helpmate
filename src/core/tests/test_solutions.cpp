@@ -497,11 +497,14 @@ TEST_CASE("mine's set-play scan reads the sibling plane at the correct cell", "[
         hits.push_back(f);
         return hits.size() < 200;
     });
-    // Must not pass vacuously: KPvk's dtm=2 pool has 57 set-play hits out of
-    // 69 positions total (measured directly via the CLI against a freshly
-    // generated KPvk table), so an empty result here would mean the wiring is
-    // broken, not that the theme is merely rare.
-    REQUIRE_FALSE(hits.empty());
+    // Must not pass vacuously: KPvk's dtm=2 pool has 23 set-play hits out of
+    // 69 positions total under the D-1 definition (measured directly via the
+    // CLI against a freshly generated KPvk table), so an empty result here
+    // would mean the wiring is broken, not that the theme is merely rare.
+    // (Under the old, pre-fix "sibling solvable at any distance" definition
+    // this was 57 -- the drop to 23 is this fix doing its job: it now
+    // excludes every sibling at D+1, keeping only true D-1 set play.)
+    REQUIRE(hits.size() == 23);
 
     for (const auto& f : hits) {
         auto b = Board::from_fen(f);
@@ -510,5 +513,9 @@ TEST_CASE("mine's set-play scan reads the sibling plane at the correct cell", "[
         flipped.reset(b->pieces(), b->stm() == Color::White ? Color::Black : Color::White);
         auto p = tb.probe(flipped.fen());
         REQUIRE(p.has_value());  // the sibling plane must be solvable
+        // Stronger than "solvable": it must be solvable at exactly D - 1
+        // (this position's own dtm is 2, per the MineFilter above), not
+        // merely at any distance -- that is the whole point of the fix.
+        REQUIRE(p->dtm == 1);
     }
 }

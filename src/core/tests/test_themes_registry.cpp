@@ -71,12 +71,12 @@ TEST_CASE("detect uses any semantics across solutions", "[themes][registry]") {
     auto not_mate = at("8/8/8/8/8/8/8/K6k w - - 0 1");
 
     std::vector<Solution> both{not_mate, model_mate};
-    ThemeInput both_in{model_mate.start, std::nullopt, both};
+    ThemeInput both_in{model_mate.start, ValuePair{DTM_UNSOLVABLE, 0}, std::nullopt, both};
     auto only_second = detect(both_in);
     REQUIRE(std::find(only_second.begin(), only_second.end(), "model") != only_second.end());
 
     std::vector<Solution> one{not_mate};
-    ThemeInput one_in{not_mate.start, std::nullopt, one};
+    ThemeInput one_in{not_mate.start, ValuePair{DTM_UNSOLVABLE, 0}, std::nullopt, one};
     auto neither = detect(one_in);
     REQUIRE(std::find(neither.begin(), neither.end(), "model") == neither.end());
 }
@@ -84,7 +84,7 @@ TEST_CASE("detect uses any semantics across solutions", "[themes][registry]") {
 TEST_CASE("detect returns names in registry order", "[themes][registry]") {
     auto mate = at("R5k1/8/6K1/8/8/8/8/8 b - - 0 1");
     std::vector<Solution> sols{mate};
-    ThemeInput in{mate.start, std::nullopt, sols};
+    ThemeInput in{mate.start, ValuePair{DTM_UNSOLVABLE, 0}, std::nullopt, sols};
     auto names = detect(in);
     size_t prev = 0;
     for (const auto& n : names) {
@@ -99,7 +99,7 @@ TEST_CASE("detect on an empty solution set finds nothing", "[themes][registry]")
     auto b = Board::from_fen("8/8/8/8/8/8/8/K6k w - - 0 1");
     REQUIRE(b);
     std::vector<Solution> sols;
-    ThemeInput in{*b, std::nullopt, sols};
+    ThemeInput in{*b, ValuePair{DTM_UNSOLVABLE, 0}, std::nullopt, sols};
     REQUIRE(detect(in).empty());
 }
 
@@ -129,7 +129,7 @@ TEST_CASE("any_of finds a theme shown by only ONE of several solutions", "[theme
     promoting.plies.push_back(p);
 
     std::vector<Solution> sols{plain, promoting};
-    ThemeInput in{*b, std::nullopt, sols};
+    ThemeInput in{*b, ValuePair{DTM_UNSOLVABLE, 0}, std::nullopt, sols};
     auto names = detect(in);
     REQUIRE(std::find(names.begin(), names.end(), "promotion") != names.end());
 }

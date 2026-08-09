@@ -36,6 +36,13 @@ using Detector = bool (*)(const ThemeInput&);
 struct ThemeDef { std::string_view name; Detector fn; std::string_view doc; Needs needs; };
 ```
 
+> **v0.9.1 update:** `ThemeInput` gained a fourth field, `ValuePair value` —
+> this position's own stored dtm/count, alongside `other_plane`, the sibling's
+> value — because `set-play`'s shipped definition turned out to be a bug (see
+> the "Three definition decisions worth arguing with" section below, revised
+> for the fix). Both production construction sites (`Tablebase::mine`'s scan
+> loop and `Tablebase::themes_of`) were updated to supply it.
+
 The existing sixteen entries keep their bodies untouched and are registered
 through a wrapper that supplies the `any`:
 
@@ -75,7 +82,7 @@ convention will return a confident, wrong result.
 
 | name | needs | definition |
 |---|---|---|
-| `set-play` | Plane | The same position with the **other** side to move is solvable (its stored `dtm <= DTM_MAX`). |
+| `set-play` | Plane | The same position with the **other** side to move is solvable at exactly `dtm = D - 1`, where `D` is this position's own stored dtm. **(Revised in v0.9.1 — see below; originally shipped in v0.9.0 as "solvable, full stop", which was a bug.)** |
 | `kniest` | Solutions | Some ply captures on square *S*, and in the final position the mated black king stands on *S*. |
 | `phoenix` | Solutions | Some ply captures a unit of type *T* ∈ {Q,R,B,N} belonging to side *C*, and a later ply promotes a pawn of side *C* to type *T*. |
 | `schnoebelen` | Solutions | Some ply promotes to a unit on square *S*; a later ply captures on *S*; and no ply in between moves a unit **from** *S*. The promoted unit is captured without ever having moved. |
@@ -104,11 +111,25 @@ were checked against that constraint and are invariant.
 
 ### Three definition decisions worth arguing with
 
-**`set-play` is defined as solvability of the other plane, full stop** — not
-"solvable at the same distance" and not "solvable one ply shorter", which the
-glossary distinguishes as *Short set play*. That distinction is a separate
-theme and is not in this round. The definition here is the catalogue's note
-("the other plane of the same position") made operational.
+**`set-play` was shipped in v0.9.0 defined as solvability of the other plane,
+full stop — this was a bug, fixed in v0.9.1.** "Solvable, full stop" is
+nearly vacuous (it matched 423 of 580, 72.9%, `KQvk --dtm 2` positions) and
+conflates two opposite things: a sibling solvable one move *sooner* (the mate
+is already available; the side to move merely delays it — this is set play)
+and a sibling solvable one move *longer* (flipping the side to move makes the
+mate take longer — the opposite of set play, but the "full stop" definition
+reported it as a match anyway). Parity forces the sibling to `D - 1` or
+`D + 1`, never `D`.
+
+**As of v0.9.1, `set-play` means the sibling plane is solvable at exactly
+`dtm = D - 1`**, where `D` is this position's own stored dtm — which is why
+`ThemeInput` had to gain the `value` field noted above; comparing only the
+sibling's bare solvability cannot express "one move sooner than *this*
+position." On the same `KQvk --dtm 2` query this drops the match count from
+423 to 183 (31.6%). The looser "solvable at any shorter distance" reading —
+not just exactly one move sooner — is a genuinely separate theme, which the
+glossary distinguishes as *Short set play*; that remains unimplemented, and
+is not what "D - 1" above means.
 
 Mechanically it is as cheap as it sounds, and that is the point of the theme:
 a cell index is independent of side to move (side to move selects the

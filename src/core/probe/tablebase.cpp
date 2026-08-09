@@ -348,7 +348,7 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
             }
             std::optional<ValuePair> other;
             if (want_plane) other = ValuePair{other_buf[c - chunk_base], 0};
-            themes::ThemeInput in{b, other, sols};
+            themes::ThemeInput in{b, v, other, sols};
             bool all_present = true;
             for (auto d : dets) {  // AND across themes; `any` within one is now
                 if (!d(in)) {      // inside d itself (any_of<>)
@@ -367,6 +367,13 @@ std::vector<std::string> Tablebase::themes_of(const std::string& fen, int max) c
     auto b = Board::from_fen(fen);
     if (!b) throw std::invalid_argument("bad FEN (or castling rights): " + fen);
     std::vector<Solution> sols = solutions(fen, max);
+    ValuePair value{DTM_UNSOLVABLE, 0};
+    try {
+        value = value_of(*b);
+    } catch (const MissingTableError&) {
+        // no table for this position's own plane: leave the DTM_UNSOLVABLE
+        // sentinel rather than inventing a value -- has_set_play answers "no".
+    }
     std::optional<ValuePair> other;
     Board flipped = *b;
     flipped.reset(b->pieces(), b->stm() == Color::White ? Color::Black : Color::White);
@@ -375,7 +382,7 @@ std::vector<std::string> Tablebase::themes_of(const std::string& fen, int max) c
     } catch (const MissingTableError&) {
         other = std::nullopt;  // no table for the sibling plane: answer "no"
     }
-    themes::ThemeInput in{*b, other, sols};
+    themes::ThemeInput in{*b, value, other, sols};
     return themes::detect(in);
 }
 

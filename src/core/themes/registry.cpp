@@ -9,7 +9,11 @@ namespace hm::themes {
 const std::vector<ThemeDef>& theme_registry() {
     static const std::vector<ThemeDef> kRegistry = {
         {"set-play", &has_set_play,
-         "Set play: the same position with the other side to move is also solvable.", Needs::Plane},
+         "Set play: the same position with the other side to move is solvable one move "
+         "sooner (sibling dtm == this position's dtm - 1) -- the mate is already "
+         "available and the side to move merely delays it. A sibling one move LONGER "
+         "is the opposite of set play, not set play.",
+         Needs::Plane},
         {"pure", &any_of<&is_pure>,
          "Pure mate: every square of the black king's field is unavailable for "
          "exactly one reason, and the king's square is attacked exactly once "

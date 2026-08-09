@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.9.1] - 2026-08-09
+
+### Fixed
+
+- **`set-play`'s definition — a behaviour change to a theme released in
+  v0.9.0.** It used to mean "the same position with the other side to move is
+  solvable, at any distance," which is nearly vacuous (it matched **423 of
+  580**, 72.9%, `KQvk --dtm 2` positions) and conflated two opposite things:
+  a sibling solvable one move *sooner* (the mate is already available; the
+  side to move merely delays it — this is set play) and a sibling solvable
+  one move *longer* (flipping the side to move makes the mate take longer —
+  the opposite of set play, but v0.9.0 reported it as a match anyway). It now
+  means **the sibling plane is solvable at exactly dtm = D − 1**, where D is
+  the position's own stored dtm: **183 of 580** (31.6%) on the same query.
+  Both directions, worked:
+  - `8/8/8/8/8/8/8/k1KQ4 b` is dtm=2 (`Ka2 Qa4#`); its sibling
+    `8/8/8/8/8/8/8/k1KQ4 w` is dtm=1 (`Qa4#`) — D − 1, `set-play` fires, as
+    before.
+  - `8/8/8/8/8/8/k7/2K1Q3 b` is dtm=2 (`Ka1 Qa5#`); its sibling
+    `8/8/8/8/8/8/k7/2K1Q3 w` is dtm=3 (`Kc2 Ka3 Qa5#`, 28 solutions) — D + 1.
+    v0.9.0 reported `set-play` here; v0.9.1 correctly does not.
+  - `ThemeInput` gained a `value` field (the position's own stored
+    dtm/count) so the detector can compare the sibling against it, not just
+    check the sibling's bare solvability. Both production construction
+    sites (`Tablebase::mine`'s scan loop, `Tablebase::themes_of`) were
+    updated.
+  - The looser "sibling solvable at any shorter distance" reading some
+    compositional literature also calls set play is a separate notion (the
+    Helpmate Analyzer glossary's *Short set play*) and remains unimplemented.
+
 ## [0.9.0] - 2026-08-09
 
 ### Added

@@ -339,11 +339,11 @@ result](#two-things-to-know-before-you-trust-a-result) below and
 [USAGE.md](docs/USAGE.md#needs-what-a-theme-actually-reads) for the full
 explanation. `helpmate themes` is the authoritative source for the
 vocabulary and always matches this build exactly; the table below is copied
-verbatim from its real output on this checkout (`helpmate 0.9.0`):
+verbatim from its real output on this checkout (`helpmate 0.9.1`):
 
 | Theme | Needs | Definition |
 |---|---|---|
-| `set-play` | plane | The same position with the other side to move is also solvable. |
+| `set-play` | plane | The same position with the other side to move is solvable one move sooner (sibling dtm == this position's dtm - 1) — the mate is already available and the side to move merely delays it. A sibling one move longer is the opposite of set play, not set play. |
 | `pure` | solutions | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
 | `model` | solutions | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
 | `ideal` | solutions | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
@@ -365,6 +365,15 @@ verbatim from its real output on this checkout (`helpmate 0.9.0`):
 | `phoenix` | solutions | A unit is captured and a pawn of the same colour later promotes to that same type. |
 | `schnoebelen` | solutions | A promoted unit is captured on its promotion square without ever having moved. |
 | `pendulum` | solutions | A unit oscillates between exactly two squares, returning at least twice. |
+
+**v0.9.1 changed `set-play`'s definition — a behaviour change to a theme
+released in v0.9.0.** It used to mean "the other side to move is solvable, at
+any distance," which matched **423 of 580** (72.9%) `KQvk --dtm 2` positions
+and counted a sibling that is solvable *later* (the mate takes one move
+*longer* with the other side to move) as set play — the opposite of what set
+play means. It now means the sibling is solvable exactly one move *sooner*:
+**183 of 580** (31.6%) on the same query. See [USAGE.md](docs/USAGE.md#v091-set-plays-definition-changed--a-behaviour-change-to-a-released-theme)
+for both worked before/after examples.
 
 Eighteen themes, twenty-two registry entries: `excelsior` and
 `single-piece` each carry a broad form plus `:white`/`:black` variants,
