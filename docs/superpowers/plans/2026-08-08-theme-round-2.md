@@ -1227,6 +1227,26 @@ Expected: KeyError on `"needs"`.
 
 - [ ] **Step 3: Implement**
 
+**First, put the enum-to-string mapping in ONE place.** Add to
+`src/core/themes/registry.h`, beside the `Needs` enum:
+
+```cpp
+// The wire/display name of a Needs value. Defined once: every surface that
+// reports `needs` uses this, so adding a fourth value cannot silently fall
+// through to "solutions" in one surface and not another.
+constexpr std::string_view needs_name(Needs n) {
+    switch (n) {
+        case Needs::Position: return "position";
+        case Needs::Plane: return "plane";
+        case Needs::Solutions: return "solutions";
+    }
+    return "solutions";
+}
+```
+
+Then every surface below calls `themes::needs_name(t.needs)` rather than
+repeating the mapping.
+
 In `pymodule.cpp`, where the registry is turned into dicts, add the field:
 
 ```cpp
