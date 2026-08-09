@@ -382,10 +382,16 @@ TEST_CASE("zajic: capture on S, king recaptures on S, mated on S", "[themes][lin
     // fixture (rook checks along the eighth, king covers a7/b7), just
     // reached one capture later.
     //
-    // Verified against the real tablebase, material KNRvkb: `helpmate probe`
-    // on the start FEN and on the position after each ply all return finite,
-    // non-error dtm values, and `helpmate line` on the start FEN returns
-    // exactly this move sequence -- see task-6-report.md.
+    // Legality comes from `play()`, which REQUIREs each move be found among
+    // Board::legal_moves() -- an impossible fixture fails loudly. Mate comes
+    // from REQUIRE(fin.state() == PosState::Checkmate) below, computed by
+    // the same real Board class the rest of the engine uses, backed by the
+    // structural REQUIREs pinning which square each capture lands on.
+    //
+    // Tablebase cross-verification was NOT performed: this fixture's
+    // material is KNRvkb (5 pieces), and three attempts to `helpmate gen`
+    // it each exceeded the time budget before the main slice finished --
+    // see task-6-report.md.
     Solution s =
         play("bk6/2N5/1K6/8/8/8/8/7R w - - 0 1", {{"c7", "a8", {}}, {"b8", "a8", {}}, {"h1", "h8", {}}});
     const Board& fin = final_board(s);
