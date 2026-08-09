@@ -6,6 +6,74 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.9.0] - 2026-08-09
+
+### Added
+
+- **Six new themes, registry 16 → 22 entries.** `helpmate themes` is the
+  authoritative source (definitions below are copied verbatim from its real
+  output on this checkout):
+  - `set-play` (needs: plane) — "Set play: the same position with the other
+    side to move is also solvable."
+  - `kniest` (needs: solutions) — "Kniest: a unit is captured on the square
+    where the black king is later mated."
+  - `zajic` (needs: solutions) — "Zajic: a unit is captured on the square
+    where the black king is mated, and the king recaptures there."
+  - `phoenix` (needs: solutions) — "Phoenix: a unit is captured and a pawn of
+    the same colour later promotes to that same type."
+  - `schnoebelen` (needs: solutions) — "Schnoebelen: a promoted unit is
+    captured on its promotion square without ever having moved."
+  - `pendulum` (needs: solutions) — "Pendulum: a unit oscillates between
+    exactly two squares, returning at least twice."
+
+### Changed
+
+- **Detector signature: `ThemeInput` instead of a bare `Solution`.** Every
+  detector now takes a `ThemeInput` (the diagram, the sibling side-to-move
+  plane's value, and the solutions) and declares which of those three it
+  actually reads via a `needs` field (`Position`, `Plane`, or `Solutions`).
+  The CLI, Python bindings, and the dashboard all report each theme's
+  `needs`; `GET /v1/themes` needed no source change since it already passes
+  the registry through verbatim.
+- **`mine` no longer enumerates solutions when every requested theme needs
+  only the diagram or the plane.** Previously `mine --theme NAME` always
+  enumerated a candidate's optimal solutions before running any detector,
+  which caps out at a saturated (255+) solution count and silently skips
+  that position. The plane-only theme (`set-play`) now answers without
+  enumerating, so it also answers on positions whose solution count
+  saturates — positions every solutions-needing theme (`pure`, `model`, …)
+  still skips. A `Needs::Position` theme (the diagram alone, no table access)
+  would get the same treatment, but every candidate considered for this
+  release turned out not to be invariant under the tablebase index's
+  symmetry group — see the branch review fix for `homebase`'s removal,
+  below. **This is a capability change, not a speed-up**: it does not make
+  `mine --theme set-play` "scan speed" — evaluating the sibling plane still
+  requires materialising the position (decode + `Board::from_pieces`), so
+  its floor is decode speed, not scan speed. Measured on `KRvkbn --dtm 8`
+  (31.5M candidates, zero matches): 26 seconds, down from an initial 51
+  seconds once `fen` construction was made lazy for the non-matching path.
+  The comparison that matters is against actually enumerating those same
+  candidates' solutions, measured at over 100 hours — `set-play` makes
+  queries answerable on saturated material that were previously unanswerable
+  at any speed, not merely faster.
+
+### Fixed (branch review)
+
+- **`homebase` removed: not invariant under the tablebase index's symmetry
+  group.** Added earlier in this same unreleased version, then removed
+  before release. `mine`'s index quotients positions by a symmetry group —
+  a cell stores an *equivalence class*, not a position — and the White
+  king's file in the stored representative is always confined to files a-d
+  (`src/core/indexing/kk.cpp`), with no inverse transform on decode
+  (`slice_index.cpp`). `homebase` is not invariant under that group (the
+  file mirror maps the king's e-file to d and the queen's d-file to e), so
+  the answer would depend on which representative was decoded — in practice
+  `mine --theme homebase` returned zero rows on every material. This is
+  deeper than a missing case, and not fixable by special-casing the decode:
+  a `Needs::Position` theme must be invariant under the index's symmetry
+  group, or it cannot be mined at all. All other themes in this release were
+  checked against this constraint and are invariant.
+
 ## [0.8.2] - 2026-08-08
 
 ### Added

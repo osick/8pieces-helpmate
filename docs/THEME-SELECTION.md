@@ -14,12 +14,12 @@ of what a detector would need.
 
 | Group | What it needs | Themes |
 |---|---|---|
-| **DONE** | Already shipped | 10 |
+| **DONE** | Already shipped | 16 |
 | **A1** | Diagram only | 5 |
 | **A2** | Mating position only | 4 |
-| **A3** | The other side-to-move plane (set play) | 3 |
-| **A4** | Within one solution | 42 |
-| **A5** | Within one solution | 10 |
+| **A3** | The other side-to-move plane (set play) | 2 |
+| **A4** | Within one solution | 38 |
+| **A5** | Within one solution | 9 |
 | **A6** | Set operations the catalogue tiered as A | 2 |
 | **A7** | Not a theme | 1 |
 | **B1** | Across the solution set | 59 |
@@ -31,9 +31,9 @@ of what a detector would need.
 | **ALIAS** | Aliases | 11 |
 | | **Total** | **295** |
 
-## DONE -- Already shipped  (10)
+## DONE -- Already shipped  (16)
 
-Ten of the glossary's names. Two more shipped detectors -- `pure` and `underpromotion` -- are **not** glossary entries, so they do not appear anywhere in this document; that is 12 detectors, 16 registry entries counting the colour variants.
+Sixteen of the glossary's names. Two more shipped detectors -- `pure` and `underpromotion` -- are **not** glossary entries, so they do not appear anywhere in this document; that is 18 detectors, 22 registry entries counting the colour variants.
 
 | Theme | Tier | Note |
 |---|---|---|
@@ -42,19 +42,25 @@ Ten of the glossary's names. Two more shipped detectors -- `pure` and `underprom
 | En passant | A | implemented; the format supports ep exactly |
 | Excelsior | A | implemented |
 | Ideal mate | A | implemented |
+| Kniest theme | A | implemented |
 | Mirror mate | A | implemented |
 | Model mate | A | implemented |
+| Pendulum | A | implemented |
+| Phoenix | A | implemented |
 | Promotion | A | implemented |
+| Schnoebelen theme | A | implemented |
 | Self-block | A | implemented |
+| Set play | A | implemented; needs: plane (answers on saturated positions without enumerating solutions) |
 | Switchback | A | implemented |
+| Zajic theme | A | implemented |
 
 ## A1 -- Diagram only -- no solutions needed  (5)
 
-Readable from the starting position alone, so they run at **scan speed** and answer on saturated positions where every theme today gives up.
+Readable from the starting position alone. Note corrected 2026-08: this does *not* run at "scan speed" -- evaluating a diagram theme still requires materialising the position (decode + `Board::from_pieces`), so the floor is decode speed, not scan speed. What it does deliver is answering on saturated positions where every solutions-needing theme today gives up.
 
 | Theme | Tier | Note |
 |---|---|---|
-| Homebase | A | the diagram alone | Y |
+| Homebase | A | built and then **removed** 2026-08: the tablebase index quotients positions by a symmetry group (see `src/core/indexing/kk.cpp`), and Homebase is not invariant under it -- a cell stores an equivalence class, not a position, so the answer would depend on which mirror representative was decoded. A `Needs::Position` theme must be invariant under the index's symmetry group, or it cannot be mined at all; Homebase is the only one of the four in this group known to fail that test |
 | Kindergarten problem | A | material of the diagram |
 | Obtrusive piece | A | static reading of the diagram's pawn structure |
 | Promoted force | A | static reading of the diagram |
@@ -71,17 +77,16 @@ Needs one solution, but only its last ply and final board -- not the whole set.
 | Mating piece | A | the last ply's mover; battery cases are genuinely ambiguous | Y |
 | Mating square | A | the last ply's destination, or the mated king's square | Y |
 
-## A3 -- The other side-to-move plane (set play)  (3)
+## A3 -- The other side-to-move plane (set play)  (2)
 
 One O(1) table lookup. Cheap here precisely because both side-to-move planes are stored, and awkward for an analyser that has to search.
 
 | Theme | Tier | Note |
 |---|---|---|
 | Apparent mate | A | the other plane of the diagram mates in one |
-| Set play | A | the other plane of the same position | Y |
 | Short set play | A | the other plane, at a shorter distance |
 
-## A4 -- Within one solution -- plies, captures, promotions  (42)
+## A4 -- Within one solution -- plies, captures, promotions  (38)
 
 Exactly the pattern of the eight ply-detectors already shipped. No new machinery of any kind.
 
@@ -109,7 +114,6 @@ Exactly the pattern of the eight ply-detectors already shipped. No new machinery
 | FML | A | repeated arrival on the square one enemy unit just left |
 | Helsinki theme | A | sacrifice then two vacations, all inside one solution |
 | Hyvinkaa theme | A | every ply of one solution lands on one square |
-| Kniest theme | A | capture on the square where the king is later mated | Y |
 | Kozhakin theme | A | first and last white ply on the same square |
 | Meerane theme | A | first and last ply compared inside one solution |
 | Mihajloski theme | A | collinear order swapped twice inside one solution |
@@ -118,8 +122,6 @@ Exactly the pattern of the eight ply-detectors already shipped. No new machinery
 | Nissl theme | A | sacrifice, then promotion to the same type |
 | Oudot task | A | three black queen promotions in one solution; the table could settle it for reachable material |
 | Pawn-Zajic | A | Zajic with a pawn as the capturing unit |
-| Phoenix | A | capture, then promotion to the same type | Y |
-| Schnoebelen theme | A | promoted unit captured before it ever moves | Y |
 | Slow Excelsior | A | excelsior that opens with a single step |
 | Square-clearance by capture | A | capture, vacate, enemy unit follows onto the square |
 | Super Durbar | A | both sides move only their kings |
@@ -128,9 +130,8 @@ Exactly the pattern of the eight ply-detectors already shipped. No new machinery
 | Unblocking sacrifice | A | capture, vacate, enemy unit captures on the square |
 | White Kniest theme | A | capture on the square the white king later occupies |
 | White Zajic theme | A | from/to and captures beside the white king |
-| Zajic theme | A | capture on the mating square, then recapture by the king | Y |
 
-## A5 -- Within one solution -- trajectory shape  (10)
+## A5 -- Within one solution -- trajectory shape  (9)
 
 Shape predicates over one unit's path. `themes::trajectories()` already exists and already chains plies per unit.
 
@@ -141,7 +142,6 @@ Shape predicates over one unit's path. `themes::trajectories()` already exists a
 | Cyclic place exchange | A | trajectory endpoints inside one solution |
 | Linear cycle | A | one unit's trajectory |
 | Long-trip | A | one officer moving three or more times |
-| Pendulum | A | one unit's trajectory | Y |
 | Place exchange | A | trajectory endpoints inside one solution |
 | Staircase | A | trajectory shape |
 | Wigwag | A | a slider recrossing its own start square along one line |

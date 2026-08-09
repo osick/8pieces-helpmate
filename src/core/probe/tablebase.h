@@ -108,6 +108,10 @@ public:
     void mine(const Material& m, const MineFilter& f,
               const std::function<bool(const std::string&)>& cb,
               uint64_t* skipped_saturated = nullptr) const;
+    // Theme names this position shows. THE one place a ThemeInput is built:
+    // CLI, bindings and API all route here, so they cannot drift apart.
+    // `max` caps enumeration; -1 means "this position's own solution count".
+    std::vector<std::string> themes_of(const std::string& fen, int max) const;
     // sidecar stats content for material `m`; throws MissingTableError if absent.
     std::string stats_json(const Material& m) const;
     // "h#2", "h#1.5", "h#0" style helpmate notation for a dtm/side-to-move pair.

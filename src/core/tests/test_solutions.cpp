@@ -428,3 +428,87 @@ TEST_CASE("mine --ends stays SAN-keyed, not (from,to,promotion)-keyed", "[themes
     // them into ends=2.
     check_ends("8/8/8/8/8/8/2q5/K1k1Q3 b - - 0 1", 1, 2);
 }
+
+TEST_CASE("a solutions-free theme does not enumerate, so saturation cannot hide it", "[themes][mine]") {
+    Tablebase tb(gen_kqvk());
+    auto m = Material::parse("KQvk");
+    REQUIRE(m);
+
+    // Make the fixture dependency loud, not hidden: a Needs::Solutions theme
+    // on the SAME filter must itself skip at least one saturated cell, or
+    // the "skipped == 0" check below would hold for the wrong reason
+    // (nothing to skip, rather than nothing enumerated) -- and a future
+    // generator change that removes the saturated cell would let this test
+    // keep passing while proving nothing. dtm=8 is used, not dtm=2: per
+    // KQvk.stats.json's uniqueness histogram, KQvk's dtm=2 pool (580
+    // positions) never saturates at all (max solution count observed there
+    // is 7), while dtm=8 has 5273 saturated (count>=255) cells out of ~9000,
+    // measured directly with an unbounded callback (3743 mirror matches, well
+    // under the 10000 cap below, so the scan runs to completion either way).
+    uint64_t skipped_solutions = 0;
+    int solutions_hits = 0;
+    tb.mine(
+        *m, MineFilter{.dtm = 8, .themes = {"mirror"}},
+        [&](const std::string&) {
+            ++solutions_hits;
+            return solutions_hits < 10000;
+        },
+        &skipped_solutions);
+    REQUIRE(skipped_solutions > 0);
+
+    MineFilter f;
+    f.dtm = 8;
+    f.themes = {"set-play"};
+    uint64_t skipped = 0;
+    int hits = 0;
+    tb.mine(
+        *m, f,
+        [&](const std::string&) {
+            ++hits;
+            return hits < 50;
+        },
+        &skipped);
+    // The whole point: nothing was skipped for saturation, because nothing was
+    // enumerated -- set-play is Needs::Plane, one sibling-plane byte, never
+    // `solutions`. A solutions-needing theme on the same table does skip.
+    CHECK(skipped == 0);
+}
+
+// Regression guard for the sibling-plane wiring in mine(): the chunked
+// read_values(other_stm, ...) call added for Needs::Plane themes must land on
+// the SAME cell index as the queried plane, not a re-encoded or offset one. A
+// wrong wiring would still emit plausible-looking FENs -- mine's own filter
+// already restricts hits to legal, decodable, dtm-matching positions -- so
+// the only thing that catches a wrong cell is checking the sibling plane
+// independently, through a different code path (Tablebase::probe on the
+// flipped position, not mine's chunk scan) against a real generated table.
+TEST_CASE("mine's set-play scan reads the sibling plane at the correct cell", "[themes][mine]") {
+    // KPvk, not KQvk: KPvk's 86,688 cells span two 65,536-cell scan chunks,
+    // so chunk_base is nonzero for part of the scan -- a chunk-boundary bug
+    // in the sibling-plane read (the other_stm read_values() call) would be
+    // invisible on a single-chunk material like KQvk (29,568 cells) but not
+    // here.
+    Tablebase tb(gen_kpvk());
+    auto m = Material::parse("KPvk");
+    REQUIRE(m);
+
+    std::vector<std::string> hits;
+    tb.mine(*m, MineFilter{.dtm = 2, .themes = {"set-play"}}, [&](const std::string& f) {
+        hits.push_back(f);
+        return hits.size() < 200;
+    });
+    // Must not pass vacuously: KPvk's dtm=2 pool has 57 set-play hits out of
+    // 69 positions total (measured directly via the CLI against a freshly
+    // generated KPvk table), so an empty result here would mean the wiring is
+    // broken, not that the theme is merely rare.
+    REQUIRE_FALSE(hits.empty());
+
+    for (const auto& f : hits) {
+        auto b = Board::from_fen(f);
+        REQUIRE(b);
+        Board flipped = *b;
+        flipped.reset(b->pieces(), b->stm() == Color::White ? Color::Black : Color::White);
+        auto p = tb.probe(flipped.fen());
+        REQUIRE(p.has_value());  // the sibling plane must be solvable
+    }
+}

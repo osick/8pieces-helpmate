@@ -218,8 +218,7 @@ int cmd_probe(const std::vector<std::string>& pos, const std::string& tables, bo
             // Detection forces solution enumeration, so it stays opt-in: a plain
             // probe must not start paying for a field most callers never read.
             try {
-                auto names =
-                    themes::detect(tb.solutions(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count));
+                auto names = tb.themes_of(pos[0], p->count >= (int)COUNT_SAT ? 100 : p->count);
                 std::cout << "themes:";
                 if (names.empty()) std::cout << " (none)";
                 for (const auto& n : names) std::cout << " " << n;
@@ -830,6 +829,7 @@ int cmd_compact(const std::vector<std::string>& args, bool compress, bool dry, u
 int cmd_themes() {
     for (const auto& t : themes::theme_registry()) {
         std::cout << t.name << "\n";
+        std::cout << "    needs: " << themes::needs_name(t.needs) << "\n";
         // Wrap the doc at ~72 columns under a 4-space indent.
         std::string doc(t.doc);
         size_t pos = 0;

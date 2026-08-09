@@ -75,7 +75,6 @@ convention will return a confident, wrong result.
 
 | name | needs | definition |
 |---|---|---|
-| `homebase` | Position | Every unit in the diagram stands on a square it occupies in the initial game array for its own colour and type: kings e1/e8, queens d1/d8, rooks a1,h1/a8,h8, bishops c1,f1/c8,f8, knights b1,g1/b8,g8, pawns anywhere on rank 2 (White) or 7 (Black). |
 | `set-play` | Plane | The same position with the **other** side to move is solvable (its stored `dtm <= DTM_MAX`). |
 | `kniest` | Solutions | Some ply captures on square *S*, and in the final position the mated black king stands on *S*. |
 | `phoenix` | Solutions | Some ply captures a unit of type *T* ∈ {Q,R,B,N} belonging to side *C*, and a later ply promotes a pawn of side *C* to type *T*. |
@@ -83,12 +82,27 @@ convention will return a confident, wrong result.
 | `zajic` | Solutions | Some ply captures on square *S*, a later ply recaptures on *S* with the black king, and *S* is the square the black king stands on in the final position. |
 | `pendulum` | Solutions | One unit's trajectory visits exactly two distinct squares and has length ≥ 4 — i.e. *A,B,A,B…*, at least two returns. |
 
-### Three definition decisions worth arguing with
+**`homebase` was implemented against this design, then removed by the branch
+review before release.** It read "every unit stands on the square it occupies
+in the initial game array for its own colour and type" from the diagram
+alone — cheap, and exactly the kind of `Needs::Position` theme this design
+set out to make possible. What this design did not check: `mine`'s index
+quotients positions by a symmetry group (`src/core/indexing/kk.cpp` confines
+the White king to files a-d; `slice_index.cpp` decodes with no inverse
+transform), so a cell stores an *equivalence class*, not a position. The file
+mirror in that group maps the king's e-file to d and the queen's d-file to e
+— `homebase` is not invariant under it, so its answer depends on which
+representative you decoded, and in practice `mine --theme homebase` returned
+zero rows on every material tried. `probe --themes` was unaffected (it
+evaluates the exact FEN supplied, never a canonicalised one), which is what
+let the bug hide behind a working example during design and review.
+**The durable lesson, worth keeping even though the theme is gone: a
+`Needs::Position` theme must be invariant under the index's symmetry group,
+or `mine` cannot answer it correctly, however cheap the diagram read is.**
+`set-play` (`Needs::Plane`) and every `Needs::Solutions` theme in this round
+were checked against that constraint and are invariant.
 
-**`homebase` counts pawns loosely.** A pawn on any square of its home rank
-counts, not only its own file. Requiring the file would make almost every
-diagram fail and the theme useless; the glossary's sense is "nothing has left
-home yet".
+### Three definition decisions worth arguing with
 
 **`set-play` is defined as solvability of the other plane, full stop** — not
 "solvable at the same distance" and not "solvable one ply shorter", which the

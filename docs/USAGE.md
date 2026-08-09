@@ -608,31 +608,184 @@ comparable with established practice. `helpmate themes` always prints the
 authoritative, in-build list below — read that if this table and the binary
 you're running ever disagree.
 
-Sixteen registry entries cover twelve themes. Four themes exist in both a
-broad and a colour-specific form (`excelsior`/`excelsior:white`/
+Twenty-two registry entries cover eighteen themes. Four themes exist in
+both a broad and a colour-specific form (`excelsior`/`excelsior:white`/
 `excelsior:black`, `single-piece`/`single-piece:white`/`single-piece:black`)
 because a detector only ever answers yes/no — it cannot itself report *which*
 side showed the theme, so the colour-specific name is a separate registry
 entry rather than an extra output field.
 
-| Theme | Definition |
-|---|---|
-| `pure` | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
-| `model` | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
-| `ideal` | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
-| `mirror` | Every square adjacent to the black king is empty, of either colour. |
-| `promotion` | A pawn promotes during the solution. |
-| `underpromotion` | A pawn promotes to rook, bishop or knight. |
-| `excelsior` | A pawn standing on its own second rank at the start of the solution promotes during it (either colour). |
-| `excelsior:white` | Excelsior by a white pawn. |
-| `excelsior:black` | Excelsior by a black pawn. |
-| `switchback` | A unit leaves a square and returns to it, having visited exactly one intermediate square. |
-| `closed-walk` | Rundlauf: a unit returns to its departure square having visited two or more distinct intermediate squares, so it traverses a circuit rather than retracing its path. |
-| `self-block` | A black unit other than the king moves onto a square of its own king's field and stands there unattacked in the mating position, blocking a flight square. |
-| `single-piece` | Every move by one side is made by the same unit (either side). |
-| `single-piece:white` | Every white move is made by the same unit. |
-| `single-piece:black` | Every black move is made by the same unit; with the king, this is the Analyzer's "BK moves only". |
-| `en-passant` | A ply is an en-passant capture. |
+Real output, `./build/helpmate themes` on this checkout:
+
+```
+$ helpmate themes
+set-play
+    needs: plane
+    Set play: the same position with the other side to move is also
+    solvable.
+pure
+    needs: solutions
+    Pure mate: every square of the black king's field is unavailable for
+    exactly one reason, and the king's square is attacked exactly once (so
+    double check is impure).
+model
+    needs: solutions
+    Model mate: pure, and every white unit except the king and pawns
+    participates -- attacks the king's square or a field square, or stands
+    on one.
+ideal
+    needs: solutions
+    Ideal mate: model with no exemptions -- the white king and white pawns
+    must participate too, and every black unit other than the king must
+    stand on a field square.
+mirror
+    needs: solutions
+    Mirror mate: every square adjacent to the black king is empty, of either
+    colour.
+promotion
+    needs: solutions
+    A pawn promotes during the solution.
+underpromotion
+    needs: solutions
+    A pawn promotes to rook, bishop or knight.
+excelsior
+    needs: solutions
+    A pawn standing on its own second rank at the start of the solution
+    promotes during it (either colour).
+excelsior:white
+    needs: solutions
+    Excelsior by a white pawn.
+excelsior:black
+    needs: solutions
+    Excelsior by a black pawn.
+switchback
+    needs: solutions
+    A unit leaves a square and returns to it, having visited exactly one
+    intermediate square.
+closed-walk
+    needs: solutions
+    Rundlauf: a unit returns to its departure square having visited two or
+    more distinct intermediate squares, so it traverses a circuit rather
+    than retracing its path.
+self-block
+    needs: solutions
+    A black unit other than the king moves onto a square of its own king's
+    field and stands there unattacked in the mating position, blocking a
+    flight square.
+single-piece
+    needs: solutions
+    Every move by one side is made by the same unit (either side).
+single-piece:white
+    needs: solutions
+    Every white move is made by the same unit.
+single-piece:black
+    needs: solutions
+    Every black move is made by the same unit; with the king, this is the
+    Analyzer's 'BK moves only'.
+en-passant
+    needs: solutions
+    A ply is an en-passant capture.
+kniest
+    needs: solutions
+    Kniest: a unit is captured on the square where the black king is later
+    mated.
+zajic
+    needs: solutions
+    Zajic: a unit is captured on the square where the black king is mated,
+    and the king recaptures there.
+phoenix
+    needs: solutions
+    Phoenix: a unit is captured and a pawn of the same colour later promotes
+    to that same type.
+schnoebelen
+    needs: solutions
+    Schnoebelen: a promoted unit is captured on its promotion square without
+    ever having moved.
+pendulum
+    needs: solutions
+    Pendulum: a unit oscillates between exactly two squares, returning at
+    least twice.
+```
+
+### `needs`: what a theme actually reads
+
+Every theme declares a `needs` field, one of three values, in increasing
+order of what a query has to do to answer it:
+
+| `needs` | What the detector reads | Consequence for `mine` |
+|---|---|---|
+| `position` | The diagram alone (the starting position, before any move). | No solution enumeration at all — the position is decoded and the detector runs directly on it. Answers even when the position's solution count is saturated (255+), which every `solutions`-needing theme below must skip. |
+| `plane` | One extra byte already read during the scan: the sibling side-to-move plane's value at the same cell index. | Same as `position` — no enumeration, saturation is not a problem. |
+| `solutions` | The full set of optimal solutions, which must be enumerated. | This is the pre-v0.9 behaviour: enumeration is forced, and a saturated position can never be answered because its exact solution set is unknowable. |
+
+Currently `set-play` is the only `plane` theme; every other theme needs
+`solutions`. No theme in the registry currently needs only `position`: the
+one candidate, `homebase`, was added and then removed during this same
+release, because it is not invariant under the tablebase index's symmetry
+group (see the CHANGELOG's "Fixed (branch review)" entry for the full
+mechanism). That failure establishes a real constraint on any future
+`Needs::Position` theme: it must be invariant under the index's symmetry
+group, or `mine` cannot answer it correctly. When **every** theme named in a
+query needs only `position` and/or `plane`, `mine` skips solution
+enumeration entirely for that query — this is a capability change, not a
+speed optimisation: it makes `mine --theme set-play` answer on positions
+that `mine --theme pure` (or any other solutions-needing theme) silently
+skips via the saturation cap, described further under [Two things to know
+before you trust a result](#two-things-to-know-before-you-trust-a-result)
+below. It does **not** mean these queries run at "scan speed" — evaluating
+a plane theme still requires materialising the position (decode +
+`Board::from_pieces`), so the floor is decode speed. Measured on
+`KRvkbn --dtm 8` (31.5M candidates, zero matches): 26 seconds, down from an
+initial 51 seconds once `fen` construction was made lazy for the
+non-matching path. The number that matters is the comparison against
+actually enumerating those same 31.5M candidates' solutions, which was
+measured at over 100 hours — `set-play` turns a query that was previously
+unanswerable at any speed into one that finishes in well under a minute,
+which is the headline, not the seconds-level speed figure itself. That
+mechanism is real and verified for `set-play` — see the worked examples
+below.
+
+### The six v0.9 themes: real examples, honestly reported
+
+Real, verified output for three of the six — real, hand-derived FENs
+against `~/tb`, cross-checked with `probe --themes` the same way the
+pre-v0.9 table above was built:
+
+```
+$ helpmate mine KQvk --dtm 2 --theme set-play --max 3 --tables ~/tb
+8/8/8/8/8/8/8/k1KQ4 b - - 0 1
+8/8/8/8/1Q6/8/8/k1K5 b - - 0 1
+8/8/8/8/4Q3/8/8/k1K5 b - - 0 1
+
+$ helpmate mine KQvk --dtm 8 --theme pendulum --max 3 --tables ~/tb
+8/8/8/8/8/8/8/KQk5 b - - 0 1
+8/8/8/8/8/8/1Q6/K1k5 b - - 0 1
+8/8/8/8/8/1Q6/8/K1k5 b - - 0 1
+note: skipped 4 position(s) whose solution count is saturated (255+): their solutions cannot be enumerated exhaustively
+
+$ helpmate probe "k7/7n/1K6/8/8/8/1p6/7R w - - 0 1" --themes --tables ~/tb
+dtm=3 (h#1.5) count=27
+themes: set-play pure model mirror promotion underpromotion single-piece single-piece:white single-piece:black phoenix
+
+$ helpmate probe "4k3/8/8/8/8/8/8/3QK3 b - - 0 1" --themes --tables ~/tb
+dtm=8 (h#4) count=78
+themes: set-play pure model ideal mirror single-piece single-piece:black
+```
+
+**`kniest`, `zajic` and `schnoebelen` have no verified real example in this
+pass.** All three need `solutions`, which forces full enumeration; several
+materials likely to contain them were tried (`KRvkq`, `KRvkr`, `KRvkb`,
+`KRvkn`, `KQvkr`, `KQvkn`, `KQvkb` at `--dtm 4`, `--tables ~/tb`) and each
+timed out well past a minute before completing the scan — `KRvkbn`-scale
+material at shallow depth is exactly the ~30-second-plus territory the
+Performance section above documents, and these did not finish faster.
+Smaller minor-piece materials that *did* complete quickly (`KBvkr`, `KBvkn`,
+`KNvkr`, `KNvkb` at `--dtm 2` and `--dtm 4`) found no matches. Rather than
+fabricate a FEN, this is disclosed plainly: their definitions above are
+exactly what `helpmate themes` prints, and their unit tests
+(`src/core/tests/test_line_themes.cpp`) are hand-built `Solution` fixtures,
+not tablebase-verified positions — a genuine tablebase example for these
+three is unresolved as of this writing.
 
 ### Match semantics: `any` within a theme, `AND` across themes
 
@@ -653,7 +806,7 @@ helpmate probe <FEN> --themes                         # annotate one position
 helpmate themes                                       # list detectors + their definitions
 ```
 
-`helpmate themes` prints exactly the table above, generated from the
+`helpmate themes` prints exactly the output shown above, generated from the
 in-build registry — the vocabulary `--theme` and `--themes` accept is always
 discoverable without the docs, and never drifts from the binary.
 
@@ -664,8 +817,14 @@ discoverable without the docs, and never drifts from the binary.
 
   ```
   $ curl -s http://127.0.0.1:8642/v1/themes
-  {"themes":[{"name":"pure","doc":"Pure mate: ..."}, ...]}
+  {"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: ...","needs":"solutions"}, ...]}
   ```
+
+  Each entry now carries a `needs` field (`"position"`, `"plane"` or
+  `"solutions"`) — see [`needs`: what a theme actually reads](#needs-what-a-theme-actually-reads)
+  above. `/v1/themes` itself needed no source change to gain this: it already
+  serves the registry verbatim, so the field appeared automatically once the
+  registry started carrying it.
 
 - `GET /v1/mine` gains a repeatable `theme=` query parameter (same `any`
   within a theme, `AND` across themes semantics as the CLI). An unknown name
@@ -696,6 +855,26 @@ discoverable without the docs, and never drifts from the binary.
   For a color-flipped probe, `themes` is `null` (not an empty array — that
   would mean "no themes found") with a sibling `themes_note` explaining why;
   see [Two honest limitations](#two-honest-limitations) below.
+
+  For a **saturated** position (stored `count` == 255, the cap), `themes` is
+  still a real list — detection falls back to the first 100 of the
+  (unknowably larger) true solution set — but the list is
+  representative-dependent, not merely incomplete: two mirror-image FENs of
+  the same position class can enumerate a different first 100 and so report
+  different themes, while full enumeration would report the same theme for
+  both. `themes_note` says so, alongside the (non-null) list:
+
+  ```
+  $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/8/8/8/8/8/K1k2Q2 b - - 0 1" \
+      --data-urlencode "themes=true"
+  {"dtm":8,"count":255,"flipped":false,"notation":"h#4","themes":["pure","model","ideal","mirror","switchback","closed-walk","single-piece","single-piece:black"],"themes_note":"this position's solution count is saturated (255+); themes were detected from the first 100 solutions only, and the list may differ between mirror-image representatives of the same position."}
+  ```
+
+  The Python binding makes the same disclosure with a `RuntimeWarning`
+  instead of a sibling field, since `helpmate.Tablebase.themes()` returns a
+  plain list with no room for one: `tb.themes(fen)` on a saturated position
+  (with the auto-cap, i.e. no explicit `max=`) issues a `RuntimeWarning`
+  before returning, catchable with `pytest.warns`/`warnings.catch_warnings`.
 
 ### Two things to know before you trust a result
 
@@ -755,15 +934,20 @@ table cannot answer a walk of the *original* (unflipped) FEN. Flipping the
 position ourselves and detecting on *that* is not a fix: every detector is
 hard-coded to the black king, so the four colour-labelled themes
 (`single-piece:white`/`:black`, `excelsior:white`/`:black`) would come out
-swapped — a wrong answer dressed as a right one. The other twelve registry
-entries, including `pure`/`model`/`ideal`/`mirror`, are in fact
+swapped — a wrong answer dressed as a right one. The other eighteen registry
+entries, including `pure`/`model`/`ideal`/`mirror` and the two v0.9 line
+themes that reference the mated king (`kniest`, `zajic`), are in fact
 flip-invariant (they read from the black king's field the same way
 regardless of which side of the board it's on) and could, in principle,
 still be answered on a flipped board — that selective re-detection is a
-known follow-up, not something v0.8.0 ships; today the whole `themes` field
-is withheld rather than risk the four that aren't. The CLI prints a note and
-exits 0; the API returns `"themes": null` with a `themes_note` field
-explaining why, distinct from `[]` (no themes found).
+known follow-up, not something v0.9.0 ships; today the whole `themes` field
+is withheld rather than risk the four that aren't. `set-play` never
+references a specific colour at all — it reads the plane generically by
+each unit's own colour — so it carries no asymmetry to begin with;
+`phoenix`, `schnoebelen` and `pendulum` are likewise colour-generic in
+their source. The CLI prints a note and exits 0; the API returns `"themes":
+null` with a `themes_note` field explaining why, distinct from `[]` (no
+themes found).
 
 **Verification against published problems was deferred by explicit
 decision.** The definitions above are this project's own — stated precisely
@@ -1032,7 +1216,15 @@ Reference:
   which can under-count themes relative to the CLI/API defaults for a
   position with more solutions than the `max` given. Raises
   `helpmate.MissingTableError` if a solution walk needs a table this
-  `Tablebase` doesn't have (e.g. a capture into missing sub-material).
+  `Tablebase` doesn't have (e.g. a capture into missing sub-material). When
+  the auto-cap engages on a saturated position (stored count == 255), the
+  returned list is representative-dependent, not merely incomplete (two
+  mirror-image FENs of the same position class can enumerate a different
+  first 100 solutions and report different themes) — `tb.themes()` issues a
+  `RuntimeWarning` saying so before returning, the same disclosure
+  `GET /v1/probe?themes=true`'s `themes_note` and `probe --themes`'s stderr
+  note make on their own surfaces. Passing an explicit `max` is treated as
+  an intentional override and does not warn.
 - `helpmate.themes()` — the theme registry as a list of `{"name": ...,
   "doc": ...}` dicts, in display order; the same data `helpmate themes` and
   `GET /v1/themes` print, generated from the in-build registry so it never
@@ -1196,14 +1388,14 @@ stats sidecar hasn't been read).
 
 ### `GET /v1/themes`
 
-The theme registry — name plus definition for every one of the sixteen
-entries in [Themes](#themes) above — served straight from the C++ build so
-the dashboard's theme picker never hard-codes a list that can drift from the
-binary it's talking to:
+The theme registry — name, definition, and `needs` for every one of the
+twenty-two entries in [Themes](#themes) above — served straight from the
+C++ build so the dashboard's theme picker never hard-codes a list that can
+drift from the binary it's talking to:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/themes
-{"themes":[{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure)."}, ...]}
+{"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure).","needs":"solutions"}, ...]}
 ```
 
 ### `GET /v1/materials/{name}/stats`

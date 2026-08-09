@@ -169,6 +169,31 @@ def test_theme_picker_is_populated_from_the_server(page, server):
     assert "model" in values and "closed-walk" in values
 
 
+def test_theme_picker_marks_themes_that_answer_on_saturated_positions(page, server):
+    # Task 10: any theme whose `needs` isn't "solutions" still answers on
+    # positions whose stored solution count has saturated (capped at 255) --
+    # the picker must mark those, driven by the server's own `needs` field,
+    # not by a hard-coded theme name.
+    import json
+    import urllib.request
+    with urllib.request.urlopen(f"{server}/v1/themes") as r:
+        registry = json.load(r)["themes"]
+    non_solutions = {t["name"] for t in registry if t["needs"] != "solutions"}
+    assert non_solutions, "fixture build must register at least one non-Solutions theme"
+
+    page.goto(f"{server}/#panel=mine")
+    page.wait_for_selector("#mine-themes option")
+    options = page.eval_on_selector_all(
+        "#mine-themes option",
+        "els => els.map(e => ({value: e.value, title: e.title}))")
+    by_value = {o["value"]: o["title"] for o in options}
+    for name in non_solutions:
+        assert "saturated" in by_value[name].lower()
+    solutions_names = {t["name"] for t in registry if t["needs"] == "solutions"}
+    for name in solutions_names:
+        assert "saturated" not in by_value[name].lower()
+
+
 def test_selecting_two_themes_sends_both_not_just_the_last(page, server):
     # Regression: Object.fromEntries(new FormData(form).entries()) keeps only
     # the LAST value of a repeated field. A naive read of the multi-select
@@ -191,13 +216,16 @@ def test_explorer_shows_detected_themes(page, server):
     page.wait_for_function(
         "() => document.getElementById('position-themes').textContent.length > 0")
     text = page.inner_text("#position-themes")
-    # Measured against the fixture's KQvk table (GET /v1/probe?themes=true):
-    # {"themes": ["pure", "model", "ideal", "mirror", "single-piece",
-    # "single-piece:white", "single-piece:black"]}. Assert the actual
-    # rendered content, not just that something is there -- a smoke check
-    # here would pass with the themes_note/themeSummary priority reversed,
-    # or with an entirely wrong theme list.
-    assert text == ("pure · model · ideal · mirror · single-piece · "
+    # Measured against a freshly generated KQvk table (GET
+    # /v1/probe?themes=true, re-checked 2026-08-09 after the round-2 themes
+    # landed): {"themes": ["set-play", "pure", "model", "ideal", "mirror",
+    # "single-piece", "single-piece:white", "single-piece:black"]}. set-play
+    # (Needs::Plane, sorts first in registry order) legitimately fires here:
+    # the same position with the other side to move is solvable. Assert the
+    # actual rendered content, not just that something is there -- a smoke
+    # check here would pass with the themes_note/themeSummary priority
+    # reversed, or with an entirely wrong theme list.
+    assert text == ("set-play · pure · model · ideal · mirror · single-piece · "
                      "single-piece:white · single-piece:black")
 
 

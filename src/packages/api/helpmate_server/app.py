@@ -199,6 +199,23 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             else:
                 try:
                     out["themes"] = tb.themes(fen)
+                    if count >= 255:
+                        # Saturated (count == 255, the stored cap): tb.themes()
+                        # falls back to detecting from the first 100 solutions
+                        # only, same as `probe --themes`'s CLI note. On a
+                        # saturated position that list is representative-
+                        # dependent, not merely incomplete -- two mirror-image
+                        # FENs of the same position class can enumerate a
+                        # different first 100 and so report different themes
+                        # (e.g. `pendulum` present on one, absent on the
+                        # other), while full enumeration would report it for
+                        # both. Say so, the same way the colour-flip branch
+                        # above does.
+                        out["themes_note"] = (
+                            "this position's solution count is saturated (255+); themes "
+                            "were detected from the first 100 solutions only, and the "
+                            "list may differ between mirror-image representatives of the "
+                            "same position.")
                 except helpmate.MissingTableError:
                     # solutions() (which detection forces) calls value_of() on
                     # every legal child move, including captures/promotions

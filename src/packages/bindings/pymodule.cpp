@@ -83,9 +83,30 @@ PYBIND11_MODULE(_helpmate, mod) {
                     // app.py's /v1/probe?themes=true -- inherits the fix by
                     // simply not overriding `max`.
                     auto p = t.probe(fen);
-                    max = (!p) ? 100 : (p->count >= (int)COUNT_SAT ? 100 : p->count);
+                    bool saturated = p && p->count >= (int)COUNT_SAT;
+                    max = (!p) ? 100 : (saturated ? 100 : p->count);
+                    if (saturated) {
+                        // Same disclosure as app.py's themes_note and the
+                        // CLI's stderr note: on a saturated position (stored
+                        // count == 255) this list is not merely incomplete,
+                        // it is representative-dependent -- two mirror-image
+                        // FENs of the same position class can enumerate a
+                        // different first 100 solutions and so report
+                        // different themes. A Python return value has no
+                        // sibling-field slot the way a dict/JSON response
+                        // does, so the idiomatic disclosure here is a
+                        // Python warning (PyErr_WarnEx, catchable with
+                        // pytest.warns/warnings.catch_warnings), not a
+                        // silently different return shape.
+                        PyErr_WarnEx(PyExc_RuntimeWarning,
+                                     "themes(): this position's solution count is saturated "
+                                     "(255+); themes were detected from the first 100 "
+                                     "solutions only, and the list may differ between "
+                                     "mirror-image representatives of the same position.",
+                                     1);
+                    }
                 }
-                return themes::detect(t.solutions(fen, max));
+                return t.themes_of(fen, max);
             },
             py::arg("fen"), py::arg("max") = -1)
         .def(
@@ -159,11 +180,12 @@ PYBIND11_MODULE(_helpmate, mod) {
                 py::dict d;
                 d["name"] = std::string(t.name);
                 d["doc"] = std::string(t.doc);
+                d["needs"] = std::string(themes::needs_name(t.needs));
                 out.append(std::move(d));
             }
             return out;
         },
-        "Every theme detector this build knows: [{name, doc}, ...], in display order.");
+        "Every theme detector this build knows: [{name, doc, needs}, ...], in display order.");
     mod.def("_perft", [](const std::string& fen, int depth) {
         auto b = Board::from_fen(fen);
         if (!b) throw std::invalid_argument("bad fen");

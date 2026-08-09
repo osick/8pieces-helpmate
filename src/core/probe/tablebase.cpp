@@ -1,5 +1,6 @@
 #include "probe/tablebase.h"
 
+#include <algorithm>
 #include <set>
 #include <utility>
 
@@ -249,14 +250,20 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     // Resolve theme names ONCE, before the scan: a typo must be an error that
     // names the valid options, not millions of positions filtered by nothing.
     std::vector<themes::Detector> dets;
+    themes::Needs need = themes::Needs::Position;
     for (const auto& n : f.themes) {
         const auto* d = themes::find_theme(n);
         if (!d) throw std::invalid_argument("unknown theme: \"" + n + "\"");
         dets.push_back(d->fn);
+        need = std::max(need, d->needs);
     }
 
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
-    const bool want_solutions = want_shape || !dets.empty();
+    // Enumerate only when something actually needs the solutions. A query whose
+    // themes read only the diagram skips enumeration and answers on saturated
+    // positions too, at the cost of one decode plus one Board construction per
+    // candidate -- measured at 26s over a 31.5M-candidate query.
+    const bool want_solutions = want_shape || (!dets.empty() && need == themes::Needs::Solutions);
     std::vector<PlacedPiece> pp;
     // Read the two planes in block-sized chunks instead of one cell at a time.
     // get() on a compressed table takes the block cache's mutex and memcpys a
@@ -266,6 +273,14 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
     constexpr size_t kScanChunk = 1 << 16;
     const uint64_t plane_cells = s->index.size();
     std::vector<uint8_t> dtm_buf(kScanChunk), cnt_buf(kScanChunk);
+    // Third buffer for the sibling side-to-move plane, filled only when some
+    // requested theme needs it (Needs::Plane). A cell index is independent of
+    // side to move -- side to move selects the plane, not the index -- so the
+    // sibling value for candidate cell c is the same cell c read from the
+    // other plane, one extra read_values() call over the same chunk.
+    const Color other_stm = stm == Color::White ? Color::Black : Color::White;
+    const bool want_plane = !dets.empty() && need >= themes::Needs::Plane;
+    std::vector<uint8_t> other_buf(want_plane ? kScanChunk : 0);
     uint64_t chunk_base = 0;
     size_t chunk_n = 0;
     for (uint64_t c = 0; c < plane_cells; ++c) {
@@ -273,66 +288,95 @@ void Tablebase::mine(const Material& m, const MineFilter& f,
             chunk_base = c;
             chunk_n = (size_t)std::min<uint64_t>(kScanChunk, plane_cells - c);
             s->reader.read_values(stm, chunk_base, chunk_n, dtm_buf.data(), cnt_buf.data());
+            if (want_plane) s->reader.read_values(other_stm, chunk_base, chunk_n, other_buf.data(), nullptr);
         }
         ValuePair v{dtm_buf[c - chunk_base], cnt_buf[c - chunk_base]};
         if (v.dtm != (uint8_t)f.dtm) continue;
         if (f.count >= 0 && v.count != (uint8_t)f.count) continue;
         if (!s->index.decode(c, pp)) continue;
-        std::string fen = Board::from_pieces(pp, stm).fen();
-        if (want_solutions) {
-            // v.count is this cell's own stored count -- the same number a
-            // probe() of `fen` would return. Using it directly saves a
-            // redundant table lookup per candidate; two things make that
-            // safe, not "probe() cannot color-flip" (it can, in general):
-            // Board::from_pieces(pp, stm) below defaults ep_square to -1, so
-            // eval_board's EP branch -- the only place probe()'s answer can
-            // differ from this cell's raw value -- is inert for every FEN
-            // built here; and load(m) already succeeded (this loop is
-            // iterating `s`, a slice it returned), so probe()'s color-flip
-            // fallback, which only triggers when the PRIMARY load fails,
-            // never runs for `fen`. Mining pawn material with reconstructed
-            // en-passant positions is a plausible next rung -- if that ever
-            // makes fen carry a real ep_square, the first load-bearer above
-            // stops holding and this shortcut needs revisiting.
-            if (v.count >= COUNT_SAT) {  // unknowable, never guessed at
-                if (skipped_saturated) ++*skipped_saturated;
-                continue;
-            }
-            if (want_shape) {
-                // --starts/--ends are a released v0.6.2 feature (see CHANGELOG.md)
-                // keyed on SAN, not on (from, to, promotion): SAN disambiguates a
-                // capture from a quiet move sharing the same (from, to) (Qxa4# vs
-                // Qa4#: v0.6.2 counts 2 distinct mating moves), and distinguishes
-                // two moves that happen to share a destination square but render
-                // identically otherwise (Qb4-b1# vs Qe4-b1#, both SAN "Qb1#": v0.6.2
-                // counts 1). A (from, to, promotion) key gets both cases backwards.
-                // Changing --ends's meaning as a side effect of adding themes is not
-                // acceptable, so this goes through lines()/shape_of exactly like
-                // v0.6.2 did, not through solutions().
-                SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
-                if (f.starts >= 0 && sh.starts != f.starts) continue;
-                if (f.ends >= 0 && sh.ends != f.ends) continue;
-            }
-            if (!dets.empty()) {
-                auto sols = solutions(fen, (int)v.count);
-                bool all_present = true;
-                for (auto d : dets) {  // AND across themes...
-                    bool any = false;
-                    for (const auto& sol : sols)  // ...`any` within one
-                        if (d(sol)) {
-                            any = true;
-                            break;
-                        }
-                    if (!any) {
-                        all_present = false;
-                        break;
-                    }
-                }
-                if (!all_present) continue;
-            }
+        Board b = Board::from_pieces(pp, stm);
+        // fen is built lazily -- only where it is actually consumed
+        // (lines()/solutions() below, or cb() on an actual match). A
+        // Needs::Position theme (the diagram alone, no table access) never
+        // touches it, and b.fen() is not free: skipping it is most of the
+        // point of this function honouring `needs` at all, since evaluating
+        // a Needs::Position detector never requires it.
+        std::string fen;
+        // v.count is this cell's own stored count -- the same number a
+        // probe() of `fen` would return. Using it directly saves a
+        // redundant table lookup per candidate; two things make that
+        // safe, not "probe() cannot color-flip" (it can, in general):
+        // Board::from_pieces(pp, stm) above defaults ep_square to -1, so
+        // eval_board's EP branch -- the only place probe()'s answer can
+        // differ from this cell's raw value -- is inert for every FEN
+        // built here; and load(m) already succeeded (this loop is
+        // iterating `s`, a slice it returned), so probe()'s color-flip
+        // fallback, which only triggers when the PRIMARY load fails,
+        // never runs for `fen`. Mining pawn material with reconstructed
+        // en-passant positions is a plausible next rung -- if that ever
+        // makes fen carry a real ep_square, the first load-bearer above
+        // stops holding and this shortcut needs revisiting.
+        //
+        // Only applies when solutions are actually wanted: a Position-only
+        // theme query answers on saturated positions too, since it never
+        // asks a saturated cell for the very thing it cannot give.
+        if (want_solutions && v.count >= COUNT_SAT) {  // unknowable, never guessed at
+            if (skipped_saturated) ++*skipped_saturated;
+            continue;
         }
+        if (want_shape) {
+            // --starts/--ends are a released v0.6.2 feature (see CHANGELOG.md)
+            // keyed on SAN, not on (from, to, promotion): SAN disambiguates a
+            // capture from a quiet move sharing the same (from, to) (Qxa4# vs
+            // Qa4#: v0.6.2 counts 2 distinct mating moves), and distinguishes
+            // two moves that happen to share a destination square but render
+            // identically otherwise (Qb4-b1# vs Qe4-b1#, both SAN "Qb1#": v0.6.2
+            // counts 1). A (from, to, promotion) key gets both cases backwards.
+            // Changing --ends's meaning as a side effect of adding themes is not
+            // acceptable, so this goes through lines()/shape_of exactly like
+            // v0.6.2 did, not through solutions().
+            fen = b.fen();
+            SolutionShape sh = shape_of((int)v.count, lines(fen, (int)v.count));
+            if (f.starts >= 0 && sh.starts != f.starts) continue;
+            if (f.ends >= 0 && sh.ends != f.ends) continue;
+        }
+        if (!dets.empty()) {
+            std::vector<Solution> sols;
+            if (need == themes::Needs::Solutions) {
+                if (fen.empty()) fen = b.fen();
+                sols = solutions(fen, (int)v.count);
+            }
+            std::optional<ValuePair> other;
+            if (want_plane) other = ValuePair{other_buf[c - chunk_base], 0};
+            themes::ThemeInput in{b, other, sols};
+            bool all_present = true;
+            for (auto d : dets) {  // AND across themes; `any` within one is now
+                if (!d(in)) {      // inside d itself (any_of<>)
+                    all_present = false;
+                    break;
+                }
+            }
+            if (!all_present) continue;
+        }
+        if (fen.empty()) fen = b.fen();  // only reached by an actual match
         if (!cb(fen)) return;
     }
+}
+
+std::vector<std::string> Tablebase::themes_of(const std::string& fen, int max) const {
+    auto b = Board::from_fen(fen);
+    if (!b) throw std::invalid_argument("bad FEN (or castling rights): " + fen);
+    std::vector<Solution> sols = solutions(fen, max);
+    std::optional<ValuePair> other;
+    Board flipped = *b;
+    flipped.reset(b->pieces(), b->stm() == Color::White ? Color::Black : Color::White);
+    try {
+        other = value_of(flipped);
+    } catch (const MissingTableError&) {
+        other = std::nullopt;  // no table for the sibling plane: answer "no"
+    }
+    themes::ThemeInput in{*b, other, sols};
+    return themes::detect(in);
 }
 
 std::string Tablebase::stats_json(const Material& m) const {

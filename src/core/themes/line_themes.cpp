@@ -128,4 +128,94 @@ bool has_en_passant(const Solution& s) {
     return false;
 }
 
+bool has_kniest(const Solution& s) {
+    const Board& fin = final_board(s);
+    int bk = -1;
+    for (const auto& pp : fin.pieces())
+        if (pp.piece.type == PieceType::King && pp.piece.color == Color::Black) bk = pp.square;
+    if (bk < 0) return false;
+    for (const auto& p : s.plies)
+        if (p.captured && (int)p.to == bk) return true;
+    return false;
+}
+
+// A unit is captured on S, a later ply recaptures on S with the black king,
+// and the black king is mated standing on S.
+bool has_zajic(const Solution& s) {
+    const Board& fin = final_board(s);
+    int bk = -1;
+    for (const auto& pp : fin.pieces())
+        if (pp.piece.type == PieceType::King && pp.piece.color == Color::Black) bk = pp.square;
+    if (bk < 0) return false;
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        if (!s.plies[i].captured || (int)s.plies[i].to != bk) continue;
+        for (size_t j = i + 1; j < s.plies.size(); ++j) {
+            const Ply& r = s.plies[j];
+            if (r.captured && (int)r.to == bk && r.piece.type == PieceType::King &&
+                r.piece.color == Color::Black)
+                return true;
+        }
+    }
+    return false;
+}
+
+// A unit of type T belonging to side C is captured, and a LATER ply promotes
+// a pawn of side C to type T -- the captured unit is reborn.
+bool has_phoenix(const Solution& s) {
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        const Ply& cap = s.plies[i];
+        if (!cap.captured) continue;
+        // The captured unit belongs to the side that did NOT move.
+        const Color owner = cap.piece.color == Color::White ? Color::Black : Color::White;
+        for (size_t j = i + 1; j < s.plies.size(); ++j) {
+            const Ply& pr = s.plies[j];
+            if (pr.promotion && *pr.promotion == *cap.captured && pr.piece.color == owner) return true;
+        }
+    }
+    return false;
+}
+
+// A pawn promotes on square S; a later ply captures on S; and no ply in
+// between moves a unit FROM S. The promoted unit is captured without ever
+// having moved.
+bool has_schnoebelen(const Solution& s) {
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        if (!s.plies[i].promotion) continue;
+        const int sq = (int)s.plies[i].to;
+        for (size_t j = i + 1; j < s.plies.size(); ++j) {
+            if ((int)s.plies[j].from == sq) break;  // it moved: not Schnoebelen
+            if (s.plies[j].captured && (int)s.plies[j].to == sq) return true;
+        }
+    }
+    return false;
+}
+
+// One unit's trajectory visits exactly two distinct squares and has length
+// >= 4 -- A,B,A,B, at least two returns. Deliberately NOT exclusive with
+// switchback: a pendulum trajectory contains a switchback (A,B,A), and both
+// are reported -- exactly as ideal implies model implies pure already does.
+bool has_pendulum(const Solution& s) {
+    for (const auto& t : trajectories(s)) {
+        if (t.squares.size() < 4) continue;
+        std::set<uint8_t> distinct(t.squares.begin(), t.squares.end());
+        // `== 2`, not `<= 2`: relaxing this to `<= 2` cannot be killed by any
+        // fixture built from real plies, so it is worth being explicit about
+        // why. `trajectories()` (trajectory.cpp) pushes p.to for every ply,
+        // and a chess move always has p.from != p.to -- there is no null
+        // move -- so any two SUCCESSIVE entries in `squares` already differ.
+        // With size() >= 4 guaranteed by the guard above, that alone forces
+        // distinct.size() >= 2 for every trajectory this loop ever sees:
+        // distinct.size() == 1 would need every entry equal, which the
+        // successive-differ property rules out. So `<= 2` and `== 2` accept
+        // exactly the same trajectories over the whole domain of legal
+        // Solutions -- an equivalent mutant, not a weaker check -- and no
+        // amount of fixture-writing can tell them apart. `== 2` is kept
+        // because it states the theme's own two-square definition directly,
+        // the same reasoning excelsior_for's rank check above uses for a
+        // defensive-but-unkillable-by-deletion condition.
+        if (distinct.size() == 2) return true;
+    }
+    return false;
+}
+
 }  // namespace hm::themes

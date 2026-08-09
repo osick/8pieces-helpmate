@@ -28,10 +28,32 @@
   vacuously. Construct each fixture with this procedure instead:
 
   1. Write the position you intend, then **check it is legal and is what you
-     think** before using it:
+     think** before using it. **Probe against `~/tb` first** — it already holds
+     190 generated tables including most 5-piece materials, and reading it is
+     free and instant:
+     `taskset -c 0-3 ./build/helpmate probe "<FEN>" --tables ~/tb`
+     `~/tb` is READ-ONLY: probing and mining it are fine, writing to it is
+     never allowed. Only if the material is genuinely absent there should you
+     generate a scratch table:
      `taskset -c 0-3 ./build/helpmate probe "<FEN>" --tables $TT`
      A position that does not parse, or is not solvable when you expected a
      mate in *n*, is wrong — fix it now, not after the test goes green.
+
+     **If the material is absent from `~/tb` AND too expensive to generate**
+     (5-piece slices can take tens of minutes), this check may be skipped.
+     Check `~/tb` before concluding this: three tasks in this round wrongly
+     wrote "no probe or line output exists for this FEN" when the table was
+     sitting in `~/tb` all along, because the instructions said to generate a
+     scratch table and they never tried simply reading the corpus. A claim that
+     evidence is unavailable is still a claim, and must be checked before it is
+     written down — but then you must say so, in
+     both the report and the test comment, in those words. `play()`'s
+     engine-enforced legality plus `REQUIRE(final_board(s).state() ==
+     PosState::Checkmate)` is adequate evidence for a predicate test; it is not
+     evidence about solvability, optimality or uniqueness, and must not be
+     described as if it were. **Never write that a fixture was verified against
+     a tablebase unless it was.** A false verification claim in committed source
+     is worse than no claim: a later reader has no reason to doubt it.
   2. Build the solution with `play()`, which rejects an illegal move.
   3. **Assert the fixture's shape before asserting the detector.** Every
      positive test must first `REQUIRE` the facts the theme depends on — that
@@ -39,6 +61,12 @@
      fixture that drifts fails on the `REQUIRE`, not silently on the `CHECK`.
      Each task below names the exact shape assertions for its theme.
   4. `$TT` is a scratch table dir: `TT=$(mktemp -d) && taskset -c 0-3 ./build/helpmate gen KQvk --tables $TT`. Never `~/tb`.
+
+  **`FEN` and `MOVES` in the test code below are stand-ins, not identifiers.**
+  Where a task shows `play(FEN, MOVES)`, you write the actual FEN string and
+  the actual `{{"e2","e4",std::nullopt}, …}` move list you constructed and
+  verified. Code that literally contains `FEN` will not compile, which is the
+  intended failure — it is not a name you should define.
 - **Mutation rule, from the same post-mortem: three detector branches survived deletion and two survived inversion with the suite green.** For each new detector, delete its central condition and run the tests, then invert it and run again. Both must fail. Record in the commit that you did it.
 
 ---
@@ -67,16 +95,44 @@ TEST_CASE("every entry declares what input it needs", "[themes][registry]") {
     for (const auto& t : theme_registry()) REQUIRE(t.needs == Needs::Solutions);
 }
 
-TEST_CASE("any_of gives the same answer detect() used to give", "[themes][registry]") {
-    // Two solutions, only the second promoting: `any` must find it.
+TEST_CASE("any_of finds a theme shown by only ONE of several solutions",
+          "[themes][registry]") {
+    // This is the `any` path that any_of<> now owns, so the test must be able
+    // to fail if any_of<> is broken. Solution 1 shows nothing; solution 2
+    // really promotes -- built from a legal move the engine produced, never a
+    // Ply typed by hand.
     auto b = Board::from_fen("8/P6k/8/8/8/8/8/K7 w - - 0 1");
     REQUIRE(b);
-    std::vector<Solution> sols{Solution{*b, {}}, Solution{*b, {}}};
+    const Move* promo = nullptr;
+    auto legal = b->legal_moves();
+    for (const auto& m : legal)
+        if (m.promotion() == PieceType::Queen) promo = &m;
+    REQUIRE(promo != nullptr);  // the fixture FEN really does allow a promotion
+
+    Solution plain{*b, {}};
+    Solution promoting{*b, {}};
+    Ply p;
+    p.piece = {Color::White, PieceType::Pawn};
+    p.from = promo->from;
+    p.to = promo->to;
+    p.promotion = promo->promotion();
+    Board after = *b;
+    after.make(*promo);
+    p.after = after;
+    promoting.plies.push_back(p);
+
+    std::vector<Solution> sols{plain, promoting};
     ThemeInput in{*b, std::nullopt, sols};
     auto names = detect(in);
-    REQUIRE(std::find(names.begin(), names.end(), "promotion") == names.end());
+    REQUIRE(std::find(names.begin(), names.end(), "promotion") != names.end());
 }
 ```
+
+**Then prove the test can fail.** Temporarily make `any_of<>` return `false`
+unconditionally and run `"[themes]"` — this test MUST fail. Restore. A test
+that passes whether or not the code works is worse than no test: the first
+draft of this very case asserted `== names.end()` over two *empty* solutions,
+which passes trivially and was caught only in review.
 
 - [ ] **Step 2: Run it and watch it fail to compile**
 
@@ -377,7 +433,15 @@ Register it in `src/core/themes/registry.cpp` (add `#include "themes/position_th
  Needs::Position},
 ```
 
-Update the registry-size test in `test_themes_registry.cpp` from 16 to 17, and relax the "every entry declares what input it needs" test written in Task 1 to `REQUIRE(t.needs <= Needs::Solutions)`.
+Update the registry-size test in `test_themes_registry.cpp` from 16 to 17, and
+**delete** the "every entry declares what input it needs" test written in
+Task 1. It asserted `t.needs == Needs::Solutions`, which is no longer true now
+that `homebase` exists. Do not "relax" it to `t.needs <= Needs::Solutions`:
+`Solutions` is the maximum enumerator, so that assertion holds for every
+possible value and can never fail — a theme wrongly declared `Needs::Position`
+while actually reading solutions would sail straight through it. Each theme's
+own test asserts its own `needs` (this task does so for `homebase`), which is
+the check that can actually fail.
 
 - [ ] **Step 4: Run the tests**
 
@@ -471,7 +535,7 @@ In `src/core/probe/tablebase.cpp`, in `mine`, replace the detector-resolution bl
 
     const bool want_shape = f.starts >= 0 || f.ends >= 0;
     // Enumerate only when something actually needs the solutions. A query whose
-    // themes read only the diagram runs at scan speed AND answers on saturated
+    // themes read only the diagram skips enumeration AND answers on saturated
     // positions, where enumeration is impossible and every other theme gives up.
     const bool want_solutions = want_shape || (!dets.empty() && need == themes::Needs::Solutions);
 ```
@@ -518,7 +582,7 @@ echo "--- homebase must now be fast and must not skip ---"
 taskset -c 0-3 /usr/bin/time -f "%e s" ./build/helpmate mine KRvkbn --dtm 8 --theme homebase --max 200 --tables ~/tb
 taskset -c 0-3 /usr/bin/time -f "%e s" ./build/helpmate mine KRvkbn --dtm 8 --theme model --max 200 --tables ~/tb >/dev/null
 ```
-Expected: the six hashes match Task 1's baseline; `homebase` runs at roughly plain-scan speed and prints no "skipped ... saturated" note, while `model` still does.
+Expected: the six hashes match Task 1's baseline; `homebase` prints no "skipped ... saturated" note, while `model` still does. `homebase` will NOT be sub-second -- it still decodes and materialises every candidate, which a diagram theme cannot avoid. Record the measured time; do not round it into "fast".
 
 - [ ] **Step 6: Gate and commit**
 
@@ -534,7 +598,7 @@ them. It now takes the maximum \`needs\` across the requested themes and
 enumerates only for Needs::Solutions, and the saturation guard applies only
 when solutions are wanted.
 
-So --theme homebase runs at scan speed and answers on saturated positions.
+So --theme homebase skips enumeration and answers on saturated positions.
 That is a capability difference, not a speed-up.
 
 Verified the sixteen solution-needing themes produce byte-identical output on
@@ -1162,6 +1226,26 @@ taskset -c 0-3 make test-bindings 2>&1 | tail -5
 Expected: KeyError on `"needs"`.
 
 - [ ] **Step 3: Implement**
+
+**First, put the enum-to-string mapping in ONE place.** Add to
+`src/core/themes/registry.h`, beside the `Needs` enum:
+
+```cpp
+// The wire/display name of a Needs value. Defined once: every surface that
+// reports `needs` uses this, so adding a fourth value cannot silently fall
+// through to "solutions" in one surface and not another.
+constexpr std::string_view needs_name(Needs n) {
+    switch (n) {
+        case Needs::Position: return "position";
+        case Needs::Plane: return "plane";
+        case Needs::Solutions: return "solutions";
+    }
+    return "solutions";
+}
+```
+
+Then every surface below calls `themes::needs_name(t.needs)` rather than
+repeating the mapping.
 
 In `pymodule.cpp`, where the registry is turned into dicts, add the field:
 
