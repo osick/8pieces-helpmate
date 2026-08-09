@@ -40,4 +40,8 @@ bool has_en_passant(const Solution& s);  // any ply is an en-passant capture
 // stands on S.
 bool has_kniest(const Solution& s);
 
+// A unit is captured on square S, a later ply recaptures on S with the black
+// king, and the black king is mated standing on S.
+bool has_zajic(const Solution& s);
+
 }  // namespace hm::themes

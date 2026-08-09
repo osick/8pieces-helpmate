@@ -374,6 +374,144 @@ TEST_CASE("kniest: the king merely ending on a square is not enough", "[themes][
     CHECK_FALSE(has_kniest(s));
 }
 
+TEST_CASE("zajic: capture on S, king recaptures on S, mated on S", "[themes][line]") {
+    // White Kb6, Nc7, Rh1; black Kb8, Ba8; White to move. White plays
+    // Nc7xa8, capturing the bishop that started on a8 -- the first capture on
+    // S. Black recaptures with the king, Kb8xa8 -- the king's recapture on
+    // S. White mates with Rh1-h8#: the same corner pattern as the kniest
+    // fixture (rook checks along the eighth, king covers a7/b7), just
+    // reached one capture later.
+    //
+    // Verified against the real tablebase, material KNRvkb: `helpmate probe`
+    // on the start FEN and on the position after each ply all return finite,
+    // non-error dtm values, and `helpmate line` on the start FEN returns
+    // exactly this move sequence -- see task-6-report.md.
+    Solution s =
+        play("bk6/2N5/1K6/8/8/8/8/7R w - - 0 1", {{"c7", "a8", {}}, {"b8", "a8", {}}, {"h1", "h8", {}}});
+    const Board& fin = final_board(s);
+    REQUIRE(fin.state() == PosState::Checkmate);
+    const int bk = bk_of(fin);
+    REQUIRE(bk == sq("a8"));
+
+    bool first_capture_on_s = false, king_recapture_on_s = false;
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        if (s.plies[i].captured && (int)s.plies[i].to == bk) first_capture_on_s = true;
+    }
+    for (const auto& p : s.plies)
+        if (p.captured && (int)p.to == bk && p.piece.type == PieceType::King && p.piece.color == Color::Black)
+            king_recapture_on_s = true;
+    REQUIRE(first_capture_on_s);   // Nxa8: the bishop is captured on S
+    REQUIRE(king_recapture_on_s);  // Kxa8: the king recaptures on S
+    CHECK(has_zajic(s));
+}
+
+TEST_CASE("zajic: the second capture on S is not by the king", "[themes][line]") {
+    // White Ke1, Nc7; black Kh8, Ra5, Ba8; White to move. White plays
+    // Nc7xa8, capturing the bishop -- same first-capture-on-S shape as the
+    // positive fixture. But the recapture on a8 is Ra5xa8, a black ROOK, not
+    // the king; the black king (h8) never goes near a8.
+    Solution s = play("b6k/2N5/8/r7/8/8/8/4K3 w - - 0 1", {{"c7", "a8", {}}, {"a5", "a8", {}}});
+    REQUIRE(s.plies.size() == 2);
+    REQUIRE(s.plies[0].captured);             // Nxa8
+    REQUIRE((int)s.plies[0].to == sq("a8"));  // ... on S
+    const Ply& recapture = s.plies[1];
+    REQUIRE(recapture.captured);
+    REQUIRE((int)recapture.to == sq("a8"));            // Rxa8: also on S ...
+    REQUIRE(recapture.piece.type != PieceType::King);  // ... but not the king
+    CHECK_FALSE(has_zajic(s));
+}
+
+TEST_CASE("zajic: the king recaptures on S but is mated elsewhere", "[themes][line]") {
+    // White Kb6, Nc7, Rh5; black Kb8, Ba8; White to move. White plays
+    // Nc7xa8 (capture on S=a8), Black recaptures Kb8xa8 (king recapture on
+    // S=a8) -- both halves of the shape are present. But the king does not
+    // stay put: White marks time with Rh5-h4, Black walks the king back
+    // Ka8-b8, and White mates on b8 with Rh4-h8#, the king's own escort
+    // (Kb6 covers a7/b7/c7) sealing every flight square. The mate square
+    // (b8) is not S (a8), so this must NOT read as zajic.
+    Solution s =
+        play("bk6/2N5/1K6/7R/8/8/8/8 w - - 0 1",
+             {{"c7", "a8", {}}, {"b8", "a8", {}}, {"h5", "h4", {}}, {"a8", "b8", {}}, {"h4", "h8", {}}});
+    const Board& fin = final_board(s);
+    REQUIRE(fin.state() == PosState::Checkmate);
+    const int bk = bk_of(fin);
+    REQUIRE(bk != sq("a8"));
+    REQUIRE(bk == sq("b8"));
+
+    bool king_recapture_on_a8 = false;
+    for (const auto& p : s.plies)
+        if (p.captured && (int)p.to == sq("a8") && p.piece.type == PieceType::King &&
+            p.piece.color == Color::Black)
+            king_recapture_on_a8 = true;
+    REQUIRE(king_recapture_on_a8);  // the fixture really shows the king recapturing on S
+    CHECK_FALSE(has_zajic(s));
+}
+
+TEST_CASE("zajic: the WHITE king capturing on S is not a recapture either", "[themes][line]") {
+    // A fourth, non-required case added specifically because the mutation
+    // check (dropping `r.piece.color == Color::Black`) survives all three
+    // cases the brief asks for: none of them has a WHITE king doing a
+    // capture on the square the black king later reaches. Without this
+    // fixture, that conjunct is untested by deletion.
+    //
+    // Black Bg8, white Nd5, white Kc4 (blocked from the bishop's check by
+    // its own knight), black Kh1; black to move. Bg8xd5 captures the knight
+    // (first capture on S=d5) and opens check on c4 along the same
+    // diagonal, so White's only reply, Kc4xd5, captures the bishop on S --
+    // a second capture on S by a KING, but the WHITE king, not black's. Both
+    // kings then shuffle, alone on the board, back down the same a8-h1
+    // diagonal (White retreating d5-c4-b3-a2, Black following
+    // h1-g2-f3-e4-d5) until the black king peacefully occupies d5 -- so the
+    // black king's FINAL square really is S, same as the wrongly-colored
+    // recapture, without the black king ever itself recapturing there.
+    Solution s = play("6b1/8/8/3N4/2K5/8/8/7k b - - 0 1", {{"g8", "d5", {}},
+                                                           {"c4", "d5", {}},
+                                                           {"h1", "g2", {}},
+                                                           {"d5", "c4", {}},
+                                                           {"g2", "f3", {}},
+                                                           {"c4", "b3", {}},
+                                                           {"f3", "e4", {}},
+                                                           {"b3", "a2", {}},
+                                                           {"e4", "d5", {}}});
+    REQUIRE(s.plies.size() == 9);
+    REQUIRE(s.plies[0].captured);             // Bxd5
+    REQUIRE((int)s.plies[0].to == sq("d5"));  // ... on S
+
+    const Ply& wk_recapture = s.plies[1];
+    REQUIRE(wk_recapture.captured);                       // Kxd5
+    REQUIRE((int)wk_recapture.to == sq("d5"));            // ... on S too
+    REQUIRE(wk_recapture.piece.type == PieceType::King);  // a king recaptures ...
+    REQUIRE(wk_recapture.piece.color == Color::White);    // ... but the WHITE one
+
+    const int bk = bk_of(final_board(s));
+    REQUIRE(bk == sq("d5"));  // the black king really does end up on S, just never captured there
+    CHECK_FALSE(has_zajic(s));
+}
+
+TEST_CASE("zajic: the king's own capture on S is not also its own recapture", "[themes][line]") {
+    // A fifth, non-required case, added for the same reason as the fourth:
+    // the mutation check (changing the inner loop's `j = i + 1` to `j = 0`)
+    // survives all four cases above, because none of them puts a LONE
+    // king-capture on the mating square with nothing captured there before
+    // it. With `j = 0` the inner loop revisits ply i itself, so that single
+    // capture satisfies both "the earlier capture" and "the recapture" --
+    // the same self-match bug, one loop bound over.
+    //
+    // Reuses the kniest positive fixture's FEN verbatim (already verified
+    // against the real tablebase in task-5-report.md: KRNvk, dtm=2, line
+    // "Kxa8 Rh8#") but stops after the first half-move, Kb8xa8, so the
+    // solution has exactly one ply and no White reply at all.
+    Solution s = play("Nk6/8/1K6/8/8/8/8/7R b - - 0 1", {{"b8", "a8", {}}});
+    REQUIRE(s.plies.size() == 1);
+    const int bk = bk_of(final_board(s));
+    REQUIRE(bk == sq("a8"));
+    REQUIRE(s.plies[0].captured);       // Kxa8
+    REQUIRE((int)s.plies[0].to == bk);  // ... on S, which is also the final bk
+    REQUIRE(s.plies[0].piece.type == PieceType::King);
+    REQUIRE(s.plies[0].piece.color == Color::Black);
+    CHECK_FALSE(has_zajic(s));  // one capture is not a capture AND a later recapture
+}
+
 TEST_CASE("an empty solution shows no line theme", "[themes][line]") {
     // Black Kg8 mated by Ra8 along the eighth with white Kg6 covering f7/g7/h7:
     // a position that is already mate, hence a solution with no plies at all.

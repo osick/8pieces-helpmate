@@ -139,4 +139,24 @@ bool has_kniest(const Solution& s) {
     return false;
 }
 
+// A unit is captured on S, a later ply recaptures on S with the black king,
+// and the black king is mated standing on S.
+bool has_zajic(const Solution& s) {
+    const Board& fin = final_board(s);
+    int bk = -1;
+    for (const auto& pp : fin.pieces())
+        if (pp.piece.type == PieceType::King && pp.piece.color == Color::Black) bk = pp.square;
+    if (bk < 0) return false;
+    for (size_t i = 0; i < s.plies.size(); ++i) {
+        if (!s.plies[i].captured || (int)s.plies[i].to != bk) continue;
+        for (size_t j = i + 1; j < s.plies.size(); ++j) {
+            const Ply& r = s.plies[j];
+            if (r.captured && (int)r.to == bk && r.piece.type == PieceType::King &&
+                r.piece.color == Color::Black)
+                return true;
+        }
+    }
+    return false;
+}
+
 }  // namespace hm::themes

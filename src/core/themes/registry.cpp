@@ -70,6 +70,10 @@ const std::vector<ThemeDef>& theme_registry() {
          "Kniest: a unit is captured on the square where the black king is later "
          "mated.",
          Needs::Solutions},
+        {"zajic", &any_of<&has_zajic>,
+         "Zajic: a unit is captured on the square where the black king is mated, "
+         "and the king recaptures there.",
+         Needs::Solutions},
     };
     return kRegistry;
 }
