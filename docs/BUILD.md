@@ -233,6 +233,40 @@ Same three distributions, each installed with its `[dev]` extra
 installs no dev extras and those targets fail on a missing `pytest`. Subject
 to the same `GIT_CONFIG_GLOBAL` note as `make install` above.
 
+### `make install-bin` — the CLI binary alone, no Python
+
+`make install` above puts `helpmate` on `PATH` as part of the wheel, which is
+the right answer if you also want the Python bindings, the API server or the
+dashboard. If you want **only** the command-line binary — a system package, a
+container layer, a machine with no Python — install it natively:
+
+```bash
+sudo make install-bin                 # /usr/local/bin/helpmate (GNU default)
+make install-bin PREFIX=$HOME/.local  # rootless; already on PATH on most distros
+make install-bin DESTDIR=/tmp/stage   # stage into a package root
+```
+
+`PREFIX` defaults to `/usr/local`, so the bare form needs root. `DESTDIR` is
+prepended to the prefix in the usual packaging two-step, giving
+`/tmp/stage/usr/local/bin/helpmate`.
+
+This is a thin wrapper over `cmake --install $(BUILD) --prefix ...` — the
+install rule lives in `src/packages/cli/CMakeLists.txt` and is the same one
+scikit-build-core uses when building the wheel, just with a different
+destination. There is deliberately no bespoke install script: one would be a
+second source of truth to keep in sync with the build.
+
+The binary is the only installed artifact and it is self-contained — the
+dependencies are static, and tables are located at runtime via `--tables`, so
+nothing else needs installing. `make uninstall-bin` removes it (honouring the
+same `PREFIX`/`DESTDIR`); CMake generates no uninstall rule of its own, and a
+hand-rolled manifest-walking one is how packaging accidents happen.
+
+Note this installs the binary built by whatever compiler configured `build/`.
+On a distribution whose default `g++` predates GCC 13, configure with the
+newer compiler first (see [Prerequisites](#prerequisites)) or the binary will
+not build at all.
+
 ### Per-package test targets
 
 Each installable distribution owns its own test suite; these wrap the

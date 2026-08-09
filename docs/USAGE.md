@@ -621,8 +621,10 @@ Real output, `./build/helpmate themes` on this checkout:
 $ helpmate themes
 set-play
     needs: plane
-    Set play: the same position with the other side to move is also
-    solvable.
+    Set play: the same position with the other side to move is solvable one
+    move sooner (sibling dtm == this position's dtm - 1) -- the mate is
+    already available and the side to move merely delays it. A sibling one
+    move LONGER is the opposite of set play, not set play.
 pure
     needs: solutions
     Pure mate: every square of the black king's field is unavailable for
@@ -745,6 +747,51 @@ which is the headline, not the seconds-level speed figure itself. That
 mechanism is real and verified for `set-play` — see the worked examples
 below.
 
+### v0.9.1: `set-play`'s definition changed — a behaviour change to a released theme
+
+`set-play` shipped in v0.9.0 meaning "the same position with the other side to
+move is solvable, at any distance." That reading is nearly vacuous — on
+`KQvk --dtm 2` it matched **423 of 580** positions (72.9%) — and it conflated
+two opposite things. With the position's own distance called D, and its
+sibling's distance called D′ (D′ is always D − 1 or D + 1, never D — parity
+forbids a tie):
+
+- **D′ = D − 1** — the mate is already available one move sooner; the side to
+  move merely delays it. This **is** set play.
+- **D′ = D + 1** — flipping the side to move makes the mate *longer*. This is
+  the **opposite** of set play, and v0.9.0 reported it anyway.
+
+As of v0.9.1, `set-play` means **the sibling plane is solvable at exactly
+D − 1**. On the same query this drops the match count from 423 to **183**
+(31.6% of the 580, not 72.9%): 183 true D − 1 hits, and the 240 D + 1 hits
+that were previously reported incorrectly are now excluded (423 − 183 = 240).
+The "any shorter distance" reading some compositional literature also calls
+set play — a sibling solvable well before D − 1 — is a separate notion (the
+glossary's *Short set play*) and is not implemented by any theme here.
+
+Both directions, worked:
+
+```
+$ helpmate probe "8/8/8/8/8/8/8/k1KQ4 b - - 0 1" --themes --tables ~/tb
+dtm=2 (h#1) count=1
+themes: set-play pure model ideal mirror single-piece single-piece:white single-piece:black
+$ helpmate probe "8/8/8/8/8/8/8/k1KQ4 w - - 0 1" --tables ~/tb
+dtm=1 (h#0.5) count=1
+```
+
+D = 2 (`Ka2 Qa4#`), sibling D − 1 = 1 (`Qa4#` immediately) — `set-play` fires.
+
+```
+$ helpmate probe "8/8/8/8/8/8/k7/2K1Q3 b - - 0 1" --themes --tables ~/tb
+dtm=2 (h#1) count=1
+themes: pure model ideal mirror single-piece single-piece:white single-piece:black
+$ helpmate probe "8/8/8/8/8/8/k7/2K1Q3 w - - 0 1" --tables ~/tb
+dtm=3 (h#1.5) count=28
+```
+
+D = 2 (`Ka1 Qa5#`), sibling D + 1 = 3 (`Kc2 Ka3 Qa5#`, 28 solutions) —
+`set-play` does **not** fire; under v0.9.0 it incorrectly did.
+
 ### The six v0.9 themes: real examples, honestly reported
 
 Real, verified output for three of the six — real, hand-derived FENs
@@ -769,8 +816,13 @@ themes: set-play pure model mirror promotion underpromotion single-piece single-
 
 $ helpmate probe "4k3/8/8/8/8/8/8/3QK3 b - - 0 1" --themes --tables ~/tb
 dtm=8 (h#4) count=78
-themes: set-play pure model ideal mirror single-piece single-piece:black
+themes: pure model ideal mirror single-piece single-piece:black
 ```
+
+(This last position is itself a small illustration of the v0.9.1 fix above:
+its sibling is at dtm=9 — D + 1, not D − 1 — so as of v0.9.1 `set-play` no
+longer appears in its theme list, where it incorrectly did under v0.9.0's
+"solvable, full stop" definition.)
 
 **`kniest`, `zajic` and `schnoebelen` have no verified real example in this
 pass.** All three need `solutions`, which forces full enumeration; several
@@ -817,7 +869,7 @@ discoverable without the docs, and never drifts from the binary.
 
   ```
   $ curl -s http://127.0.0.1:8642/v1/themes
-  {"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: ...","needs":"solutions"}, ...]}
+  {"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is solvable one move sooner (sibling dtm == this position's dtm - 1) -- the mate is already available and the side to move merely delays it. A sibling one move LONGER is the opposite of set play, not set play.","needs":"plane"},{"name":"pure","doc":"Pure mate: ...","needs":"solutions"}, ...]}
   ```
 
   Each entry now carries a `needs` field (`"position"`, `"plane"` or
@@ -1395,7 +1447,7 @@ drift from the binary it's talking to:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/themes
-{"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is also solvable.","needs":"plane"},{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure).","needs":"solutions"}, ...]}
+{"themes":[{"name":"set-play","doc":"Set play: the same position with the other side to move is solvable one move sooner (sibling dtm == this position's dtm - 1) -- the mate is already available and the side to move merely delays it. A sibling one move LONGER is the opposite of set play, not set play.","needs":"plane"},{"name":"pure","doc":"Pure mate: every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure).","needs":"solutions"}, ...]}
 ```
 
 ### `GET /v1/materials/{name}/stats`

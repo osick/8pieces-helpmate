@@ -31,9 +31,13 @@ constexpr std::string_view needs_name(Needs n) {
 // Everything a detector may read. The CALLER fetches; the detector stays a
 // pure function, so it is still testable against a hand-built position with
 // no .hm file on disk. `solutions` is empty unless some theme needs it, and
-// `other_plane` is nullopt unless some theme needs it.
+// `other_plane` is nullopt unless some theme needs it. `value` is this
+// position's own stored dtm/count -- needed by detectors (set-play) that
+// compare the sibling plane against the position's OWN distance, not merely
+// its solvability.
 struct ThemeInput {
     const Board& start;
+    ValuePair value;
     std::optional<ValuePair> other_plane;
     const std::vector<Solution>& solutions;
 };
