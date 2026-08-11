@@ -64,11 +64,14 @@ from a Hugging Face dataset for tables not stored locally) and
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
 
-The same process serves a **web dashboard** at `/` — an interactive board with
-per-move evaluations, optimal lines and their themes, a material browser with
-mate-length and solution-count histograms, and composition search with the
-`starts`/`ends` shape filters and a theme multi-select. No build step, no
-CDN: plain ES modules with cm-chessboard vendored.
+The same process serves a **web dashboard** at `/` — a responsive,
+two-column explorer with a grouped, sorted move list (Optimal ranked by how
+forcing each move is, then Slower, then No mate; a saturated solution count
+always renders `255+`, never `255`), a material browser with mate-length and
+solution-count histograms, and composition search with the `starts`/`ends`
+shape filters and a theme multi-select. A three-state theme toggle
+(system/light/dark) remembers your choice and applies it before first paint.
+No build step, no CDN: plain ES modules with cm-chessboard vendored.
 
 ```bash
 helpmate-server --tables ~/tb --port 8642   # then open http://127.0.0.1:8642/

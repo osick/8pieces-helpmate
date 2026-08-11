@@ -67,7 +67,8 @@ headers, which the study flagged as a newcomer cost for nothing saved.
 This is the centre of the redesign.
 
 **Grouping.** Three groups, gap-separated, each with a counted header —
-`Optimal (3)`, `Slower (7)`, `No mate (12)`:
+`Optimal 3`, `Slower 7`, `No mate 12`, the count in a faint mono span rather
+than parenthesised:
 
 | group | predicate | sort within group | badge |
 |---|---|---|---|
@@ -242,6 +243,27 @@ are simply the *next* cliché rather than an escape from this one.
 sets `data-theme` on `:root`, persists the choice, and defaults to
 `prefers-color-scheme` when unset — the three-state pattern (system / light /
 dark) rather than syzygy's system-only, which its own study flagged as a gap.
+
+### Known follow-up: the spacing sweep is incomplete
+
+**Amended during the final fix wave (2026-08-11).** Unlike the type scale,
+which replaced every ad-hoc `rem` font size, the spacing scale (`--s1`
+through `--s4`) was not swept to completion — and this document should say so
+plainly rather than imply otherwise. The final fix wave converted only the
+literals that *exactly* equalled an existing step (so the rendered result is
+byte-identical to before), which brought token usage from 16 call sites to
+26. That leaves roughly forty ad-hoc `rem` literals in `margin`/`padding`/
+`gap` declarations that are close to a step but not exactly on one (`.4rem`,
+`.45rem`, `.75rem`, `.9rem`, and similar), plus another ten or so `rem`
+literals sizing fixed-width things (icon buttons, form inputs, the `<select>`
+`min-width`) that a *spacing* scale was never going to cover regardless.
+Converting the close-but-not-exact values would change rendered spacing by a
+pixel or two in places no automated test pins — a real visual-regression
+risk this late, not a mechanical rename — so it is left as a deliberate,
+tracked follow-up rather than attempted under review pressure. `--s5: 2.6rem`
+was removed in the same pass: it was declared and never used, and no
+existing gap happened to equal it, so there was nothing honest to convert it
+into.
 
 ## Search panel
 

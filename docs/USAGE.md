@@ -1341,6 +1341,15 @@ Three screens:
   are rejected before the request; the server stays the authority for the
   rest.
 
+**Theme.** The header's `Theme:` button cycles through three states — system,
+light, dark — rather than a plain on/off switch. System means "follow the
+OS": the page reads `prefers-color-scheme` and needs no explicit choice.
+Picking light or dark overrides that for this browser; the choice is
+remembered (`localStorage`) and survives a reload. It is also applied
+*before* first paint, via a small inline script in `<head>` that runs ahead
+of the page's own module — so a dark-mode user never sees a flash of the
+light page on load.
+
 **Editing a position.** Under the board, a palette places pieces: pick one,
 then click squares. `Erase` empties the squares you click, `Clear board`
 empties all of them, and the `To move` selector sets the side. While editing,
