@@ -27,9 +27,11 @@
    us consistent with the nearest neighbour tool rather than merely inspired
    by it. Its light mode is stock Bootstrap 3 and is not copied.
 
-   --flag stays, achromatic-adjacent and used for exactly one thing: the
-   error banner and the "server unreachable" chip. An error is the one place
-   on this page where a warning hue is telling the truth. */
+   --flag is a genuine, saturated red (#b3261e is hue ~3deg at 71% saturation
+   -- the most saturated value in this file, not an "achromatic-adjacent"
+   one), used for exactly one thing: the error banner and the "server
+   unreachable" chip. An error is the one place on this page where a warning
+   hue is telling the truth. */
 
 :root {
   --ground: #edebe9;
@@ -37,11 +39,19 @@
   --sunk: #f5f4f2;
   --ink: #2b2b2b;
   --ink-soft: #6b6b6b;
-  --ink-faint: #949494;
+  /* #949494 measured 2.55:1 against --ground here -- illegible, below even
+     the 3:1 large-text floor. #757575 (the mid-grey syzygy's own draw-result
+     scale uses, see "the ordinal is encoded without hue" below) measures
+     3.87:1 on --ground and 4.61:1 on --panel: comfortably legible, and still
+     visibly fainter than --ink-soft, because the bottom rung of the move-list
+     ordinal is also marked by strikethrough and a lighter weight -- colour
+     was never carrying it alone. Dark mode's #787878 measures 4.14:1 on
+     --ground and 3.51:1 on --panel -- both above the 3:1 floor already --
+     and is left untouched. */
+  --ink-faint: #757575;
   --rule: #d9d9d9;
   --rule-strong: #b4b4b4;
   --accent: #1b78d0;
-  --accent-soft: #e3eef9;
   --on-ink: #ffffff;
   --flag: #b3261e;
   --flag-soft: #fbeae9;
@@ -60,7 +70,6 @@
   --s2: .6rem;
   --s3: 1rem;
   --s4: 1.6rem;
-  --s5: 2.6rem;
 
   /* Instruments have small radii: lichess ships 7px, Primer 6px. */
   --r: 6px;
@@ -81,7 +90,7 @@
     --ground: #161512; --panel: #262421; --sunk: #33312e;
     --ink: #bababa; --ink-soft: #949494; --ink-faint: #787878;
     --rule: #404040; --rule-strong: #5c5c5c;
-    --accent: #3692e7; --accent-soft: #1f2d3a;
+    --accent: #3692e7;
     --on-ink: #161512;
     --flag: #e8837b; --flag-soft: #3a1f1d; --info-soft: #1f2d3a;
   }
@@ -90,7 +99,7 @@
   --ground: #161512; --panel: #262421; --sunk: #33312e;
   --ink: #bababa; --ink-soft: #949494; --ink-faint: #787878;
   --rule: #404040; --rule-strong: #5c5c5c;
-  --accent: #3692e7; --accent-soft: #1f2d3a;
+  --accent: #3692e7;
   --on-ink: #161512;
   --flag: #e8837b; --flag-soft: #3a1f1d; --info-soft: #1f2d3a;
 }
@@ -141,26 +150,26 @@ h2 { margin: 0; }
   display: block; font-size: var(--f0); font-weight: 600; letter-spacing: .1em;
   text-transform: uppercase; color: var(--ink-soft);
 }
-.help { margin: .35rem 0 0; color: var(--ink-soft); font-size: var(--f2); max-width: 62ch; }
+.help { margin: var(--s1) 0 0; color: var(--ink-soft); font-size: var(--f2); max-width: 62ch; }
 .hint { margin: 0; color: var(--ink-soft); font-size: var(--f1); max-width: 46ch; }
 .row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
 .spacer { flex: 1; }
 
 button, select, input {
   font: inherit; color: inherit; border-radius: var(--r);
-  border: 1px solid var(--rule); background: var(--panel); padding: .28rem .6rem;
+  border: 1px solid var(--rule); background: var(--panel); padding: .28rem var(--s2);
 }
 button { cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--ink-soft); }
 button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.verdict { font-family: var(--mono); font-size: var(--f2); margin: 1rem 0 0; }
+.verdict { font-family: var(--mono); font-size: var(--f2); margin: var(--s3) 0 0; }
 .verdict.muted { color: var(--ink-soft); }
 
 #error-banner {
   background: var(--flag-soft); color: var(--flag);
-  border-bottom: 1px solid var(--flag); padding: .6rem 1.25rem; font-size: var(--f2);
+  border-bottom: 1px solid var(--flag); padding: var(--s2) 1.25rem; font-size: var(--f2);
 }
 #error-banner.info { background: var(--info-soft); color: var(--ink); border-color: var(--rule); }
 
@@ -223,7 +232,7 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 
 #fen-form { display: flex; flex-direction: column; gap: .45rem; }
 #fen-input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
-label.inline { display: inline-flex; align-items: center; gap: .35rem; color: var(--ink-soft); font-size: var(--f2); }
+label.inline { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ink-soft); font-size: var(--f2); }
 
 /* Optimal -> Slower -> No mate is ONE ordinal axis, not three categories, so
    it is encoded by LUMINANCE AND WEIGHT with no hue at all: filled, then
@@ -245,6 +254,9 @@ label.inline { display: inline-flex; align-items: center; gap: .35rem; color: va
 .move-group h3 { margin: 0; }
 .move-group h3 .n { font-family: var(--mono); color: var(--ink-faint); font-weight: 400; }
 .move-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* 4px on the row, 3px on the badge below -- not --r (6px). Deliberate: rows
+   and badges read tighter than the panels that contain them, so they are not
+   tokenized to the shared radius. */
 .move-group li {
   display: flex; align-items: center; gap: var(--s2);
   padding: .4rem .55rem; border-radius: 4px; border: 1px solid transparent;
@@ -259,22 +271,22 @@ label.inline { display: inline-flex; align-items: center; gap: .35rem; color: va
 }
 
 /* top of the scale: solid, maximum contrast, and a bar in the gutter */
-li.optimal { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
-li.optimal .badge { background: var(--ink); color: var(--on-ink); }
+.move-group li.optimal { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
+.move-group li.optimal .badge { background: var(--ink); color: var(--on-ink); }
 /* The qualifier is a RING, not a hue, so it survives greyscale and every form
    of colour blindness -- and the badge already says "only reply" in words. */
-li.optimal.only .badge { box-shadow: inset 0 0 0 2px var(--on-ink); }
+.move-group li.optimal.only .badge { box-shadow: inset 0 0 0 2px var(--on-ink); }
 
 /* middle: outlined, same ink, no fill */
-li.slower .san { font-weight: 400; }
-li.slower .badge { color: var(--ink-soft); border: 1px solid var(--rule); }
+.move-group li.slower .san { font-weight: 400; }
+.move-group li.slower .badge { color: var(--ink-soft); border: 1px solid var(--rule); }
 
 /* bottom: faded and struck through */
-li.dead .san {
+.move-group li.dead .san {
   color: var(--ink-faint); font-weight: 400;
   text-decoration: line-through; text-decoration-thickness: 1px;
 }
-li.dead .badge { color: var(--ink-faint); }
+.move-group li.dead .badge { color: var(--ink-faint); }
 
 #lines { margin: .5rem 0 0; padding-left: 1.4rem; font-family: var(--mono); font-size: var(--f1); }
 #lines li { padding: .1rem 0; }
@@ -318,7 +330,7 @@ li.dead .badge { color: var(--ink-faint); }
 
 .chart { margin: 1.4rem 0 0; }
 .chart > .eyebrow + .hint { margin-bottom: .5rem; }
-.hist { display: grid; grid-template-columns: auto 1fr auto; gap: .18rem .6rem; align-items: center; margin-top: .55rem; }
+.hist { display: grid; grid-template-columns: auto 1fr auto; gap: .18rem var(--s2); align-items: center; margin-top: .55rem; }
 .hist .k, .hist .v { font-family: var(--mono); font-size: var(--f1); font-variant-numeric: tabular-nums; }
 .hist .k { color: var(--ink-soft); text-align: right; white-space: nowrap; }
 .hist .v { text-align: right; }
@@ -339,8 +351,8 @@ li.dead .badge { color: var(--ink-faint); }
 
 #panel-mine { max-width: 900px; }
 #mine-form {
-  display: flex; flex-wrap: wrap; align-items: end; gap: .6rem 1rem;
-  margin: 1rem 0 0; padding: .85rem 1rem; background: var(--panel);
+  display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2) var(--s3);
+  margin: var(--s3) 0 0; padding: .85rem var(--s3); background: var(--panel);
   border: 1px solid var(--rule); border-radius: var(--r);
 }
 #mine-form label { display: flex; flex-direction: column; gap: .2rem;
