@@ -160,6 +160,84 @@ literals. Concretely:
   as colour; the qualifier (unique vs. multiple continuations) is a ring or
   border, not a new hue. Nothing is colour-only.
 
+### The palette is replaced, not kept
+
+The current warm-cream ground (`#f7f5f0`) with a terracotta flag (`#a4542a`)
+goes. It is not wrong for being warm — it is wrong for being *saturated*. The
+replacement is **lichess's shipped theme**, read off
+`ui/lib/css/theme/_theme.default.scss` / `_theme.light.scss`, whose whole
+system is two rules:
+
+1. **Grounds carry one hue**, declared once (`---site-hue: 37deg`) and derived
+   for every surface, at **5–10% saturation**.
+2. **Ink and rules are exactly achromatic** — hue 0, saturation 0.
+
+Our old palette was hue 37 as well, at 30–40% saturation. That is the
+difference between a tint and a colour, and cream-plus-terracotta is a
+signature that now reads as machine-generated on sight.
+
+| token | light | dark |
+|---|---|---|
+| `--ground` | `#edebe9` | `#161512` |
+| `--panel` | `#ffffff` | `#262421` |
+| `--sunk` (zebra) | `#f5f4f2` | `#33312e` |
+| `--ink` | `#2b2b2b` | `#bababa` |
+| `--ink-soft` | `#6b6b6b` | `#949494` |
+| `--ink-faint` | `#949494` | `#787878` |
+| `--rule` | `#d9d9d9` | `#404040` |
+| `--accent` | `#1b78d0` | `#3692e7` |
+
+Two arguments beyond taste. First, syzygy-tables.info's dark mode **is** this
+palette — `#161512`, `#262421`, `#bababa`, `#404040`, `#3692e7` all match
+lichess exactly — so adopting it makes us consistent with the nearest
+neighbour tool rather than merely inspired by it. (Its *light* mode is
+stock Bootstrap 3 — `#333`/`#eee`/`#ccc`/`#337ab7` — and is the one part of
+syzygy not worth copying.) Second, every instrument UI surveyed picks a blue
+accent in a startlingly narrow band: Primer `#0969da`, Grafana `#1f62e0`,
+Datasette `#276890`, Bootstrap `#337ab7`, lichess `#1b78d0` — **hue 203–220°,
+median 211°**. The discipline is not desaturation (those run 56–93% saturated)
+but hue-lock plus restraint about placement. The accent is therefore confined
+to links, focus rings and hover borders. It is never a field, never a header
+fill, and never the move list.
+
+Board squares are lichess's default brown (`#f0d9b5` / `#b58863`) and do
+**not** change between themes.
+
+### The ordinal is encoded without hue
+
+Optimal → Slower → No mate is **one ranked axis, not three categories**. Three
+hues is the encoding for unrelated things; a ranked scale belongs to
+**luminance and weight**:
+
+| group | encoding |
+|---|---|
+| Optimal | filled badge (`--ink` on `--on-ink`), 3px inset bar in the row gutter |
+| Slower | outlined badge, same ink, no fill |
+| No mate | faded to `--ink-faint`, SAN struck through |
+
+This is syzygy's own device rather than an invention. It renders a five-level
+win / cursed-win / draw / blessed-loss / loss scale in white, mid-grey
+(`#757575`) and black — the colours of the game itself, so it needs no legend
+— and marks the two degraded levels with a `3px` inset ring in the draw grey
+rather than a fourth hue. Its dark mode shifts that grey to `#999999` so the
+ordinal midpoint holds *relative to the ground*; ours must do the same.
+
+Green→amber→red is the obvious move and the wrong one: **a slower move is not
+a warning**, and hue-only ordinals fail exactly where adjacent levels must be
+told apart. Where lichess does use hue for move quality it runs
+blue→amber→red, holding green back for the *exceptional* case rather than
+spending it on "fine".
+
+The qualifier — "only reply" vs. several continuations — stays a ring on the
+badge, so nothing on the page is encoded by colour alone.
+
+Also avoided, each because something in the survey earns it: vertical
+`linear-gradient` on headers and buttons (skeuomorphic residue; the
+most-criticised part of lichess's own chrome); large radii with a soft drop
+shadow on every card — lichess ships **7px**, Primer 6px, so ours is `6px` and
+panels are border-only; and saturated violet or a neon-on-black accent, which
+are simply the *next* cliché rather than an escape from this one.
+
 **Dark mode gets a toggle.** The CSS already exists; the work is a control that
 sets `data-theme` on `:root`, persists the choice, and defaults to
 `prefers-color-scheme` when unset — the three-state pattern (system / light /
