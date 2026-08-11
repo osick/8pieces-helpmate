@@ -68,6 +68,14 @@ test("dead moves sort by san alone and never reach a numeric comparison", () => 
   // count (as the slower group's does) would tie exactly the same way
   // bySan does and the mutation would go undetected. Qg8+'s count is lower
   // than Qg6's while its san sorts later, so the two comparators disagree.
+  //
+  // These counts are fictional: a real unsolvable move always carries
+  // count: 0, never 1 or 9. That is exactly why they have to be fictional --
+  // on real data every dead move ties at both dtm: null and count: 0, so the
+  // slower group's (dtm, count, san) comparator degenerates to bySan and no
+  // fixture built from real payloads could ever tell the two apart. This
+  // test is guarding the contract ("this group sorts by SAN alone"), not
+  // reproducing a payload.
   const moves = [
     { san: "Qg8+", dtm: null, count: 1, solvable: false, optimal: false, notation: null },
     { san: "Qg6", dtm: null, count: 9, solvable: false, optimal: false, notation: null },
