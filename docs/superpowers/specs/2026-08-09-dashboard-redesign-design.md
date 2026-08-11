@@ -105,7 +105,7 @@ The structure is therefore:
 ```html
 <div id="move-list">
   <section class="move-group">
-    <h3>Optimal <span class="count">3</span></h3>
+    <h3>Optimal <span class="n">3</span></h3>
     <ul>
       <li class="optimal" data-san="Kh6">…</li>
     </ul>

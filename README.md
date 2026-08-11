@@ -342,7 +342,7 @@ result](#two-things-to-know-before-you-trust-a-result) below and
 [USAGE.md](docs/USAGE.md#needs-what-a-theme-actually-reads) for the full
 explanation. `helpmate themes` is the authoritative source for the
 vocabulary and always matches this build exactly; the table below is copied
-verbatim from its real output on this checkout (`helpmate 0.9.1`):
+verbatim from its real output on this checkout (`helpmate 0.10.0`):
 
 | Theme | Needs | Definition |
 |---|---|---|
