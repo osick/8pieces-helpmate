@@ -859,7 +859,7 @@ url = f"http://127.0.0.1:{port}"
 for _ in range(100):
     try: urllib.request.urlopen(f"{url}/v1/health", timeout=1); break
     except Exception: time.sleep(.1)
-out = os.environ.get("SHOTS", "/tmp/claude-1000/shots"); os.makedirs(out, exist_ok=True)
+out = os.environ.get("SHOTS", "/tmp/claude-1000/-home-os-development-8pieces-helpmate/1276e24f-dd94-4959-9c52-73b31854300e/scratchpad/shots"); os.makedirs(out, exist_ok=True)
 with sync_playwright() as pw:
     b = pw.chromium.launch(args=["--no-sandbox"])
     for scheme in ("light", "dark"):
