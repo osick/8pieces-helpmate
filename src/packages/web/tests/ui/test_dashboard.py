@@ -323,6 +323,21 @@ def test_the_group_header_is_not_a_move_row(page, server):
     assert all(sans), "every #move-list li must carry a data-san"
 
 
+def test_a_mate_position_renders_prose_not_a_miscounted_move_row(page, server):
+    # explorer.js's renderMoveList has a comment explaining why the empty
+    # branch renders a <p class="empty"> rather than an <li>: seven other
+    # tests in this file use `#move-list li` as their "the page is ready"
+    # idiom, and two of them count it -- an <li> here would be silently
+    # counted as a move. Nothing reached this branch until now: reverting the
+    # <p> back to an <li> passes every other gate in this suite.
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    page.click("#move-list li[data-san='Qg7#']")   # h#0: mate, no legal replies
+    page.wait_for_selector("#move-list .empty")
+    assert page.eval_on_selector_all("#move-list li", "els => els.length") == 0
+    assert page.is_visible("#move-list .empty")
+
+
 def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # Syzygy's structural win, without its 310px cap: a long move list must
     # never drag the board off screen. No sticky headers, no scroll sync --
