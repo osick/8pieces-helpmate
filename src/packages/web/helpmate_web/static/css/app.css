@@ -47,7 +47,7 @@
   --flag-soft: #fbeae9;
   --info-soft: #e3eef9;
 
-  /* Type scale. Replaces twelve ad-hoc rem values (.7 .74 .76 .78 .8 .82
+  /* Type scale. Replaces fourteen ad-hoc rem values (.7 .74 .76 .78 .8 .82
      .84 .85 .86 .88 .9 .95 1.05 1.15). */
   --f0: .75rem;   /* eyebrows, chips, tile keys */
   --f1: .82rem;   /* data rows, hints, form labels */
@@ -278,7 +278,7 @@ li.dead .badge { color: var(--ink-faint); }
 
 .stats-head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .stats-head h2 { font-family: var(--mono); font-size: var(--f4); font-weight: 650; }
-.stats-head .sub { color: var(--ink-soft); font-size: .85rem; }
+.stats-head .sub { color: var(--ink-soft); font-size: var(--f2); }
 
 .tiles { display: flex; flex-wrap: wrap; gap: .5rem; margin: .9rem 0 0; }
 .tile {
