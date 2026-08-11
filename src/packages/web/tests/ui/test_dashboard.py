@@ -247,3 +247,70 @@ def test_explorer_shows_the_flip_note_not_no_themes_detected(page, server):
     text = page.inner_text("#position-themes")
     assert "flip" in text.lower()
     assert text != "no themes detected"
+
+
+SATURATED = "8/8/7k/8/8/8/8/KQ6 b - - 0 1"
+THREE_GROUPS = "7k/8/5K2/8/8/8/8/6Q1 w - - 0 1"
+
+
+def _rows(page, selector="#move-list li"):
+    return page.eval_on_selector_all(selector, "els => els.map(e => e.dataset.san)")
+
+
+def test_optimal_moves_are_ordered_by_ascending_child_count(page, server):
+    # Landing position: Kh6 has 3 optimal continuations, Kh8 has 1, and the
+    # move generator emits them in that (wrong) order. Kh8 is the more forcing
+    # move and must lead. Measured against KQvk on 2026-08-11.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert _rows(page, "#move-list section[data-group=optimal] li") == ["Kh8", "Kh6"]
+
+
+def test_a_saturated_child_count_renders_as_a_ceiling_not_a_number(page, server):
+    # 8/8/7k/8/8/8/8/KQ6 b: Kg5 leads to a child whose count has saturated at
+    # 255, Kh5 to one with 246. The saturated move must sort last (255 > 246)
+    # and must never claim "255 ways" -- a ceiling is not a measurement.
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    optimal = "#move-list section[data-group=optimal] li"
+    assert _rows(page, optimal) == ["Kh5", "Kg5"]
+    badges = page.eval_on_selector_all(
+        f"{optimal} .badge", "els => els.map(e => e.textContent)")
+    assert badges == ["h#4.5 · 246 ways", "h#4.5 · 255+ ways"]
+    assert not any(b.endswith("255 ways") for b in badges)
+
+
+def test_all_three_groups_render_in_order_with_counted_headers(page, server):
+    # 7k/8/5K2/8/8/8/8/6Q1 w -- the position after Kh8. 28 legal moves:
+    # one optimal (Qg7#), 25 slower, 2 that lead nowhere.
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    groups = page.eval_on_selector_all(
+        "#move-list section.move-group", "els => els.map(e => e.dataset.group)")
+    assert groups == ["optimal", "slower", "dead"]
+
+    headers = page.eval_on_selector_all(
+        "#move-list section.move-group h3", "els => els.map(e => e.textContent)")
+    assert headers == ["Optimal 1", "Slower 25", "No mate 2"]
+
+    # Row one is the answer, whatever the generator emitted.
+    assert _rows(page)[0] == "Qg7#"
+    assert page.eval_on_selector(
+        "#move-list li .badge", "e => e.textContent") == "h#0 · only reply"
+
+    # The slower group is ordered by mate length first, then by count.
+    assert _rows(page, "#move-list section[data-group=slower] li")[:6] == [
+        "Qa7", "Qg2", "Qg3", "Qg4", "Qg5", "Kf7"]
+    assert _rows(page, "#move-list section[data-group=dead] li") == ["Qg6", "Qg8+"]
+
+
+def test_the_group_header_is_not_a_move_row(page, server):
+    # The whole DOM contract in one assertion: three headers exist, and
+    # `#move-list li` still counts exactly the 28 moves and nothing else.
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector_all("#move-list section.move-group h3",
+                                     "els => els.length") == 3
+    sans = _rows(page)
+    assert len(sans) == 28
+    assert all(sans), "every #move-list li must carry a data-san"
