@@ -433,7 +433,7 @@ def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
     page.wait_for_selector("#mine-results li")
     idx = page.eval_on_selector_all("#mine-results li .idx",
                                     "els => els.map(e => e.textContent)")
-    assert idx[:3] == ["1", "2", "3"], idx[:3]
+    assert idx == [str(n) for n in range(1, len(idx) + 1)]
     assert len(idx) == page.eval_on_selector_all("#mine-results li", "els => els.length")
     # each row still carries its FEN and still navigates
     first = page.eval_on_selector("#mine-results li .fen", "e => e.textContent")

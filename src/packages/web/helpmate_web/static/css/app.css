@@ -208,8 +208,17 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 }
 .palette-pieces button svg { width: 100%; height: 100%; display: block; }
 .palette-actions { display: flex; gap: .4rem; }
+/* The armed piece has to be unmistakable, and these buttons are icon-only --
+   there is no text for a weight change to act on -- so the cue cannot be
+   typographic. It is the same device the move list uses for "only reply": a
+   ring. The fill inverts to --panel as well, because .palette-pieces button
+   already sits on --sunk by default, so a --sunk "pressed" state would be no
+   change at all. */
 .palette button[aria-pressed="true"] {
-  border-color: var(--rule-strong); background: var(--sunk); font-weight: 600;
+  border-color: var(--ink);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 2px var(--ink);
+  font-weight: 600;
 }
 
 #fen-form { display: flex; flex-direction: column; gap: .45rem; }
