@@ -277,7 +277,14 @@ def test_a_saturated_child_count_renders_as_a_ceiling_not_a_number(page, server)
     badges = page.eval_on_selector_all(
         f"{optimal} .badge", "els => els.map(e => e.textContent)")
     assert badges == ["h#4.5 · 246 ways", "h#4.5 · 255+ ways"]
-    assert not any(b.endswith("255 ways") for b in badges)
+    # The position's OWN count also saturates here (it is the sum of its
+    # optimal children's counts, capped at the same ceiling) -- the summary
+    # line above the badges must honour the same rule they do: a ceiling is
+    # never a measurement. Measured against KQvk on 2026-08-11: this position
+    # is dtm=10 (h#5), count=255.
+    summary = page.inner_text("#position-summary")
+    assert summary == "dtm 10 (h#5) · 255+ optimal lines"
+    assert "255 optimal line" not in summary
 
 
 def test_all_three_groups_render_in_order_with_counted_headers(page, server):

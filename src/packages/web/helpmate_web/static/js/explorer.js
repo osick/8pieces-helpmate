@@ -10,7 +10,7 @@ import { encodeState, decodeState } from "./lib/state.js";
 import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
 import { themeSummary } from "./lib/themes.js";
-import { groupMoves, moveBadge, moveClass } from "./lib/moves.js";
+import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
@@ -187,9 +187,18 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   const b = res.body;
   lastMoves = b.moves;
   summary.classList.toggle("muted", b.solvable === false);
+  // b.count is min(255, sum of the optimal children's counts), so the moment
+  // any child badge below reads "255+ ways" this position's own count is
+  // guaranteed to have saturated too -- a bare "255 optimal line(s)" here
+  // would present that ceiling as a measurement, inches above badges that
+  // correctly say otherwise. COUNT_SAT is the one source of truth for the
+  // ceiling; no second 255 literal.
+  const lines = b.count >= COUNT_SAT
+    ? `${COUNT_SAT}+ optimal lines`
+    : `${b.count} optimal line(s)`;
   summary.textContent = b.solvable === false
     ? "no helpmate from this position"
-    : `dtm ${b.dtm} (${b.notation}) · ${b.count} optimal line(s)` +
+    : `dtm ${b.dtm} (${b.notation}) · ${lines}` +
       (b.flipped ? " · colors flipped" : "");
 
   if (b.solvable !== false) {
