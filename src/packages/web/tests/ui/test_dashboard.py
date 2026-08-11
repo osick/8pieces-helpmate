@@ -370,3 +370,56 @@ def test_reference_material_appears_only_on_the_landing_position(page, server):
     page.wait_for_selector("#move-list li")
     page.wait_for_function("() => document.getElementById('primer').hidden === true")
     assert not page.is_visible("#explorer-help")
+
+
+def test_theme_toggle_cycles_all_three_states_and_persists(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.get_attribute("#theme-toggle", "data-mode") == "system"
+    assert page.evaluate(
+        "document.documentElement.hasAttribute('data-theme')") is False
+    assert page.inner_text("#theme-toggle") == "Theme: system"
+
+    page.click("#theme-toggle")
+    assert page.get_attribute("html", "data-theme") == "light"
+    page.click("#theme-toggle")
+    assert page.get_attribute("html", "data-theme") == "dark"
+    assert page.inner_text("#theme-toggle") == "Theme: dark"
+
+    # The choice survives a reload -- and is applied before first paint, so
+    # a dark-mode user never gets a white flash.
+    page.reload()
+    page.wait_for_selector("#move-list li")
+    assert page.get_attribute("html", "data-theme") == "dark"
+
+    page.click("#theme-toggle")   # back round to system
+    assert page.evaluate(
+        "document.documentElement.hasAttribute('data-theme')") is False
+
+
+def test_an_explicit_light_choice_beats_a_dark_operating_system(browser, server):
+    # The three-state point: prefers-color-scheme is the DEFAULT, not the
+    # authority. If the media query were unguarded, a dark OS would win and
+    # the light setting would do nothing.
+    ctx = browser.new_context(color_scheme="dark")
+    pg = ctx.new_page()
+    pg.goto(server)
+    pg.wait_for_selector("#move-list li")
+    dark_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
+    pg.click("#theme-toggle")   # -> light
+    assert pg.get_attribute("html", "data-theme") == "light"
+    light_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
+    assert light_bg != dark_bg, "explicit light did not override the dark OS"
+    ctx.close()
+
+
+def test_the_theme_toggle_is_not_treated_as_a_panel_button(page, server):
+    # panels.js binds EVERY `nav button` as a panel switch and reads
+    # btn.dataset.panel. A stray button inside <nav> would call
+    # showPanel(undefined) on click and hide all three panels at once -- a
+    # failure that looks like a blank page and has no other test guarding it.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector("#theme-toggle", "e => e.closest('nav') === null")
+    page.click("#theme-toggle")
+    assert page.is_visible("#panel-explorer")
