@@ -6,6 +6,63 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.10.0] - 2026-08-11
+
+### Changed
+
+- **The web dashboard is redesigned end to end** — a professionalization pass
+  aimed at publishing it, benchmarked against syzygy-tables.info's UX.
+  - **The move list is grouped and sorted, not left in generator order.**
+    Three groups — Optimal, Slower, No mate — each with a counted header. The
+    optimal group sorts by ascending child `count`: `dtm` is constant across
+    the whole group (every optimal move leads to a child at `dtm = D − 1`),
+    so it cannot discriminate; `count` says how forcing the move is, which is
+    also the property composers care about, so the ordering doubles as the
+    advice. The slower group sorts by `dtm`, then `count`, then SAN; the dead
+    group sorts by SAN alone. Row one is always the recommended move.
+  - **A saturated `count` renders `255+`, never `255`.** The whole project
+    treats a saturated count as "cannot be enumerated," so presenting the
+    ceiling as a bare number would misreport it as a measurement. This
+    applies everywhere a count is shown, including the position summary
+    line, which is derived from the same ceiling as its children (a
+    position's own `count` is `min(255, sum of its optimal children's
+    counts)`, so the moment one child badge saturates the position's own
+    count necessarily has too).
+  - **The palette is lichess's shipped theme, not the old warm-cream/
+    terracotta pairing.** Grounds carry one hue at 5–10% saturation; ink and
+    rules are exactly achromatic; the one accent (`#1b78d0` light /
+    `#3692e7` dark) is confined to links, focus rings and hover borders —
+    never a fill, header, or list colour.
+  - **The Optimal → Slower → No mate ordinal carries no hue.** It is one
+    ranked axis, encoded by luminance and weight (filled → outlined → faded
+    and struck through), the same device syzygy-tables.info uses for its own
+    win/draw/loss scale. The qualifier ("only reply" vs. several
+    continuations) is a ring, not a colour, so nothing on the page is
+    encoded by hue alone.
+  - **A responsive two-column shell**, mobile-first, with the board pane
+    fixed and only the answer pane scrolling above an 860px breakpoint — a
+    long move list never drags the board out of view.
+  - **The primer and legend copy show only on the landing position** and get
+    out of the way once the user has a real position, matching the
+    benchmark's treatment of its own About/Download material.
+  - **A three-state theme toggle** (system / light / dark): the choice
+    persists across reloads and is applied before first paint, so a
+    dark-mode user never sees a white flash on load.
+  - **Search results are numbered.** `/v1/mine` returns no per-row data
+    beyond the FEN, so a table (as originally scoped) would have every
+    column constant across every row; the result list keeps its `<ul>` and
+    gains a row index instead. A genuine table needs `/v1/mine` to return
+    per-row values, which is an API change left to its own cycle.
+
+### Fixed
+
+- **`make test-web` now reinstalls the web package before running the UI
+  suite.** `helpmate-web` installs as a copy into site-packages, not
+  editable, and the target used to run `pytest` straight against whatever
+  was already installed — so a regression in the dashboard could pass
+  silently against a stale copy, while only a brand-new test would fail
+  loudly. The target now reinstalls first.
+
 ## [0.9.1] - 2026-08-09
 
 ### Fixed
