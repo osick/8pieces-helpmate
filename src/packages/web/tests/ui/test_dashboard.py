@@ -314,3 +314,48 @@ def test_the_group_header_is_not_a_move_row(page, server):
     sans = _rows(page)
     assert len(sans) == 28
     assert all(sans), "every #move-list li must carry a data-san"
+
+
+def test_the_board_stays_put_while_the_answer_scrolls(page, server):
+    # Syzygy's structural win, without its 310px cap: a long move list must
+    # never drag the board off screen. No sticky headers, no scroll sync --
+    # position: sticky on the board column, and only above the breakpoint.
+    page.set_viewport_size({"width": 1280, "height": 700})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")   # 28 moves: taller than the viewport
+    page.wait_for_selector("#move-list li")
+    page.mouse.wheel(0, 600)
+    page.wait_for_function("() => window.scrollY > 100")
+    top_after = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect().top")
+    # Without sticky this is around -500 (scrolled off the top). With it, the
+    # column parks at --s3 from the viewport top and stays there.
+    assert top_after >= 0, f"the board column scrolled out of view (top={top_after})"
+
+
+def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, server):
+    page.set_viewport_size({"width": 420, "height": 900})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    board = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect()")
+    side = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
+    assert side["top"] >= board["bottom"] - 1, "columns did not stack"
+    # Nothing is hidden on a small screen -- hiding controls is a support burden.
+    for sel in ("#palette", "#fen-form", "#move-list", "#btn-export-pgn"):
+        assert page.is_visible(sel), f"{sel} disappeared at 420px"
+    # And the page never scrolls sideways.
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1")
+
+
+def test_reference_material_appears_only_on_the_landing_position(page, server):
+    # The benchmark renders its About/Download copy only when the FEN is the
+    # default: ask a real question and the explanatory copy vanishes. A
+    # published tool explains itself to a newcomer, then gets out of the way.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.is_visible("#primer")
+    assert page.is_visible("#explorer-help")
+
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    page.wait_for_function("() => document.getElementById('primer').hidden === true")
+    assert not page.is_visible("#explorer-help")

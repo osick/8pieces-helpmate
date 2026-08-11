@@ -114,6 +114,13 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   const seq = ++renderSeq;
   current = fen;
   syncControls(fen);
+  // Reference material is for a newcomer meeting the landing position; once
+  // the user has a position of their own it gets out of the way. The
+  // benchmark does the same with its About/Download copy, and the reasoning
+  // is the same: a published tool explains itself, then stops talking.
+  const landing = fen === START;
+  document.getElementById("explorer-help").hidden = !landing;
+  document.getElementById("primer").hidden = !landing;
   // A hand-typed FEN may be malformed (wrong rank count, stray characters).
   // cm-chessboard's own FEN parser rejects that -- setPosition is `async`, so
   // the rejection surfaces on the returned promise, not as a synchronous

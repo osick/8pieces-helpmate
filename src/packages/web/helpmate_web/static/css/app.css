@@ -168,16 +168,32 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 
 /* ---------- explorer ---------- */
 
-#panel-explorer { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
-.board-col { display: flex; flex-direction: column; gap: 1rem; flex: 0 1 auto; }
+/* Mobile is the default; two columns are the enhancement. 460px board +
+   32px gap + 300px minimum side + 40px of main padding = 832, so the two
+   columns need ~840px and the breakpoint sits just above at 860. */
+#panel-explorer { display: flex; flex-direction: column; gap: var(--s4); }
+.board-col { display: flex; flex-direction: column; gap: var(--s3); }
 #board { width: min(88vw, 460px); aspect-ratio: 1; }
-.side { flex: 1 1 340px; min-width: 300px; display: flex; flex-direction: column; gap: 1.1rem; }
+.side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
 
+@media (min-width: 860px) {
+  #panel-explorer {
+    display: grid;
+    grid-template-columns: min(460px, 40%) minmax(300px, 1fr);
+    gap: var(--s4);
+    align-items: start;
+  }
+  /* The board pane stays put and only the answer pane scrolls, so a long
+     move list never drags the board out of view. No sticky headers, no
+     scroll-sync JavaScript. */
+  .board-col { position: sticky; top: var(--s3); }
+}
+
 .palette {
-  display: flex; flex-direction: column; gap: .55rem;
+  display: flex; flex-direction: column; gap: var(--s2);
   border: 1px solid var(--rule); border-radius: var(--r);
-  background: var(--panel); padding: .7rem .8rem;
+  background: var(--panel); padding: var(--s2) var(--s3);
   width: min(88vw, 460px);
 }
 /* Six columns: White on the first row, Black on the second, in the order a

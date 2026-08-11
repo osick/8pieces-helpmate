@@ -45,10 +45,11 @@
     </div>
 
     <div class="side">
-      <p class="help">
-        Drag a piece to play its move, or click one from the list. Moves
-        outlined in green keep the shortest mate; greyed moves lead nowhere.
-        The position lives in the address bar, so any link you copy reopens it.
+      <p class="help" id="explorer-help">
+        Drag a piece to play its move, or click one from the list. Moves are
+        grouped: the ones that keep the shortest mate first, then those that
+        take longer, then those that lead nowhere. The position lives in the
+        address bar, so any link you copy reopens it.
       </p>
 
       <form id="fen-form">
@@ -79,7 +80,7 @@
       <ol id="lines"></ol>
       <button type="button" id="btn-export-pgn">Download PGN</button>
 
-      <details class="primer">
+      <details class="primer" id="primer">
         <summary>What am I looking at?</summary>
         <p>In a <b>helpmate</b> both sides cooperate: Black moves first and
         helps White mate Black as fast as possible. <b>h#2</b> means two moves
