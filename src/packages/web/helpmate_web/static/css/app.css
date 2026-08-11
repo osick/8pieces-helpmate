@@ -209,7 +209,7 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 .palette-pieces button svg { width: 100%; height: 100%; display: block; }
 .palette-actions { display: flex; gap: .4rem; }
 .palette button[aria-pressed="true"] {
-  border-color: var(--accent); background: var(--accent-soft); font-weight: 600;
+  border-color: var(--rule-strong); background: var(--sunk); font-weight: 600;
 }
 
 #fen-form { display: flex; flex-direction: column; gap: .45rem; }
@@ -291,7 +291,7 @@ li.dead .badge { color: var(--ink-faint); }
   font-family: var(--mono); font-size: var(--f1);
 }
 #material-list li:hover, #mine-results li:hover, #material-samples li:hover { border-color: var(--accent); }
-#material-list li[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+#material-list li[aria-selected="true"] { border-color: var(--rule-strong); background: var(--sunk); font-weight: 600; }
 #material-list .name { font-weight: 650; }
 #material-list .meta { color: var(--ink-soft); }
 
@@ -352,3 +352,10 @@ li.dead .badge { color: var(--ink-faint); }
    The title attribute carries the explanation; this just makes the option
    findable at a glance. */
 #mine-form select[multiple] option.theme-answers-saturated { font-style: italic; }
+
+#mine-results li { display: flex; align-items: baseline; gap: var(--s2); }
+#mine-results li .idx {
+  color: var(--ink-faint); font-variant-numeric: tabular-nums;
+  min-width: 2.5ch; text-align: right; flex: none;
+}
+#mine-results li .fen { overflow-wrap: anywhere; }

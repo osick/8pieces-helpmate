@@ -423,3 +423,25 @@ def test_the_theme_toggle_is_not_treated_as_a_panel_button(page, server):
     assert page.eval_on_selector("#theme-toggle", "e => e.closest('nav') === null")
     page.click("#theme-toggle")
     assert page.is_visible("#panel-explorer")
+
+
+def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
+    page.goto(f"{server}/#panel=mine")
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_selector("#mine-results li")
+    idx = page.eval_on_selector_all("#mine-results li .idx",
+                                    "els => els.map(e => e.textContent)")
+    assert idx[:3] == ["1", "2", "3"], idx[:3]
+    assert len(idx) == page.eval_on_selector_all("#mine-results li", "els => els.length")
+    # each row still carries its FEN and still navigates
+    first = page.eval_on_selector("#mine-results li .fen", "e => e.textContent")
+    assert first.count("/") == 7
+    page.click("#mine-results li")
+    page.wait_for_selector("#panel-explorer:not([hidden])")
+    # The click sets location.hash; panels.js and explorer.js both react to
+    # hashchange, and explorer's render() is async -- so wait for the value
+    # rather than reading it in the same tick.
+    page.wait_for_function(
+        "want => document.getElementById('fen-input').value === want", arg=first)
