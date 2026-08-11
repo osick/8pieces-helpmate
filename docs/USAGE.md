@@ -1316,8 +1316,11 @@ explicitly that you want the API alone.
 Three screens:
 
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
-  one from the complete legal-move list, which shows the value each move leads
-  to and outlines in green the ones that keep the shortest mate. Below it, the
+  one from the complete legal-move list, which is grouped into **Optimal**
+  (keeps the shortest mate), **Slower** and **No mate**, with the optimal
+  moves ordered by how forcing they are — the child position's optimal-line
+  count, ascending, since mate length is constant across that group by
+  construction. A saturated count renders as `255+`, never `255`. Below it, the
   optimal lines in SAN, exportable as PGN, and (since v0.8.0) the current
   position's themes — fetched via `probe --themes` (opt-in on the client too),
   showing `themes_note` in place of the list for a color-flipped position
@@ -1333,9 +1336,10 @@ Three screens:
   `ends` shape filters and (since v0.8.0) a theme multi-select populated from
   [`/v1/themes`](#get-v1themes), so the picker's vocabulary always matches the
   server's own build rather than a hard-coded list. Results are clickable
-  FENs, exportable as a FEN list or CSV. Impossible filter combinations
-  (`starts` greater than `count`) are rejected before the request; the server
-  stays the authority for the rest.
+  FENs, exportable as a FEN list or CSV. Results are numbered so a row is
+  nameable. Impossible filter combinations (`starts` greater than `count`)
+  are rejected before the request; the server stays the authority for the
+  rest.
 
 **Editing a position.** Under the board, a palette places pieces: pick one,
 then click squares. `Erase` empties the squares you click, `Clear board`

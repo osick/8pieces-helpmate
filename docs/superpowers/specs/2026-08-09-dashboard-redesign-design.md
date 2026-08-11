@@ -250,6 +250,15 @@ results presented as a table with the data we already have rather than a flat
 list of FEN strings. The form keeps its current fields and client-side
 validation.
 
+**Amended during implementation (2026-08-11).** "Results presented as a table"
+was not built. `/v1/mine` returns `{fens, truncated, skipped_saturated}` and
+nothing per-row, so every column a table could carry — material, dtm, count,
+side to move — is a constant of the query, identical in every row. A table of
+constant columns is worse than a list, and the conversion would have broken
+two passing UI tests for no gain. The list keeps its `<ul>` and gains a row
+index. Genuine per-row data requires `/v1/mine` to return values alongside the
+FENs; that is an API change and belongs to its own cycle.
+
 ## Testing
 
 - **The 38 JS unit tests must stay green untouched.** They import only
