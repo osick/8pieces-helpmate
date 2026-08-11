@@ -329,6 +329,13 @@ def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # Without sticky this is around -500 (scrolled off the top). With it, the
     # column parks at --s3 from the viewport top and stays there.
     assert top_after >= 0, f"the board column scrolled out of view (top={top_after})"
+    # Above the breakpoint #panel-explorer is a grid. grid-template-columns
+    # computes to "none" when the element is not a grid and to resolved track
+    # sizes when it is, so this pins the media query itself rather than a side
+    # effect that a flex-wrap layout could also produce.
+    assert page.evaluate(
+        "getComputedStyle(document.getElementById('panel-explorer')).gridTemplateColumns"
+    ) != "none"
 
 
 def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, server):
@@ -344,6 +351,10 @@ def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, serv
     # And the page never scrolls sideways.
     assert page.evaluate(
         "document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1")
+    # ...and below it, the grid must not apply at all.
+    assert page.evaluate(
+        "getComputedStyle(document.getElementById('panel-explorer')).gridTemplateColumns"
+    ) == "none"
 
 
 def test_reference_material_appears_only_on_the_landing_position(page, server):
