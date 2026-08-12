@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
+from .aggregate import aggregate_stats
 from .storage import ChainSource
 
 _MATERIAL_RE = re.compile(r"^[KQRBNP]+v[kqrbnp]+$")
@@ -135,6 +137,38 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         if resp is not None:
             return resp
         return _tb(chain, d).stats(name)
+
+    # Recomputing this walks every sidecar (295 files / 13 MB / 0.17s measured
+    # on the reference corpus), so it is cached against a signature of the
+    # catalog itself: a newly generated or downloaded table invalidates it and
+    # nothing else does. Closure state, not module state, so each create_app()
+    # in the test suite starts cold.
+    agg_cache: dict[str, object] = {}
+
+    @app.get("/v1/stats")
+    def stats_overall():
+        cat = chain.catalog()
+        key = tuple(sorted((s.material, s.size_bytes, s.location) for s in cat))
+        if agg_cache.get("key") == key:
+            return agg_cache["value"]
+        sidecars = []
+        for s in cat:
+            d = chain.resolve(s.material)
+            if d is None:
+                continue
+            p = Path(d) / f"{s.material}.stats.json"
+            if not p.exists():
+                continue
+            try:
+                sidecars.append(json.loads(p.read_text()))
+            except (OSError, ValueError):
+                # A truncated sidecar (an interrupted generation run) must not
+                # take the whole summary down; it counts as "without stats".
+                continue
+        value = aggregate_stats(sidecars, cat)
+        agg_cache["key"] = key
+        agg_cache["value"] = value
+        return value
 
     def _dir_for_fen(fen: str):
         # The FEN's board field determines the material, which names the table.
