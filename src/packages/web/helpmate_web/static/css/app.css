@@ -366,6 +366,14 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 #material-list li[aria-selected="true"] { border-color: var(--rule-strong); background: var(--sunk); font-weight: 600; }
 #material-list .name { font-weight: 650; }
 #material-list .meta { color: var(--ink-soft); }
+/* .meta's --ink-soft passes against its usual --panel background (5.103:1
+   dark, 5.329:1 light) but the selected row's background is --sunk, and
+   --ink-soft measures 4.275:1 there in dark mode -- below the 4.5:1 AA floor
+   (light is fine at 4.848:1). Same failure class as .tile .k below, and
+   fixed the same way: bump to full --ink only where the sunk fill applies,
+   rather than softening the row's whole selected state. --ink on --sunk
+   measures 6.681:1 dark, 12.881:1 light. */
+#material-list li[aria-selected="true"] .meta { color: var(--ink); }
 
 .stats-head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .stats-head h2 { font-family: var(--mono); font-size: var(--f4); font-weight: 650; }
@@ -378,7 +386,16 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
   border-radius: var(--r); background: var(--sunk);
   padding: .45rem .7rem; min-width: 8.5rem;
 }
-.tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+/* --ink-soft measures 4.275:1 against --sunk in dark mode -- below the 4.5:1
+   AA floor (light is fine at 4.848:1) -- so this is full --ink, not
+   --ink-soft, even though .k reads as the muted eyebrow label above .v's
+   value. That relationship is carried four times over without colour's
+   help: .k is --f0 (12px) vs .v's --f3 (1rem), uppercase vs sentence case,
+   letter-spaced vs not, and sans vs .v's mono -- so colour was a fifth,
+   redundant cue, and it was the one that failed. --ink on --sunk measures
+   6.681:1 dark, 12.881:1 light. Do not "restore" the softer grey here: it
+   silently reintroduces the AA failure with no legibility gained. */
+.tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
 .tile .v { font-family: var(--mono); font-size: var(--f3); font-variant-numeric: tabular-nums; }
 
 .chart { margin: 1.4rem 0 0; }
