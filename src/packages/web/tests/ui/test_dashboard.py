@@ -1140,3 +1140,28 @@ def test_a_superseded_band_response_does_not_hide_the_current_band(page, server)
     assert page.is_visible("#table-stats"), \
         "a superseded response hid the band of the position on screen"
 
+
+def test_the_explorer_rail_has_no_rounded_corner_mid_panel(page, server):
+    # At the two-column breakpoint every rail rounds its left corners to sit
+    # in the panel's own border-radius. In Materials and Mine the rail IS the
+    # panel's bottom, so that is right; in the explorer the table band spans
+    # both columns underneath it, and the rounded bottom-left corner became a
+    # quarter-circle notch of the readout colour in the middle of the panel,
+    # directly above the band's square corner.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    page.wait_for_selector("#table-stats:not([hidden])")
+
+    radii = "e => { const s = getComputedStyle(e); return [s.borderTopLeftRadius, s.borderBottomLeftRadius]; }"
+    top, bottom = page.eval_on_selector("#panel-explorer .rail", radii)
+    assert top != "0px", "the panel's own top-left corner must stay rounded"
+    assert bottom == "0px", f"rounded corner mid-panel: bottom-left is {bottom}"
+
+    # With no band (no material to show stats for) the rail is the panel's
+    # bottom again, and the corner has to come back or the rail's square
+    # corner overhangs the panel's rounded one.
+    page.click("#btn-clear-board")
+    page.wait_for_function("document.getElementById('table-stats').hidden === true")
+    top2, bottom2 = page.eval_on_selector("#panel-explorer .rail", radii)
+    assert bottom2 == top2, f"the rail is the panel's bottom but is not rounded: {bottom2}"

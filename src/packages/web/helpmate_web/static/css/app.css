@@ -208,6 +208,16 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 @media (min-width: 860px) {
   .rail { border-radius: var(--r) 0 0 var(--r); }
   .readout { border-left: 1px solid var(--rule); }
+  /* The rounding above assumes the rail reaches the panel's bottom edge, as
+     it does in Materials and Mine. The explorer's table band spans both
+     columns UNDER the rail, so there the rounded bottom-left corner sits in
+     the middle of the panel -- a quarter-circle notch of the readout colour
+     biting into the rail, with the band's own square corner right below it.
+     Only round that corner while the band is hidden, which is exactly when
+     the rail IS the bottom of the panel again. */
+  #panel-explorer:has(> .table-band:not([hidden])) .rail {
+    border-bottom-left-radius: 0;
+  }
 }
 
 /* ---------- explorer ---------- */
