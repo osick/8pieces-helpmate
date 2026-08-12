@@ -115,6 +115,7 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     def health():
         cat = chain.catalog()
         return {"status": "ok", "version": __version__,
+                "mine_timeout": mine_timeout,
                 "tables_local": sum(1 for s in cat if s.location in ("local", "cached")),
                 "tables_remote": sum(1 for s in cat if s.location == "remote")}
 
@@ -170,9 +171,13 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return JSONResponse(status_code=400,
                                 content=error_json("invalid_fen", str(e)))
         if res is None:
-            return {"solvable": False}
+            return {"solvable": False, "material": material}
         dtm, count, flipped = res
+        # The table that DID THE WORK, which is the mirrored material whenever
+        # the C++ layer answered by flipping colours. Deriving this client-side
+        # from the FEN would be wrong in exactly the case that matters.
         out = {"dtm": dtm, "count": count, "flipped": flipped,
+               "material": flipped_mat if flipped else material,
                "notation": h_notation(dtm)}
         if themes:
             # Opt-in: detection forces solution enumeration, and /v1/probe is
@@ -269,10 +274,11 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             out.append({**m,
                         "notation": h_notation(m["dtm"]) if m["solvable"] else None})
         if res is None:
-            return {"fen": fen, "solvable": False, "moves": out}
+            return {"fen": fen, "solvable": False, "material": material, "moves": out}
         dtm, count, flip = res
         return {"fen": fen, "dtm": dtm, "count": count, "notation": h_notation(dtm),
-                "flipped": flip, "moves": out}
+                "flipped": flip, "material": flipped if flip else material,
+                "moves": out}
 
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
     pool = ThreadPoolExecutor(max_workers=2)

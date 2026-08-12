@@ -63,7 +63,8 @@ def test_probe_odd_dtm_notation(client):
 
 def test_probe_unsolvable_and_errors(client):
     kvk = "8/8/8/8/8/4k3/8/4K3 w - - 0 1"
-    assert client.get("/v1/probe", params={"fen": kvk}).json() == {"solvable": False}
+    assert client.get("/v1/probe", params={"fen": kvk}).json() == {
+        "solvable": False, "material": "Kvk"}
     assert client.get("/v1/probe", params={"fen": "garbage"}).status_code == 400
     knvkqr = "1n2k3/8/8/8/8/8/8/QR2K3 b - - 0 1"   # KNvkqr flipped-colors: no table
     assert client.get("/v1/probe", params={"fen": knvkqr}).status_code == 404
@@ -74,3 +75,19 @@ def test_line_first_and_all(client):
     r = client.get("/v1/line", params={"fen": GOLD_FEN, "all": "true"})
     lines = r.json()["lines"]
     assert len(lines) == 4 and ["Kh6", "Qh2#"] in lines  # count=4 optimal lines
+
+def test_probe_names_the_table_that_answered(client):
+    r = client.get("/v1/probe", params={"fen": "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"})
+    assert r.status_code == 200
+    assert r.json()["material"] == "KQvk"
+
+
+def test_probe_names_the_mirrored_table_when_colors_were_flipped(client):
+    # Black holds the queen, so the position's own material is Kvkq and only
+    # KQvk exists. probe() answers by flipping; the material it reports must
+    # be the table that did the work, not the one the FEN spells out.
+    r = client.get("/v1/probe", params={"fen": "8/7K/5k2/8/8/8/8/6q1 w - - 0 1"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["flipped"] is True
+    assert body["material"] == "KQvk"
