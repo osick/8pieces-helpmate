@@ -868,23 +868,15 @@ def test_dragging_a_piece_from_the_palette_places_it(page, server):
     assert page.is_visible("#btn-done-editing")
 
 
-def test_dragging_a_piece_off_the_board_removes_it(page, server):
-    # The landing position has a white queen on g1. Enter edit mode, drag it
-    # to a point beside the board -- right of its right edge, at the same y
-    # -- and it should be gone. Straight down (as a naive brief once had it)
-    # can land below the fixture's 1280x720 viewport, where mouse events
-    # never dispatch; beside the board stays inside the viewport in every
-    # layout.
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-    before = page.input_value("#fen-input")
-    assert "Q" in before.split()[0]
+def _drag_piece_off_the_board(page, square):
+    """Drag whatever is on `square` to a point beside the board, and drop it.
 
-    page.click("#btn-arrange")            # arrange mode: drag, don't place
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    assert page.get_attribute("#btn-arrange", "aria-pressed") == "true"
-
-    box = page.locator("#board rect[data-square=g1]").bounding_box()
+    Right of the board's right edge, at the same y. Straight down (as a naive
+    brief once had it) can land below the fixture's 1280x720 viewport, where
+    mouse events never dispatch; beside the board stays inside the viewport in
+    every layout. The caller must already be in Arrange mode.
+    """
+    box = page.locator(f"#board rect[data-square={square}]").bounding_box()
     board_box = page.locator("#board").bounding_box()
     start_x = box["x"] + box["width"] / 2
     start_y = box["y"] + box["height"] / 2
@@ -894,6 +886,49 @@ def test_dragging_a_piece_off_the_board_removes_it(page, server):
     page.mouse.move(off_x, start_y, steps=12)
     page.mouse.up()
 
+
+# The verdict line setArmed() writes when an edit session opens. It is not an
+# evaluation: the tests below have to see the summary move OFF it, because a
+# bare "the summary says something" wait is satisfied by this text the instant
+# edit mode is entered -- which is how the old Done test passed with the whole
+# commit path deleted.
+EDITING = "editing"
+
+# The landing position is KQvk (white Kf6+Qg1, black Kh7) and the UI fixture
+# generates KQvk and nothing else, so any edit that ends outside that material
+# ends on a 404 banner instead of an evaluation. Dropping a second white queen
+# on d4 and then dragging the original off g1 stays in KQvk the whole way out:
+# the end state is 8/7k/5K2/8/3Q4/8/8/8 b - - 0 1, which the table answers
+# with dtm 2 / 1 optimal line (verified against helpmate.Tablebase.probe).
+EDITED_PLACEMENT = "8/7k/5K2/8/3Q4/8/8/8"
+
+
+def _edit_queen_to_d4(page):
+    page.locator("#palette-pieces button[data-piece=wq]").drag_to(
+        page.locator("#board rect[data-square=d4]"))
+    page.wait_for_function(
+        "document.getElementById('fen-input').value.split('/')[4].startsWith('3Q')")
+    page.click("#btn-arrange")            # arrange mode: drag, don't place
+    _drag_piece_off_the_board(page, "g1")
+    page.wait_for_function(
+        "p => document.getElementById('fen-input').value.split(' ')[0] === p",
+        arg=EDITED_PLACEMENT)
+
+
+def test_dragging_a_piece_off_the_board_removes_it(page, server):
+    # The landing position has a white queen on g1. Enter edit mode, drag it
+    # off the board, and it should be gone.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+    assert "Q" in before.split()[0]
+
+    page.click("#btn-arrange")            # arrange mode: drag, don't place
+    page.wait_for_selector("#btn-done-editing:not([hidden])")
+    assert page.get_attribute("#btn-arrange", "aria-pressed") == "true"
+
+    _drag_piece_off_the_board(page, "g1")
+
     page.wait_for_function(
         "before => document.getElementById('fen-input').value !== before", arg=before)
     assert "Q" not in page.input_value("#fen-input").split()[0]
@@ -902,14 +937,86 @@ def test_dragging_a_piece_off_the_board_removes_it(page, server):
 def test_done_evaluates_and_leaves_edit_mode(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    src = page.locator("#palette-pieces button[data-piece=wr]")
-    dst = page.locator("#board rect[data-square=d4]")
-    src.drag_to(dst)
+
+    page.locator("#palette-pieces button[data-piece=wq]").drag_to(
+        page.locator("#board rect[data-square=d4]"))
+    page.wait_for_selector("#btn-done-editing:not([hidden])")
+    # The state the old assertion mistook for an answer.
+    assert EDITING in page.inner_text("#position-summary")
+
+    page.click("#btn-arrange")
+    _drag_piece_off_the_board(page, "g1")
+    page.wait_for_function(
+        "p => document.getElementById('fen-input').value.split(' ')[0] === p",
+        arg=EDITED_PLACEMENT)
+
+    page.click("#btn-done-editing")
+
+    # A real evaluation: the move list repopulates and the verdict leaves the
+    # editing text for a distance. Neither happens on the 404 screen a
+    # closure-leaving edit lands on.
+    page.wait_for_selector("#move-list li")
+    summary = page.inner_text("#position-summary")
+    assert EDITING not in summary, summary
+    assert "dtm 2" in summary, summary
+    assert page.is_hidden("#error-banner")
+    assert page.is_hidden("#btn-done-editing")
+    assert page.get_attribute("#btn-arrange", "aria-pressed") == "false"
+
+
+def test_done_puts_the_edited_position_in_the_url_and_back_undoes_it(page, server):
+    # The edit is a position in its own right: index.html and docs/USAGE.md
+    # both promise that a copied link reopens what is on screen, and Back is
+    # the only way out of an edit. commitBoard() compared the committed FEN
+    # against `current`, which every placement path had already advanced to
+    # the edited FEN, so the comparison was always false: nothing reached the
+    # hash, nothing reached the history, and one nav click (panels.js
+    # re-encodes whatever the hash says) put the pre-edit position back.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+
+    _edit_queen_to_d4(page)
+    page.click("#btn-done-editing")
+    page.wait_for_selector("#move-list li")
+    edited = page.input_value("#fen-input")
+    assert edited.split(" ")[0] == EDITED_PLACEMENT
+    assert edited != before
+
+    hash_fen = page.evaluate("new URLSearchParams(location.hash.slice(1)).get('fen')")
+    assert hash_fen == edited, "the edited position never reached the URL"
+
+    # A round trip through another panel must not resurrect the pre-edit FEN.
+    page.click("nav button[data-panel=materials]")
+    page.click("nav button[data-panel=explorer]")
+    assert page.input_value("#fen-input") == edited
+
+    # ...and Back returns to what the edit session started from.
+    assert page.is_enabled("#btn-back"), "the edit left no history entry"
+    page.click("#btn-back")
+    page.wait_for_function(
+        "f => document.getElementById('fen-input').value === f", arg=before)
+    assert page.evaluate(
+        "new URLSearchParams(location.hash.slice(1)).get('fen')") == before
+
+
+def test_arming_and_disarming_without_editing_pushes_no_history(page, server):
+    # The other half of the same comparison: opening an edit session and
+    # closing it again without touching a square must not spend a request or
+    # leave a duplicate entry for Back to walk through.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+    assert page.get_attribute("#btn-back", "disabled") is not None
+
+    page.click("#palette-pieces button[data-piece=wq]")
     page.wait_for_selector("#btn-done-editing:not([hidden])")
     page.click("#btn-done-editing")
-    page.wait_for_function(
-        "document.getElementById('position-summary').textContent.length > 0")
-    assert page.is_hidden("#btn-done-editing")
+    page.wait_for_selector("#move-list li")
+
+    assert page.input_value("#fen-input") == before
+    assert page.get_attribute("#btn-back", "disabled") is not None, \
+        "an edit that changed nothing pushed a history entry"
 
 
 def test_a_cancelled_drag_does_not_swallow_the_next_tap(page, server):
@@ -960,3 +1067,76 @@ def test_a_cancelled_drag_does_not_swallow_the_next_tap(page, server):
     page.click("#palette-pieces button[data-piece=wr]")
     assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true", \
         "the tap after a cancelled drag was silently swallowed"
+
+
+def test_filtering_an_empty_corpus_does_not_throw(page, empty_server):
+    # First-run state of a public release: install the server, generate
+    # nothing yet, open the dashboard, type in the filter. The list then holds
+    # "All tables" plus a "No tables yet" note, and the note carries no
+    # data-material -- applyFilter() read .toLowerCase() straight off that
+    # undefined, so every keystroke threw an uncaught TypeError and the filter
+    # stayed dead for the rest of the session.
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{empty_server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+
+    assert page.eval_on_selector_all(
+        "#material-list li", "els => els.map(e => e.dataset.material)") == ["*", None]
+    assert page.is_visible("#material-list li.empty")
+
+    page.fill("#material-filter", "kq")
+    page.fill("#material-filter", "k")
+    page.fill("#material-filter", "")
+
+    assert errors == [], errors
+    # Both survivors of an empty corpus stay on screen: the way back to the
+    # summary, and the note that says why there is nothing else.
+    assert page.is_visible("#material-list li[data-material='*']")
+    assert page.is_visible("#material-list li.empty")
+
+
+def test_a_superseded_band_response_does_not_hide_the_current_band(page, server):
+    # The band's failure paths (a 202 "still downloading", or an error) used
+    # to hide the band unconditionally, without the "is this still MY
+    # material?" guard the success path has. So a slow response for a
+    # material the user has already navigated away from arrived and blanked
+    # the band belonging to the position now on screen -- with nothing to
+    # bring it back until the user left the material and came back. The
+    # trigger is precisely the remote-chain case this release exists for.
+    #
+    # KQvk's stats request is held open in the page (not in Playwright's
+    # thread) and released by hand after the switch, so this is deterministic
+    # rather than a race against a sleep.
+    page.add_init_script("""
+      window.__releaseStaleStats = null;
+      const orig = window.fetch;
+      window.fetch = function (input, init) {
+        if (String(input).includes("/v1/materials/KQvk/stats")) {
+          return new Promise((resolve) => {
+            window.__releaseStaleStats = () => resolve(new Response(
+              JSON.stringify({status: "fetching", material: "KQvk"}),
+              {status: 202, headers: {"content-type": "application/json"}}));
+          });
+        }
+        return orig.call(window, input, init);
+      };
+    """)
+    page.goto(server)                       # the landing position is KQvk
+    page.wait_for_selector("#move-list li")
+    page.wait_for_function("window.__releaseStaleStats !== null")
+
+    # Move to a Kvk position; its band answers immediately.
+    page.fill("#fen-input", "8/8/8/8/8/4k3/8/4K3 w - - 0 1")
+    page.click("#fen-form button[type=submit]")
+    page.wait_for_function(
+        "document.getElementById('table-stats').dataset.material === 'Kvk'")
+    page.wait_for_selector("#table-stats:not([hidden])")
+
+    page.evaluate("window.__releaseStaleStats()")   # the stale 202 lands now
+    page.wait_for_timeout(200)
+
+    assert page.eval_on_selector("#table-stats", "e => e.dataset.material") == "Kvk"
+    assert page.is_visible("#table-stats"), \
+        "a superseded response hid the band of the position on screen"
+

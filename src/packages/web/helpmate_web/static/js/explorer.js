@@ -32,6 +32,16 @@ let lastMoves = [];      // the move list from the last /v1/moves call, for drag
 // the board is in play mode (drag = play a move). Editing and playing are
 // mutually exclusive on the same pointer, so arming swaps the board's input.
 let armed = null;
+// `current` as it stood when the present edit session began, or null when no
+// session is open. Every placement path (palette drop, click-to-place,
+// Arrange, Clear board, the side-to-move select) writes the new FEN straight
+// into `current`, so `current` cannot also serve as the "what did we start
+// from" baseline -- comparing the committed FEN against it was always false,
+// which is why an edit never reached the hash or the history. Capturing the
+// baseline once, when the session opens, is the smallest thing that survives
+// however many placements happen in between, and it is also the value Back
+// has to return to.
+let editBaseline = null;
 const history = [];
 
 // Monotonic token guarding render(): every call captures its own seq at
@@ -53,6 +63,16 @@ const statsCache = new Map();
 async function showTableStats(material) {
   const band = document.getElementById("table-stats");
   const body = document.getElementById("table-stats-body");
+  // Retire the band, but only if it is still OUR band: a failure path that
+  // fires after the user has moved on belongs to a material nobody is
+  // looking at any more, and hiding the band then would blank the CURRENT
+  // material's context with nothing to restore it. Same guard the success
+  // path below applies before it renders.
+  const retire = () => {
+    if (bandMaterial !== material) return;
+    band.hidden = true;
+    bandMaterial = null;
+  };
   if (!material) { band.hidden = true; bandMaterial = null; return; }
   if (material === bandMaterial) return;
   bandMaterial = material;
@@ -75,10 +95,10 @@ async function showTableStats(material) {
       // A 202 means the table is still downloading. The band is context, not
       // an answer; it stays quiet rather than starting a second poll loop
       // beside the one render() is already running for this position.
-      if (res.status !== 200) { band.hidden = true; bandMaterial = null; return; }
+      if (res.status !== 200) { retire(); return; }
       statsCache.set(material, res.body);
     } catch {
-      band.hidden = true; bandMaterial = null; return;   // never break the board on context
+      retire(); return;                                  // never break the board on context
     }
   }
   if (bandMaterial !== material) return;                 // superseded while awaiting
@@ -307,13 +327,19 @@ async function render(fen, { push = true, retries = 0 } = {}) {
 // user leaves edit mode, not on every click.
 function commitBoard() {
   const fen = withPlacement(current, board.getPosition());
+  // The position this edit session started from -- NOT `current`, which every
+  // placement has already advanced to the edited FEN.
+  const before = editBaseline;
+  editBaseline = null;
   // Arming and disarming without touching a square must not cost a request
-  // or leave a duplicate entry for Back to walk through. `current` already
-  // tracks each placement, so an unchanged FEN means nothing was edited --
-  // but the panel still has to be redrawn, because entering edit mode
-  // retired the previous value.
-  if (fen !== current) history.push(current);
-  render(fen, { push: fen !== current });
+  // or leave a duplicate entry for Back to walk through -- but the panel
+  // still has to be redrawn, because entering edit mode retired the previous
+  // value. An edit that DID change something is a position in its own right:
+  // it goes into the hash (so a copied link reopens it) and onto the history
+  // stack (so Back returns to what the user started from).
+  const changed = before === null || fen !== before;
+  if (changed && before !== null) history.push(before);
+  render(fen, { push: changed });
 }
 
 // Dragging a piece out of the palette and onto a square. cm-chessboard has no
@@ -407,6 +433,9 @@ function setArmed(piece, { commit = true } = {}) {
     enableDragToPlay();
     done.hidden = true;
     if (wasEditing && commit) commitBoard();
+    // `commit: false` means something else is about to set the position: drop
+    // the baseline unconditionally so it can never leak into a later session.
+    editBaseline = null;
     return;
   }
 
@@ -415,6 +444,9 @@ function setArmed(piece, { commit = true } = {}) {
   done.hidden = false;
 
   if (!wasEditing) {
+    // The session opens here, so this is the last moment `current` still
+    // holds the position the user is editing away from.
+    editBaseline = current;
     // The previous position's value belongs to a position that no longer
     // exists. Leaving it on screen while pieces move around would present a
     // stale dtm as the current one; say what is happening instead.

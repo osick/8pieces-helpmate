@@ -47,6 +47,13 @@ function applyFilter(list, term) {
     // narrowed to a handful, "4 PIECES" over one row is furniture.
     if (li.dataset.material === ALL) { li.hidden = false; continue; }
     if (li.classList.contains("group")) { li.hidden = Boolean(q); continue; }
+    // An empty corpus's list holds a "No tables yet" note, which carries no
+    // data-material and is not a group heading. Reading .toLowerCase() off
+    // that undefined threw on every keystroke and killed the filter for the
+    // whole session -- and an empty corpus is the FIRST thing a new install
+    // sees. The note is the entire content of the list there, so it stays
+    // put rather than being filtered away to nothing.
+    if (!li.dataset.material) continue;
     li.hidden = Boolean(q) && !li.dataset.material.toLowerCase().includes(q);
   }
 }
