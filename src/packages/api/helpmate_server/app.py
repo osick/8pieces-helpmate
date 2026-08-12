@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 import re
 from pathlib import Path
 from typing import Optional
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from . import __version__
+from .aggregate import aggregate_stats
 from .storage import ChainSource
 
 _MATERIAL_RE = re.compile(r"^[KQRBNP]+v[kqrbnp]+$")
@@ -115,6 +117,7 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     def health():
         cat = chain.catalog()
         return {"status": "ok", "version": __version__,
+                "mine_timeout": mine_timeout,
                 "tables_local": sum(1 for s in cat if s.location in ("local", "cached")),
                 "tables_remote": sum(1 for s in cat if s.location == "remote")}
 
@@ -135,6 +138,63 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return resp
         return _tb(chain, d).stats(name)
 
+    # Recomputing this walks every sidecar (295 files / 13 MB on the reference
+    # corpus). The cache key covers each sidecar's own identity (existence,
+    # mtime, size), not just the .hm's (material, size_bytes, location), so it
+    # invalidates both when a table is newly generated or downloaded AND when
+    # an existing material's sidecar is rewritten in place with the .hm
+    # untouched -- e.g. a corrected regeneration. Every field of that key
+    # comes from stat() alone, so the cache is consulted BEFORE any sidecar
+    # is read here: a hit neither parses 13 MB of JSON nor holds 295 parsed
+    # dicts live for the duration of the request, which it did while the key
+    # was built after the reads. Measured on the 295-table reference corpus
+    # (13 MB of sidecars): cold 0.39s -> 0.41s, warm 0.246s -> 0.124s per
+    # call. What remains of the warm path is chain.catalog(), which parses
+    # every sidecar itself on every call (0.118s of that 0.124s) to fill in
+    # each SliceInfo's max_dtm/cells -- a cache belonging in storage.py, and
+    # deliberately not this endpoint's business.
+    # Closure state, not module state, so each create_app() in the test
+    # suite starts cold.
+    agg_cache: dict[str, object] = {}
+
+    @app.get("/v1/stats")
+    def stats_overall():
+        cat = chain.catalog()
+        paths = []
+        sig = []
+        for s in cat:
+            d = chain.resolve(s.material)
+            p = Path(d) / f"{s.material}.stats.json" if d is not None else None
+            try:
+                # One syscall, and no exists()/stat() window for a sidecar to
+                # be deleted in -- that race used to 500 the endpoint from
+                # outside the read loop's own except.
+                st = p.stat() if p is not None else None
+            except OSError:
+                st = None
+            sig.append((s.material, s.size_bytes, s.location,
+                       st.st_mtime_ns if st is not None else -1,
+                       st.st_size if st is not None else -1))
+            if st is not None:
+                paths.append(p)
+        key = tuple(sorted(sig))
+        if agg_cache.get("key") == key:
+            return agg_cache["value"]
+        sidecars = []
+        for p in paths:
+            try:
+                doc = json.loads(p.read_text())
+            except (OSError, ValueError):
+                # A truncated sidecar (an interrupted generation run) must not
+                # take the whole summary down; it counts as "without stats".
+                continue
+            if isinstance(doc, dict):
+                sidecars.append(doc)
+        value = aggregate_stats(sidecars, cat)
+        agg_cache["key"] = key
+        agg_cache["value"] = value
+        return value
+
     def _dir_for_fen(fen: str):
         # The FEN's board field determines the material, which names the table.
         parts = fen.split()
@@ -151,17 +211,39 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         # dtm plies; black-to-move depths are even (h#n = 2n plies).
         return f"h#{dtm // 2}" if dtm % 2 == 0 else f"h#{dtm // 2}.5"
 
+    def _mirror(material: str) -> str:
+        return material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
+
+    def _resolve_either(material: str, flipped_mat: str):
+        """Where the answer will come from, and which table will give it.
+
+        Returns (dir, answering_material, response). The answering material is
+        the FEN's own material when that table exists, and the mirrored one
+        when only the mirror does -- which is the same rule the C++ layer's
+        `flipped` flag reports on a solvable probe, made available on the
+        paths where there is no flag to read (an unsolvable position returns
+        no result at all). Naming the FEN's material there advertised a table
+        that CANNOT exist: had it existed, this resolve would have bound it
+        and no flip would have happened.
+        """
+        d = chain.resolve(material)
+        if d is not None:
+            return d, material, None
+        d = chain.resolve(flipped_mat)
+        if d is not None:
+            return d, flipped_mat, None
+        d, resp = _resolve_or_response(material)
+        return d, material, resp
+
     @app.get("/v1/probe")
     def probe(fen: str, themes: bool = False):
         material = None
         try:
             material = _dir_for_fen(fen)
-            flipped_mat = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
-            d = chain.resolve(material) or chain.resolve(flipped_mat)
-            if d is None:
-                d, resp = _resolve_or_response(material)
-                if resp is not None:
-                    return resp
+            flipped_mat = _mirror(material)
+            d, answered, resp = _resolve_either(material, flipped_mat)
+            if resp is not None:
+                return resp
             tb = _tb(chain, d)
             res = tb.probe(fen)
         except helpmate.MissingTableError:
@@ -170,9 +252,13 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return JSONResponse(status_code=400,
                                 content=error_json("invalid_fen", str(e)))
         if res is None:
-            return {"solvable": False}
+            return {"solvable": False, "material": answered}
         dtm, count, flipped = res
+        # The table that DID THE WORK, which is the mirrored material whenever
+        # the C++ layer answered by flipping colours. Deriving this client-side
+        # from the FEN would be wrong in exactly the case that matters.
         out = {"dtm": dtm, "count": count, "flipped": flipped,
+               "material": flipped_mat if flipped else material,
                "notation": h_notation(dtm)}
         if themes:
             # Opt-in: detection forces solution enumeration, and /v1/probe is
@@ -250,12 +336,10 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         material = None
         try:
             material = _dir_for_fen(fen)
-            flipped = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
-            d = chain.resolve(material) or chain.resolve(flipped)
-            if d is None:
-                d, resp = _resolve_or_response(material)
-                if resp is not None:
-                    return resp
+            flipped = _mirror(material)
+            d, answered, resp = _resolve_either(material, flipped)
+            if resp is not None:
+                return resp
             tb = _tb(chain, d)
             res = tb.probe(fen)
             raw = tb.moves(fen)
@@ -269,10 +353,14 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             out.append({**m,
                         "notation": h_notation(m["dtm"]) if m["solvable"] else None})
         if res is None:
-            return {"fen": fen, "solvable": False, "moves": out}
+            # Same rule as /v1/probe: name the table that answered, which on
+            # an unsolvable position is whichever of the two directions
+            # resolved -- there is no `flipped` flag to read here.
+            return {"fen": fen, "solvable": False, "material": answered, "moves": out}
         dtm, count, flip = res
         return {"fen": fen, "dtm": dtm, "count": count, "notation": h_notation(dtm),
-                "flipped": flip, "moves": out}
+                "flipped": flip, "material": flipped if flip else material,
+                "moves": out}
 
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutTimeout
     pool = ThreadPoolExecutor(max_workers=2)

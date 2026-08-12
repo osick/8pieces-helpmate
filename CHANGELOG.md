@@ -6,6 +6,41 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.11.0] - 2026-08-12
+
+Dashboard UX: one skeleton for all three screens.
+
+### Added
+- Drag a piece from the palette onto the board, drag it to another square, or
+  drag it off the board to remove it. Click-to-place is unchanged and remains
+  the keyboard and touch path. Edit mode gains a visible **Done — evaluate**.
+- The explorer shows the statistics of the table the position came from, in a
+  band below the board and the move list.
+- Materials lands on **All tables** — the whole corpus at once, including the
+  materials that contain no helpmate and the generator versions that built the
+  rest. The table list scrolls inside its rail, filters on substring, and is
+  grouped by piece count.
+- The search screen has a **Stop** button and shows elapsed time against the
+  server's `--mine-timeout` budget.
+- `GET /v1/stats` returns the corpus aggregate. `/v1/probe` and `/v1/moves`
+  report the `material` whose table answered. `/v1/health` reports
+  `mine_timeout`.
+
+### Changed
+- Every screen is a grey rail beside a white readout: grey is what you
+  manipulate, white is what the tables say. No new colours — both surfaces are
+  aliases over the existing palette.
+
+### Fixed
+- The board no longer overlaps the move list between 860px and ~1150px. It was
+  sized from the viewport while its column was sized from the grid; at 960px
+  that put a 460px board in a 368px column.
+- A material with no helpmate said "longest mate h#127.5" — the stored
+  `DTM_UNSOLVABLE` sentinel divided by two. 67 of the 295 tables in the
+  reference corpus are in that state.
+- A timed-out search reported "0 position(s) (truncated — raise max results
+  for more)" instead of naming the timeout.
+
 ## [0.10.0] - 2026-08-11
 
 ### Changed
