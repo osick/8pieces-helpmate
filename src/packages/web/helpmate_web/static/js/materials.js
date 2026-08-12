@@ -1,5 +1,5 @@
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
-import { fmtSize, el, renderStats } from "./stats-view.js";
+import { fmtSize, el, renderStats, renderAggregate } from "./stats-view.js";
 
 // Monotonic token guarding showStats(): every call captures its own seq at
 // entry, and bails out after each await (and inside the 202 retry callback)
@@ -36,12 +36,44 @@ async function showStats(name, { retries = 0, seq } = {}) {
   renderStats(box, res.body);
 }
 
+const ALL = "*";   // the pinned "All tables" entry's data-material
+
+function applyFilter(list, term) {
+  const q = term.trim().toLowerCase();
+  for (const li of list.children) {
+    // "All tables" is never filtered away -- it is the way back to the
+    // summary, and hiding it would strand a user who typed a term matching
+    // nothing. Group headings go while a filter is active: with the list
+    // narrowed to a handful, "4 PIECES" over one row is furniture.
+    if (li.dataset.material === ALL) { li.hidden = false; continue; }
+    if (li.classList.contains("group")) { li.hidden = Boolean(q); continue; }
+    li.hidden = Boolean(q) && !li.dataset.material.toLowerCase().includes(q);
+  }
+}
+
+async function showOverall() {
+  const seq = ++statsSeq;
+  const box = document.getElementById("material-stats");
+  box.textContent = "";
+  box.appendChild(el("p", "empty", "Summing every table…"));
+  try {
+    const res = await api.overall();
+    if (seq !== statsSeq) return;
+    renderAggregate(box, res.body);
+  } catch (err) {
+    if (seq !== statsSeq) return;
+    if (!(err instanceof ApiError)) throw err;
+    box.textContent = "";
+    box.appendChild(el("p", "empty", err.hint ? `${err.message} — ${err.hint}` : err.message));
+  }
+}
+
 export async function initMaterials() {
   const list = document.getElementById("material-list");
-  const box = document.getElementById("material-stats");
-  box.appendChild(el("p", "empty", "Select a table to see its statistics."));
+  const filter = document.getElementById("material-filter");
   list.textContent = "";
   list.appendChild(el("li", "empty", "Loading…"));
+
   let res;
   try { res = await api.materials(); }
   catch (err) {
@@ -53,20 +85,43 @@ export async function initMaterials() {
     }
     throw err;
   }
+
+  const select = (li, run) => {
+    for (const other of list.children) other.removeAttribute("aria-selected");
+    li.setAttribute("aria-selected", "true");
+    run();
+  };
+
   list.textContent = "";
+  const all = el("li", "all");
+  all.dataset.material = ALL;
+  all.append(el("span", "name", "All tables"),
+             el("span", "meta", `  ${res.body.materials.length} tables`));
+  all.addEventListener("click", () => select(all, showOverall));
+  list.appendChild(all);
+
   if (!res.body.materials.length)
     list.appendChild(el("li", "empty", "No tables yet. Generate one with `helpmate gen KQvk`."));
-  for (const m of res.body.materials) {
+
+  // Grouped by piece count, in the order the catalog already sorts them.
+  let group = null;
+  for (const m of [...res.body.materials].sort((a, b) => a.pieces - b.pieces
+                                                       || a.material.localeCompare(b.material))) {
+    if (m.pieces !== group) {
+      group = m.pieces;
+      const h = el("li", "group", `${group} pieces`);
+      list.appendChild(h);
+    }
     const li = el("li");
     li.append(el("span", "name", m.material),
-              el("span", "meta", `  ${m.pieces} pieces · ${fmtSize(m.size_bytes)} · ${m.location}`));
+              el("span", "meta", `  ${fmtSize(m.size_bytes)} · ${m.location}`));
     li.dataset.material = m.material;
-    li.addEventListener("click", () => {
-      for (const other of list.children) other.removeAttribute("aria-selected");
-      li.setAttribute("aria-selected", "true");
-      showStats(m.material);
-    });
+    li.addEventListener("click", () => select(li, () => showStats(m.material)));
     list.appendChild(li);
   }
+
+  filter.addEventListener("input", () => applyFilter(list, filter.value));
+
+  select(all, showOverall);
   window.__materialsReady = true;
 }

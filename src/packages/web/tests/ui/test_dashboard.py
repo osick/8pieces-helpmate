@@ -629,3 +629,52 @@ def test_the_rail_matches_the_readout_height_on_a_tall_move_list(page, server):
     readout = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
     assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
         f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
+
+
+def test_materials_lands_on_the_corpus_summary(page, server):
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    page.wait_for_selector("#material-stats .stats-head")
+    head = page.inner_text("#material-stats .stats-head")
+    assert "All tables" in head
+    assert page.get_attribute("#material-list li[data-material='*']", "aria-selected") == "true"
+    assert page.eval_on_selector_all("#agg-dtm-hist", "e => e.length") == 1
+    # the corpus's uncomfortable facts are stated, not dropped
+    assert page.is_visible("#agg-no-helpmate")
+
+
+def test_the_material_rail_filters(page, server):
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    all_names = page.eval_on_selector_all(
+        "#material-list li[data-material]:not([hidden])", "els => els.length")
+    page.fill("#material-filter", "kqv")
+    page.wait_for_function(
+        "document.querySelectorAll('#material-list li[data-material]:not([hidden])').length < %d"
+        % all_names)
+    shown = page.eval_on_selector_all(
+        "#material-list li[data-material]:not([hidden])",
+        "els => els.map(e => e.dataset.material)")
+    assert shown, "the filter hid everything"
+    # "*" (the pinned "All tables" entry) is deliberately never filtered
+    # away -- it is the way back -- so it is excluded from the substring
+    # check below and asserted separately instead.
+    assert all("kqv" in m.lower() for m in shown if m != "*")
+    assert page.is_visible("#material-list li[data-material='*']")
+
+
+def test_the_material_rail_scrolls_instead_of_the_page(page, server):
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    overflow = page.eval_on_selector("#material-list", "e => getComputedStyle(e).overflowY")
+    assert overflow in ("auto", "scroll")
+    height = page.evaluate("document.documentElement.scrollHeight")
+    assert height < 4000, f"page is {height}px tall; the rail is not containing the list"
+
+
+def test_the_rail_groups_by_piece_count(page, server):
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    heads = page.eval_on_selector_all("#material-list li.group", "els => els.map(e => e.textContent)")
+    assert any("PIECES" in h.upper() for h in heads)

@@ -118,13 +118,14 @@
   </section>
 
   <section id="panel-materials" hidden>
-    <div class="list-col">
+    <div class="rail list-col">
       <h2 class="eyebrow">Tables</h2>
-      <p class="help">Every table this server can reach. Pick one to see how its
-      solutions are distributed.</p>
+      <label class="sr-label" for="material-filter">Filter tables</label>
+      <input id="material-filter" type="search" autocomplete="off" spellcheck="false"
+             placeholder="filter, e.g. kq">
       <ul id="material-list"></ul>
     </div>
-    <div id="material-stats" class="detail-col"></div>
+    <div id="material-stats" class="readout detail-col"></div>
   </section>
 
   <section id="panel-mine" hidden>

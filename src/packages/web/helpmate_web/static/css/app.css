@@ -192,13 +192,13 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
    anywhere on this path: it would create a scroll container and silently
    cancel the rail's `position: sticky`.
 
-   Only #panel-explorer is listed: it is the only panel whose children are
-   wrapped in .rail/.readout so far. #panel-materials and #panel-mine keep
-   their unbordered, unpainted layout until the tasks that wrap their own
-   content in .rail/.readout (Materials and Search panels) add themselves
-   here -- adding the id now, before its markup exists, would draw a bordered
-   card with zero internal padding around content that has none of its own. */
-#panel-explorer {
+   #panel-explorer and #panel-materials are listed: both wrap their children
+   in .rail/.readout. #panel-mine keeps its unbordered, unpainted layout
+   until the task that wraps its own content in .rail/.readout (the Search
+   panel) adds itself here -- adding the id now, before its markup exists,
+   would draw a bordered card with zero internal padding around content that
+   has none of its own. */
+#panel-explorer, #panel-materials {
   border: 1px solid var(--rule); border-radius: var(--r);
   background: var(--readout);
 }
@@ -359,9 +359,37 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 
 /* ---------- materials ---------- */
 
-#panel-materials { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
-.list-col { flex: 0 1 300px; min-width: 260px; }
-.detail-col { flex: 1 1 420px; min-width: 300px; }
+#panel-materials { display: flex; flex-direction: column; }
+.list-col { display: flex; flex-direction: column; gap: var(--s2); }
+#material-filter { width: 100%; font-size: var(--f2); }
+/* The rail scrolls, so the page height stops being a function of how many
+   tables the server can reach. 295 of them rendered 12,005px tall. */
+#material-list { overflow-y: auto; max-height: 60vh; margin: 0; }
+#material-list li.group {
+  border: 0; background: none; cursor: default; padding: var(--s3) 0 .2rem;
+  font-size: var(--f0); font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-soft);
+}
+#material-list li.all { font-weight: 650; }
+.name-list { list-style: none; padding: 0; margin: var(--s2) 0 0;
+             display: flex; flex-wrap: wrap; gap: .3rem;
+             font-family: var(--mono); font-size: var(--f1); }
+.name-list li { border: 1px solid var(--rule); border-radius: 3px; padding: .1rem .4rem; }
+/* Visible to a screen reader, out of the way of the eye: the filter's
+   placeholder is a hint, not a label. */
+.sr-label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+@media (min-width: 860px) {
+  #panel-materials {
+    display: grid; grid-template-columns: minmax(240px, 320px) minmax(320px, 1fr);
+    align-items: start;
+  }
+  .list-col { position: sticky; top: var(--s3); }
+  #material-list { max-height: calc(100vh - 12rem); }
+}
 
 #material-list, #mine-results, #material-samples { list-style: none; padding: 0; margin: .75rem 0 0; }
 #material-list li, #mine-results li, #material-samples li {

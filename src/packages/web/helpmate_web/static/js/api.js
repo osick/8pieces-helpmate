@@ -50,6 +50,7 @@ export const api = {
   health: () => getJson("/v1/health"),
   materials: () => getJson("/v1/materials"),
   stats: (name) => getJson(`/v1/materials/${encodeURIComponent(name)}/stats`),
+  overall: () => getJson("/v1/stats"),
   probe: (fen, themes = false) => getJson("/v1/probe", { fen, themes: themes ? "true" : "" }),
   line: (fen, all = false) => getJson("/v1/line", { fen, all: all ? "true" : "" }),
   moves: (fen) => getJson("/v1/moves", { fen }),
