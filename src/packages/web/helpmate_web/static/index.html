@@ -41,10 +41,24 @@
   <section id="panel-explorer">
     <div class="rail board-col">
       <div class="board-pin">
+        <div id="tray-black" class="tray" data-color="b"></div>
         <div id="board"></div>
+        <div id="tray-white" class="tray" data-color="w"></div>
 
-        <div id="palette-pieces" class="palette-pieces"></div>
-        <button type="button" id="btn-clear-board">Clear board</button>
+        <form id="fen-form" class="board-controls">
+          <label class="sr-label" for="fen-input">Position (FEN)</label>
+          <input id="fen-input" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
+          <label class="inline" for="stm-select">To move
+            <select id="stm-select">
+              <option value="b">Black</option>
+              <option value="w">White</option>
+            </select>
+          </label>
+          <button type="button" id="btn-flip">Flip</button>
+          <button type="button" id="btn-clear-board">Clear board</button>
+          <button type="button" id="btn-back" disabled>Back</button>
+        </form>
       </div>
     </div>
 
@@ -55,24 +69,6 @@
         take longer, then those that lead nowhere. The position lives in the
         address bar, so any link you copy reopens it.
       </p>
-
-      <form id="fen-form">
-        <label class="eyebrow" for="fen-input">Position (FEN)</label>
-        <input id="fen-input" type="text" spellcheck="false" autocomplete="off"
-               placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
-        <div class="row">
-          <label class="inline" for="stm-select">To move
-            <select id="stm-select">
-              <option value="b">Black</option>
-              <option value="w">White</option>
-            </select>
-          </label>
-          <span class="spacer"></span>
-          <button type="submit">Set</button>
-          <button type="button" id="btn-flip">Flip</button>
-          <button type="button" id="btn-back" disabled>Back</button>
-        </div>
-      </form>
 
       <p id="position-summary" class="verdict"></p>
       <p id="position-themes" class="verdict"></p>

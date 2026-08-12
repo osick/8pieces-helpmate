@@ -40,7 +40,7 @@ def test_setting_an_invalid_fen_shows_the_server_message(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
     page.fill("#fen-input", "garbage")
-    page.click("#fen-form button[type=submit]")
+    page.press("#fen-input", "Enter")
     page.wait_for_selector("#error-banner:not([hidden])")
     assert page.inner_text("#error-banner")
 
@@ -206,6 +206,42 @@ def test_a_multi_candidate_promotion_drag_waits_for_the_dialog(page, server):
         "b => document.getElementById('fen-input').value === b", arg=before)
 
 
+def test_the_trays_flank_the_board_black_above_white_below(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    black = page.eval_on_selector("#tray-black", "e => e.getBoundingClientRect()")
+    white = page.eval_on_selector("#tray-white", "e => e.getBoundingClientRect()")
+    assert black["bottom"] <= board["top"] + 1, "the black tray is not above the board"
+    assert white["top"] >= board["bottom"] - 1, "the white tray is not below the board"
+
+
+def test_the_trays_swap_when_the_board_is_flipped(page, server):
+    # The placement is only meaningful because each tray sits on its own
+    # colour's side; after a flip, black is at the bottom and so is its tray.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    page.click("#btn-flip")
+    page.wait_for_function(
+        "() => document.getElementById('tray-black').getBoundingClientRect().top"
+        " > document.getElementById('board').getBoundingClientRect().top")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    black = page.eval_on_selector("#tray-black", "e => e.getBoundingClientRect()")
+    white = page.eval_on_selector("#tray-white", "e => e.getBoundingClientRect()")
+    assert black["top"] >= board["bottom"] - 1, "the black tray did not move below"
+    assert white["bottom"] <= board["top"] + 1, "the white tray did not move above"
+
+
+def test_the_fen_applies_on_enter_without_a_set_button(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector_all("#fen-form button[type=submit]", "e => e.length") == 0
+    page.fill("#fen-input", "7k/8/5K2/8/8/8/8/6Q1 w - - 0 1")
+    page.press("#fen-input", "Enter")
+    page.wait_for_function(
+        "() => document.getElementById('stm-select').value === 'w'")
+
+
 def test_the_board_has_no_mode_controls(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
@@ -213,7 +249,7 @@ def test_the_board_has_no_mode_controls(page, server):
         assert page.eval_on_selector_all(gone, "e => e.length") == 0, f"{gone} still exists"
     # and a tray piece is draggable without arming anything first
     assert page.eval_on_selector_all(
-        "#palette-pieces button[aria-pressed]", "e => e.length") == 0
+        ".tray button[aria-pressed]", "e => e.length") == 0
 
 
 def test_clearing_the_board_names_the_missing_kings(page, server):
@@ -465,7 +501,7 @@ def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, serv
     side = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
     assert side["top"] >= board["bottom"] - 1, "columns did not stack"
     # Nothing is hidden on a small screen -- hiding controls is a support burden.
-    for sel in ("#palette-pieces", "#fen-form", "#move-list", "#btn-export-pgn"):
+    for sel in ("#tray-white", "#fen-form", "#move-list", "#btn-export-pgn"):
         assert page.is_visible(sel), f"{sel} disappeared at 420px"
     # And the page never scrolls sideways.
     assert page.evaluate(
@@ -945,16 +981,17 @@ def test_the_search_rail_matches_the_readout_height(page, server):
 
 def test_dragging_a_piece_from_the_palette_places_it(page, server):
     # Dropping onto h7 overwrites the landing position's black king rather
-    # than adding a piece: the fixture only ever generates KQvk (and its
-    # capture closure, Kvk), so a drop that ADDED a rook alongside the
-    # existing queen would land on KQRvk -- a material the fixture never
-    # generated -- and 404 instead of ever showing "dtm". Overwriting the
-    # king instead exercises kingProblem's no-request short circuit, which
-    # answers instantly and deterministically, and still proves the point:
-    # the drop evaluates on its own, with nothing clicked first.
+    # than adding a piece: the fixture only ever generates KPvk, whose
+    # closure is KBvk, KNvk, KPvk, KQvk, KRvk, Kvk, so a drop that ADDED a
+    # rook alongside the existing queen would land on KQRvk -- a material
+    # the fixture never generated -- and 404 instead of ever showing "dtm".
+    # Overwriting the king instead exercises kingProblem's no-request short
+    # circuit, which answers instantly and deterministically, and still
+    # proves the point: the drop evaluates on its own, with nothing clicked
+    # first.
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    src = page.locator("#palette-pieces button[data-piece=wr]")
+    src = page.locator("#tray-white button[data-piece=wr]")
     dst = page.locator("#board rect[data-square=h7]")
     src.drag_to(dst)
     page.wait_for_function(
@@ -999,6 +1036,32 @@ def test_dragging_a_piece_off_the_board_removes_it(page, server):
     page.wait_for_function(
         "before => document.getElementById('fen-input').value !== before", arg=before)
     assert "Q" not in page.input_value("#fen-input").split()[0]
+
+
+def test_a_drag_released_on_the_boards_own_bounds_does_not_delete_the_piece(page, server):
+    # With `style: { borderType: "frame" }` the widget drew a ~20px
+    # coordinate band INSIDE its visible bounds but outside the squares --
+    # elementFromPoint at a drop released there hit that border rect, which
+    # carries no data-square, and cm-chessboard read that as movedOutOfBoard
+    # and deleted the piece, even though the drop looked, to the eye, like it
+    # landed on the board. Switching to borderType "none" (inline
+    # coordinates, pointer-events: none) removes that band: the squares now
+    # tile the board element's full bounds, so any drop inside #board lands
+    # on a square. Release right at the board's own top-left corner -- the
+    # old frame border's coordinate band used to sit exactly there.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+    assert "Q" in before.split()[0]
+    src = _square_box(page, "g1")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    page.mouse.move(src["x"] + src["width"] / 2, src["y"] + src["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(board["x"] + 1, board["y"] + 1, steps=10)
+    page.mouse.up()
+    page.wait_for_function(
+        "before => document.getElementById('fen-input').value !== before", arg=before)
+    assert "Q" in page.input_value("#fen-input").split()[0]
 
 
 def test_filtering_an_empty_corpus_does_not_throw(page, empty_server):
@@ -1060,7 +1123,7 @@ def test_a_superseded_band_response_does_not_hide_the_current_band(page, server)
 
     # Move to a Kvk position; its band answers immediately.
     page.fill("#fen-input", "8/8/8/8/8/4k3/8/4K3 w - - 0 1")
-    page.click("#fen-form button[type=submit]")
+    page.press("#fen-input", "Enter")
     page.wait_for_function(
         "document.getElementById('table-stats').dataset.material === 'Kvk'")
     page.wait_for_selector("#table-stats:not([hidden])")

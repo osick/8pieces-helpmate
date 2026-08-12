@@ -240,7 +240,7 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
    `align-items: start` that caused this is gone) and its background now
    covers the seam instead of leaving it to show the readout's colour
    through. */
-.board-pin { display: flex; flex-direction: column; gap: var(--s3); }
+.board-pin { display: flex; flex-direction: column; gap: var(--s2); }
 #board { width: 100%; max-width: 460px; margin-inline: auto; aspect-ratio: 1; }
 .side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
@@ -267,12 +267,19 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 .table-band-head { display: flex; align-items: center; gap: var(--s2); }
 .table-band-head .eyebrow { margin-right: auto; }
 
-/* Six columns: White on the first row, Black on the second, in the order a
-   chess player names them. A wrapping flex row would break 10/2. */
-.palette-pieces { display: grid; grid-template-columns: repeat(6, 2.35rem); gap: .3rem; }
-.palette-pieces button {
-  width: 2.35rem; height: 2.35rem; padding: .15rem; display: grid; place-items: center;
-  background: var(--sunk);
+/* The trays are the affordance -- no panel, no label, no hint copy. Each sits
+   on the side of the board its own colour occupies, and swaps on a flip.
+   The base .board-pin flex rules live with #board above; only the flipped
+   reversal belongs here, next to the trays it reorders. */
+.board-pin.flipped { flex-direction: column-reverse; }
+.tray {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  gap: .3rem; width: 100%; max-width: 460px; margin-inline: auto;
+}
+.tray button {
+  aspect-ratio: 1; padding: .15rem; display: grid; place-items: center;
+  background: var(--sunk); border: 1px solid var(--rule); border-radius: 4px;
+  cursor: grab;
   /* Without this, a touch drag started on the button can lose the gesture to
      the browser's own scroll-vs-drag heuristic mid-move -- it wins, fires
      pointercancel, and our drag never completes. Scoped to these twelve
@@ -280,7 +287,19 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
      start a page scroll from inside a drag handle. */
   touch-action: none;
 }
-.palette-pieces button svg { width: 100%; height: 100%; display: block; }
+.tray button:active { cursor: grabbing; }
+.tray button svg { width: 100%; height: 100%; display: block; }
+
+/* One line: the position, whose turn it is, and the three things you can do
+   to the board. */
+.board-controls {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  width: 100%; max-width: 460px; margin-inline: auto;
+}
+.board-controls #fen-input {
+  flex: 1 1 100%; font-family: var(--mono); font-size: var(--f1);
+}
+.board-pin.flipped .board-controls { order: -1; }
 
 /* The piece under the pointer during a palette drag. Fixed to the viewport
    and inert, so elementFromPoint sees the square underneath rather than the
@@ -290,8 +309,6 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
   pointer-events: none; opacity: .85;
 }
 
-#fen-form { display: flex; flex-direction: column; gap: .45rem; }
-#fen-input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
 label.inline { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ink-soft); font-size: var(--f2); }
 
 /* Optimal -> Slower -> No mate is ONE ordinal axis, not three categories, so

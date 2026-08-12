@@ -1,5 +1,5 @@
 import {
-  Chessboard, INPUT_EVENT_TYPE, COLOR,
+  Chessboard, INPUT_EVENT_TYPE, COLOR, BORDER_TYPE,
 } from "../vendor/cm-chessboard/Chessboard.js";
 import {
   PromotionDialog,
@@ -18,7 +18,10 @@ import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
-const PALETTE = ["wk", "wq", "wr", "wb", "wn", "wp", "bk", "bq", "br", "bb", "bn", "bp"];
+const TRAY = {
+  b: ["bk", "bq", "br", "bb", "bn", "bp"],
+  w: ["wk", "wq", "wr", "wb", "wn", "wp"],
+};
 
 let board = null;
 let current = START;
@@ -356,21 +359,23 @@ function enablePaletteDrag(btn, piece) {
 }
 
 function buildPalette() {
-  const box = document.getElementById("palette-pieces");
-  for (const piece of PALETTE) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.piece = piece;
-    btn.title = piece;
-    btn.setAttribute("aria-label", piece);
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 40 40");
-    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `${SPRITE}#${piece}`);
-    svg.appendChild(use);
-    btn.appendChild(svg);
-    enablePaletteDrag(btn, piece);
-    box.appendChild(btn);
+  for (const color of Object.keys(TRAY)) {
+    const box = document.querySelector(`.tray[data-color="${color}"]`);
+    for (const piece of TRAY[color]) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.piece = piece;
+      btn.title = piece;
+      btn.setAttribute("aria-label", piece);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 40 40");
+      const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", `${SPRITE}#${piece}`);
+      svg.appendChild(use);
+      btn.appendChild(svg);
+      enablePaletteDrag(btn, piece);
+      box.appendChild(btn);
+    }
   }
   document.getElementById("btn-clear-board").addEventListener("click", () => {
     board.setPosition(EMPTY_PLACEMENT, false).then(() => {
@@ -484,7 +489,12 @@ export function initExplorer() {
   board = new Chessboard(document.getElementById("board"), {
     position: START.split(" ")[0],
     assetsUrl: "/vendor/cm-chessboard/assets/",
-    style: { borderType: "frame" },
+    // "none" draws the rank/file coordinates inline, on the squares
+    // themselves (the lichess/syzygy look), instead of in a "frame" border
+    // band inside the widget's visible bounds. That band carried no
+    // data-square attribute, so a drag released on it -- visually still on
+    // the board -- read as movedOutOfBoard and deleted the piece.
+    style: { borderType: BORDER_TYPE.none },
     extensions: [{ class: PromotionDialog }],
   });
   enableBoardInput();
@@ -501,7 +511,11 @@ export function initExplorer() {
     render(fen);
   });
   document.getElementById("btn-flip").addEventListener("click", () => {
-    board.setOrientation(board.getOrientation() === COLOR.white ? COLOR.black : COLOR.white);
+    const black = board.getOrientation() === COLOR.white;   // after the flip below
+    board.setOrientation(black ? COLOR.black : COLOR.white);
+    // Each tray sits on the side of the board its own colour occupies; leaving
+    // them put after a flip would make them two anonymous rows of buttons.
+    document.querySelector(".board-pin").classList.toggle("flipped", black);
   });
   document.getElementById("btn-back").addEventListener("click", () => {
     const prev = history.pop();
