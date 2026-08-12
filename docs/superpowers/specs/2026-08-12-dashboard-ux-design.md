@@ -246,7 +246,7 @@ corpus's real values where they are known and `…` where they are per-corpus:
 formatting is the reader's job.
 
 It reads the `.stats.json` sidecars, which is cheap — **295 sidecars, 13 MB,
-0.17s measured cold** — and caches the result keyed on the catalog's
+0.17s to parse in a tight loop** — and caches the result keyed on the catalog's
 `(material, size_bytes)` set, so a newly generated or downloaded table
 invalidates it and nothing else does. Remote-only tables have no local
 sidecar; they are counted in `tables` and excluded from the sums, and the

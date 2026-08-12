@@ -581,7 +581,7 @@ def aggregate_stats(sidecars: Sequence[dict[str, Any]],
 Insert this immediately after the `stats(name)` route (after line 136):
 
 ```python
-    # Recomputing this walks every sidecar (295 files / 13 MB / 0.17s measured
+    # Recomputing this walks every sidecar (295 files / 13 MB / 0.17s to parse
     # on the reference corpus), so it is cached against a signature of the
     # catalog itself: a newly generated or downloaded table invalidates it and
     # nothing else does. Closure state, not module state, so each create_app()
@@ -674,7 +674,7 @@ Aggregation is a pure function over parsed sidecars, so the awkward cases
 testable without generating a table.
 
 Cached against a signature of the catalog, because recomputing walks 295
-files (13 MB, 0.17s cold on the reference corpus).
+files (13 MB, 0.17s to parse on the reference corpus).
 
 Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ```
