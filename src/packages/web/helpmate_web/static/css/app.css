@@ -190,8 +190,15 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 
 /* One card per panel, split into a rail and a readout. No `overflow: hidden`
    anywhere on this path: it would create a scroll container and silently
-   cancel the rail's `position: sticky`. */
-#panel-explorer, #panel-materials, #panel-mine {
+   cancel the rail's `position: sticky`.
+
+   Only #panel-explorer is listed: it is the only panel whose children are
+   wrapped in .rail/.readout so far. #panel-materials and #panel-mine keep
+   their unbordered, unpainted layout until the tasks that wrap their own
+   content in .rail/.readout (Materials and Search panels) add themselves
+   here -- adding the id now, before its markup exists, would draw a bordered
+   card with zero internal padding around content that has none of its own. */
+#panel-explorer {
   border: 1px solid var(--rule); border-radius: var(--r);
   background: var(--readout);
 }
@@ -214,7 +221,20 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
    instead of from the viewport -- one rule, and the overlap that two rules
    produced between 860px and ~1150px is impossible by construction. */
 #panel-explorer { display: flex; flex-direction: column; }
-.board-col { display: flex; flex-direction: column; gap: var(--s3); }
+.board-col { display: flex; flex-direction: column; }
+/* The surface (.rail, full column height) and the sticky element (.board-pin,
+   only as tall as the board + palette) are deliberately different elements.
+   Fix round 1: giving .board-col itself `position: sticky` left it sized to
+   its own content while the grid row's height followed the taller .readout
+   -- a hard colour seam below the board, in both themes, on any move list
+   long enough to make the two columns' heights diverge (the landing
+   position's short list never showed it). .board-pin carries the sticky
+   behaviour at the old, short height; .rail/.board-col stretches to the
+   row's full height (grid's default align-items is stretch; the explicit
+   `align-items: start` that caused this is gone) and its background now
+   covers the seam instead of leaving it to show the readout's colour
+   through. */
+.board-pin { display: flex; flex-direction: column; gap: var(--s3); }
 #board { width: 100%; max-width: 460px; margin-inline: auto; aspect-ratio: 1; }
 .side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
@@ -223,11 +243,15 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
   #panel-explorer {
     display: grid;
     grid-template-columns: minmax(300px, 460px) minmax(320px, 1fr);
-    align-items: start;
   }
-  /* The rail stays put and only the readout scrolls, so a long move list
-     never drags the board out of view. No sticky headers, no scroll-sync JS. */
-  .board-col { position: sticky; top: var(--s3); }
+  /* .board-pin stays put and only the readout scrolls, so a long move list
+     never drags the board out of view. No sticky headers, no scroll-sync JS.
+     Its containing block for the sticky offset is .rail/.board-col, which is
+     now stretched to the full row height, so the sticking range is the same
+     as when sticky sat directly on the (formerly short) .board-col inside
+     the grid container -- only the element carrying the surface colour
+     changed. */
+  .board-pin { position: sticky; top: var(--s3); }
 }
 
 .palette {

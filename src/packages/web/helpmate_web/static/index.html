@@ -40,20 +40,22 @@
 <main>
   <section id="panel-explorer">
     <div class="rail board-col">
-      <div id="board"></div>
+      <div class="board-pin">
+        <div id="board"></div>
 
-      <div id="palette" class="palette">
-        <span class="eyebrow">Edit position</span>
-        <div id="palette-pieces" class="palette-pieces"></div>
-        <div class="palette-actions">
-          <button type="button" id="btn-erase" data-piece="">Erase</button>
-          <button type="button" id="btn-clear-board">Clear board</button>
+        <div id="palette" class="palette">
+          <span class="eyebrow">Edit position</span>
+          <div id="palette-pieces" class="palette-pieces"></div>
+          <div class="palette-actions">
+            <button type="button" id="btn-erase" data-piece="">Erase</button>
+            <button type="button" id="btn-clear-board">Clear board</button>
+          </div>
+          <p id="edit-hint" class="hint">
+            Pick a piece, then click squares to place it; <b>Erase</b> empties the
+            squares you click. Click the same palette entry again to stop editing
+            and evaluate the position.
+          </p>
         </div>
-        <p id="edit-hint" class="hint">
-          Pick a piece, then click squares to place it; <b>Erase</b> empties the
-          squares you click. Click the same palette entry again to stop editing
-          and evaluate the position.
-        </p>
       </div>
     </div>
 

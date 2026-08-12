@@ -1,5 +1,7 @@
 from urllib.parse import quote, urlparse, parse_qs
 
+import pytest
+
 GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
 
 
@@ -341,13 +343,18 @@ def test_a_mate_position_renders_prose_not_a_miscounted_move_row(page, server):
 def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # Syzygy's structural win, without its 310px cap: a long move list must
     # never drag the board off screen. No sticky headers, no scroll sync --
-    # position: sticky on the board column, and only above the breakpoint.
+    # position: sticky on .board-pin, and only above the breakpoint.
+    # Fix round 1: sticky moved off .board-col (the rail, which fix round 1
+    # stretches to the readout's full height so its background covers the
+    # whole column -- see the C2 comment in app.css) onto .board-pin, the
+    # inner wrapper around #board and .palette that is still only as tall as
+    # its own content. So this now asserts on .board-pin, not .board-col.
     page.set_viewport_size({"width": 1280, "height": 700})
     page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")   # 28 moves: taller than the viewport
     page.wait_for_selector("#move-list li")
     page.mouse.wheel(0, 600)
     page.wait_for_function("() => window.scrollY > 100")
-    top_after = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect().top")
+    top_after = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
     # Without sticky this is around -500 (scrolled off the top). With it, the
     # column parks at --s3 from the viewport top and stays there.
     assert top_after >= 0, f"the board column scrolled out of view (top={top_after})"
@@ -483,9 +490,6 @@ def test_a_material_with_no_helpmate_says_so(page, server):
     assert "h#" not in sub.split("·")[0]
 
 
-import pytest
-
-
 @pytest.mark.parametrize("width", [880, 960, 1024, 1280])
 def test_the_board_never_overlaps_the_readout(page, server, width):
     # Regression, measured before the fix: #board was min(88vw, 460px) while
@@ -524,9 +528,10 @@ def test_the_rail_and_the_readout_are_different_surfaces(page, server):
 
 
 def test_the_board_stays_put_while_the_readout_scrolls(page, server):
-    # The rail is sticky. `overflow: hidden` on any ancestor would create a
-    # scroll container and silently kill that -- an easy thing to add while
-    # clipping surfaces to a border radius, and invisible to every other test.
+    # .board-pin (wrapping #board and .palette) is sticky. `overflow: hidden`
+    # on any ancestor would create a scroll container and silently kill that
+    # -- an easy thing to add while clipping surfaces to a border radius, and
+    # invisible to every other test.
     page.set_viewport_size({"width": 1280, "height": 700})
     page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
     page.wait_for_selector("#move-list li")
@@ -536,3 +541,21 @@ def test_the_board_stays_put_while_the_readout_scrolls(page, server):
     after = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
     assert after > before - 400 + 50, "the board scrolled away instead of sticking"
     assert after >= -1, "the board is above the viewport"
+
+
+def test_the_rail_matches_the_readout_height_on_a_tall_move_list(page, server):
+    # Fix round 1 / C2 regression: #panel-explorer is a grid with
+    # `align-items: start` (pre-fix), so .rail/.board-col sized itself to its
+    # own short content (board + palette) while the grid row's height
+    # followed the taller .readout. Below the rail's content, the ancestor
+    # panel's --readout background showed straight through -- a hard colour
+    # seam, invisible on the landing position (whose short move list makes
+    # the two columns nearly equal height) but covering most of the card on
+    # THREE_GROUPS's 28-move list. The rail must now stretch to match.
+    page.set_viewport_size({"width": 1280, "height": 1100})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    rail = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect()")
+    readout = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
+    assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
+        f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
