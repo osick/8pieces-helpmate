@@ -741,13 +741,95 @@ def test_the_search_button_becomes_stop_while_in_flight(page, server):
 
 
 def test_the_countdown_uses_the_servers_budget(page, server):
+    # The fixture server's default mine_timeout (30) is the same number as
+    # mine.js's hardcoded fallback, so asserting "of 30s" against the real
+    # /v1/health response would pass identically whether the health call
+    # ever happened or not. Mock a different budget so the test can only
+    # pass if the countdown actually reads it from the server.
+    page.route("**/v1/health**", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"status": "ok", "version": "0.0.0", "mine_timeout": 7, '
+             '"tables_local": 1, "tables_remote": 0}'))
     page.goto(f"{server}/#panel=mine")
     page.route("**/v1/mine**", lambda route: None)
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
     page.click("#mine-form button[type=submit]")
     page.wait_for_function(
-        "document.getElementById('mine-status').textContent.includes('of 30s')")
+        "document.getElementById('mine-status').textContent.includes('of 7s')")
+
+
+def test_pressing_enter_mid_search_does_not_orphan_the_ticker(page, server):
+    # Fix round 1 (code review): setBusy(true) only sets `hidden` on the
+    # submit button, which does not stop Enter-key implicit form submission
+    # -- so a second /v1/mine can fire while the first is still in flight,
+    # even though the Search button is invisible. Before the guard, that
+    # second submission's startTicker() call overwrote the module-level
+    # `ticker` variable, orphaning the first interval: pressing Stop then
+    # correctly showed "Stopped..." for one tick, and the orphaned interval
+    # (still ticking against the FIRST search's own `began` timestamp) kept
+    # overwriting #mine-status with "searching... Ns of 30s" every second
+    # after that, forever -- the honest timeout message silently reverting
+    # to a stale "searching..." line. Reproduces the reviewer's exact
+    # sequence: click Search, submit again via Enter (not a second click),
+    # press Stop, then wait past a full tick and confirm the Stopped message
+    # held.
+    page.goto(f"{server}/#panel=mine")
+    page.route("**/v1/mine**", lambda route: None)   # never respond
+    material = page.locator("#mine-form input[name=material]")
+    material.fill("KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_selector("#btn-stop:not([hidden])")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.includes('of ')")
+    # Implicit submission via Enter in a text field, while the first search
+    # is still in flight and its Search button is only `hidden`, not
+    # disabled -- the reachable path the reviewer identified.
+    material.press("Enter")
+    page.click("#btn-stop")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.toLowerCase().includes('stopped')")
+    page.wait_for_timeout(3000)   # past a full orphaned-ticker tick, if one exists
+    status = page.inner_text("#mine-status")
+    assert "stopped" in status.lower(), status
+    assert "searching" not in status.lower(), status
+
+
+def test_stop_and_the_busy_state_survive_a_downloading_retry(page, server):
+    # Fix round 1 (code review): the 202 branch used to schedule its retry
+    # with a bare setTimeout and return immediately, so the submit handler's
+    # `finally` unwound as soon as the FIRST 202 arrived -- Stop hidden,
+    # Search shown, ticker stopped, inFlight nulled -- while the status
+    # still read "downloading...". With inFlight null, the retry's own
+    # api.mine call read `signal: undefined`, making the retry loop
+    # unabortable. Confirm Stop (and the busy state generally) survives
+    # across a 202 -> 200 retry.
+    calls = {"n": 0}
+
+    def handle_mine(route):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            route.fulfill(status=202, content_type="application/json",
+                           body='{"material": "KQvk"}')
+        else:
+            route.fulfill(status=200, content_type="application/json",
+                           body='{"fens": [], "truncated": false, "skipped_saturated": 0}')
+
+    page.goto(f"{server}/#panel=mine")
+    page.route("**/v1/mine**", handle_mine)
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.includes('downloading')")
+    assert page.is_visible("#btn-stop"), "Stop disappeared while still downloading"
+    assert page.is_hidden("#mine-form button[type=submit]")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.includes('position(s)')")
+    assert calls["n"] >= 2, "the retry never actually fired"
+    assert page.is_hidden("#btn-stop")
+    assert page.is_visible("#mine-form button[type=submit]")
 
 
 def test_the_search_rail_matches_the_readout_height(page, server):

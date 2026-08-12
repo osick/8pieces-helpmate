@@ -20,6 +20,12 @@ let inFlight = null;     // the AbortController of the running search
 let ticker = null;       // the elapsed-time interval
 
 function startTicker(status) {
+  // An orphaned interval must be structurally impossible: if one is already
+  // running (it shouldn't be, given the submit-handler guard below, but this
+  // must hold even if that guard is ever bypassed) clear it first, so the
+  // module-level `ticker` can never point at only the newest of two live
+  // intervals while the other keeps writing to #mine-status forever.
+  stopTicker();
   const began = Date.now();
   const tick = () => {
     const secs = Math.floor((Date.now() - began) / 1000);
@@ -69,10 +75,17 @@ async function runQuery(q, status, results, seq, retries = 0) {
       return;
     }
     status.textContent = `downloading ${res.body.material}…`;
-    setTimeout(() => {
-      if (seq !== mineSeq) return; // user started a new search: stop retrying
-      runQuery(q, status, results, seq, retries + 1);
-    }, DOWNLOAD_RETRY_MS);
+    // Await the whole retry chain. A bare setTimeout that schedules and
+    // returns immediately let the submit handler's `finally` unwind as soon
+    // as the FIRST 202 arrived (Stop hidden, ticker stopped, inFlight
+    // nulled) while the status still read "downloading..." -- and with
+    // inFlight null, the retry's own api.mine call below reads
+    // `signal: undefined`, making the retry loop unabortable for up to
+    // DOWNLOAD_RETRY_CAP * DOWNLOAD_RETRY_MS. Awaiting keeps inFlight valid
+    // and the busy state alive for as long as retries are still happening.
+    await new Promise((resolve) => setTimeout(resolve, DOWNLOAD_RETRY_MS));
+    if (seq !== mineSeq) return; // user started a new search: stop retrying
+    await runQuery(q, status, results, seq, retries + 1);
     return;
   }
   const b = res.body;
@@ -154,6 +167,17 @@ export function initMine() {
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
+    // A search already in flight: ignore this submission rather than start a
+    // second one. setBusy(true) only sets `hidden` on the submit button,
+    // which does not stop Enter-key implicit form submission -- so this is
+    // reachable even though the button looks gone. Starting a second search
+    // here would leak the first one's ticker (its interval id is overwritten
+    // by the second startTicker() call) and the two searches' 202 retries
+    // would race over the same #mine-status/#mine-results. Chosen over
+    // "replace the running search" because Stop already exists as the
+    // explicit, visible way to abandon a search and start over; an Enter
+    // press should not silently do the same thing.
+    if (inFlight) return;
     const q = Object.fromEntries(new FormData(form).entries());
     q.theme = selectedThemes(themeSel);      // fromEntries would keep only one
     results.textContent = ""; rows = [];
