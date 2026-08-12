@@ -58,12 +58,18 @@ async function runQuery(q, status, results, seq, retries = 0) {
     li.textContent = "Nothing matches. Try a different dtm, or drop the count/starts/ends filters.";
     results.appendChild(li);
   }
-  for (const fen of b.fens) {
+  b.fens.forEach((fen, i) => {
     const li = document.createElement("li");
-    li.textContent = fen;
+    const idx = document.createElement("span");
+    idx.className = "idx";
+    idx.textContent = i + 1;
+    const text = document.createElement("span");
+    text.className = "fen";
+    text.textContent = fen;
+    li.append(idx, text);
     li.addEventListener("click", () => { location.hash = encodeState({ fen, panel: "explorer" }); });
     results.appendChild(li);
-  }
+  });
 }
 
 export function initMine() {

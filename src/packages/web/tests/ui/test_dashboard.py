@@ -247,3 +247,223 @@ def test_explorer_shows_the_flip_note_not_no_themes_detected(page, server):
     text = page.inner_text("#position-themes")
     assert "flip" in text.lower()
     assert text != "no themes detected"
+
+
+SATURATED = "8/8/7k/8/8/8/8/KQ6 b - - 0 1"
+THREE_GROUPS = "7k/8/5K2/8/8/8/8/6Q1 w - - 0 1"
+
+
+def _rows(page, selector="#move-list li"):
+    return page.eval_on_selector_all(selector, "els => els.map(e => e.dataset.san)")
+
+
+def test_optimal_moves_are_ordered_by_ascending_child_count(page, server):
+    # Landing position: Kh6 has 3 optimal continuations, Kh8 has 1, and the
+    # move generator emits them in that (wrong) order. Kh8 is the more forcing
+    # move and must lead. Measured against KQvk on 2026-08-11.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert _rows(page, "#move-list section[data-group=optimal] li") == ["Kh8", "Kh6"]
+
+
+def test_a_saturated_child_count_renders_as_a_ceiling_not_a_number(page, server):
+    # 8/8/7k/8/8/8/8/KQ6 b: Kg5 leads to a child whose count has saturated at
+    # 255, Kh5 to one with 246. The saturated move must sort last (255 > 246)
+    # and must never claim "255 ways" -- a ceiling is not a measurement.
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    optimal = "#move-list section[data-group=optimal] li"
+    assert _rows(page, optimal) == ["Kh5", "Kg5"]
+    badges = page.eval_on_selector_all(
+        f"{optimal} .badge", "els => els.map(e => e.textContent)")
+    assert badges == ["h#4.5 · 246 ways", "h#4.5 · 255+ ways"]
+    # The position's OWN count also saturates here (it is the sum of its
+    # optimal children's counts, capped at the same ceiling) -- the summary
+    # line above the badges must honour the same rule they do: a ceiling is
+    # never a measurement. Measured against KQvk on 2026-08-11: this position
+    # is dtm=10 (h#5), count=255.
+    summary = page.inner_text("#position-summary")
+    assert summary == "dtm 10 (h#5) · 255+ optimal lines"
+    assert "255 optimal line" not in summary
+
+
+def test_all_three_groups_render_in_order_with_counted_headers(page, server):
+    # 7k/8/5K2/8/8/8/8/6Q1 w -- the position after Kh8. 28 legal moves:
+    # one optimal (Qg7#), 25 slower, 2 that lead nowhere.
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    groups = page.eval_on_selector_all(
+        "#move-list section.move-group", "els => els.map(e => e.dataset.group)")
+    assert groups == ["optimal", "slower", "dead"]
+
+    headers = page.eval_on_selector_all(
+        "#move-list section.move-group h3", "els => els.map(e => e.textContent)")
+    assert headers == ["Optimal 1", "Slower 25", "No mate 2"]
+
+    # Row one is the answer, whatever the generator emitted.
+    assert _rows(page)[0] == "Qg7#"
+    assert page.eval_on_selector(
+        "#move-list li .badge", "e => e.textContent") == "h#0 · only reply"
+
+    # The slower group is ordered by mate length first, then by count.
+    assert _rows(page, "#move-list section[data-group=slower] li")[:6] == [
+        "Qa7", "Qg2", "Qg3", "Qg4", "Qg5", "Kf7"]
+    assert _rows(page, "#move-list section[data-group=dead] li") == ["Qg6", "Qg8+"]
+
+
+def test_the_group_header_is_not_a_move_row(page, server):
+    # The whole DOM contract in one assertion: three headers exist, and
+    # `#move-list li` still counts exactly the 28 moves and nothing else.
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector_all("#move-list section.move-group h3",
+                                     "els => els.length") == 3
+    sans = _rows(page)
+    assert len(sans) == 28
+    assert all(sans), "every #move-list li must carry a data-san"
+
+
+def test_a_mate_position_renders_prose_not_a_miscounted_move_row(page, server):
+    # explorer.js's renderMoveList has a comment explaining why the empty
+    # branch renders a <p class="empty"> rather than an <li>: seven other
+    # tests in this file use `#move-list li` as their "the page is ready"
+    # idiom, and two of them count it -- an <li> here would be silently
+    # counted as a move. Nothing reached this branch until now: reverting the
+    # <p> back to an <li> passes every other gate in this suite.
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    page.click("#move-list li[data-san='Qg7#']")   # h#0: mate, no legal replies
+    page.wait_for_selector("#move-list .empty")
+    assert page.eval_on_selector_all("#move-list li", "els => els.length") == 0
+    assert page.is_visible("#move-list .empty")
+
+
+def test_the_board_stays_put_while_the_answer_scrolls(page, server):
+    # Syzygy's structural win, without its 310px cap: a long move list must
+    # never drag the board off screen. No sticky headers, no scroll sync --
+    # position: sticky on the board column, and only above the breakpoint.
+    page.set_viewport_size({"width": 1280, "height": 700})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")   # 28 moves: taller than the viewport
+    page.wait_for_selector("#move-list li")
+    page.mouse.wheel(0, 600)
+    page.wait_for_function("() => window.scrollY > 100")
+    top_after = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect().top")
+    # Without sticky this is around -500 (scrolled off the top). With it, the
+    # column parks at --s3 from the viewport top and stays there.
+    assert top_after >= 0, f"the board column scrolled out of view (top={top_after})"
+    # Above the breakpoint #panel-explorer is a grid. grid-template-columns
+    # computes to "none" when the element is not a grid and to resolved track
+    # sizes when it is, so this pins the media query itself rather than a side
+    # effect that a flex-wrap layout could also produce.
+    assert page.evaluate(
+        "getComputedStyle(document.getElementById('panel-explorer')).gridTemplateColumns"
+    ) != "none"
+
+
+def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, server):
+    page.set_viewport_size({"width": 420, "height": 900})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    board = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect()")
+    side = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
+    assert side["top"] >= board["bottom"] - 1, "columns did not stack"
+    # Nothing is hidden on a small screen -- hiding controls is a support burden.
+    for sel in ("#palette", "#fen-form", "#move-list", "#btn-export-pgn"):
+        assert page.is_visible(sel), f"{sel} disappeared at 420px"
+    # And the page never scrolls sideways.
+    assert page.evaluate(
+        "document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1")
+    # ...and below it, the grid must not apply at all.
+    assert page.evaluate(
+        "getComputedStyle(document.getElementById('panel-explorer')).gridTemplateColumns"
+    ) == "none"
+
+
+def test_reference_material_appears_only_on_the_landing_position(page, server):
+    # The benchmark renders its About/Download copy only when the FEN is the
+    # default: ask a real question and the explanatory copy vanishes. A
+    # published tool explains itself to a newcomer, then gets out of the way.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.is_visible("#primer")
+    assert page.is_visible("#explorer-help")
+
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    page.wait_for_function("() => document.getElementById('primer').hidden === true")
+    assert not page.is_visible("#explorer-help")
+
+
+def test_theme_toggle_cycles_all_three_states_and_persists(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.get_attribute("#theme-toggle", "data-mode") == "system"
+    assert page.evaluate(
+        "document.documentElement.hasAttribute('data-theme')") is False
+    assert page.inner_text("#theme-toggle") == "Theme: system"
+
+    page.click("#theme-toggle")
+    assert page.get_attribute("html", "data-theme") == "light"
+    page.click("#theme-toggle")
+    assert page.get_attribute("html", "data-theme") == "dark"
+    assert page.inner_text("#theme-toggle") == "Theme: dark"
+
+    # The choice survives a reload -- and is applied before first paint, so
+    # a dark-mode user never gets a white flash.
+    page.reload()
+    page.wait_for_selector("#move-list li")
+    assert page.get_attribute("html", "data-theme") == "dark"
+
+    page.click("#theme-toggle")   # back round to system
+    assert page.evaluate(
+        "document.documentElement.hasAttribute('data-theme')") is False
+
+
+def test_an_explicit_light_choice_beats_a_dark_operating_system(browser, server):
+    # The three-state point: prefers-color-scheme is the DEFAULT, not the
+    # authority. If the media query were unguarded, a dark OS would win and
+    # the light setting would do nothing.
+    ctx = browser.new_context(color_scheme="dark")
+    pg = ctx.new_page()
+    pg.goto(server)
+    pg.wait_for_selector("#move-list li")
+    dark_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
+    pg.click("#theme-toggle")   # -> light
+    assert pg.get_attribute("html", "data-theme") == "light"
+    light_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
+    assert light_bg != dark_bg, "explicit light did not override the dark OS"
+    ctx.close()
+
+
+def test_the_theme_toggle_is_not_treated_as_a_panel_button(page, server):
+    # panels.js binds EVERY `nav button` as a panel switch and reads
+    # btn.dataset.panel. A stray button inside <nav> would call
+    # showPanel(undefined) on click and hide all three panels at once -- a
+    # failure that looks like a blank page and has no other test guarding it.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector("#theme-toggle", "e => e.closest('nav') === null")
+    page.click("#theme-toggle")
+    assert page.is_visible("#panel-explorer")
+
+
+def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
+    page.goto(f"{server}/#panel=mine")
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_selector("#mine-results li")
+    idx = page.eval_on_selector_all("#mine-results li .idx",
+                                    "els => els.map(e => e.textContent)")
+    assert idx == [str(n) for n in range(1, len(idx) + 1)]
+    assert len(idx) == page.eval_on_selector_all("#mine-results li", "els => els.length")
+    # each row still carries its FEN and still navigates
+    first = page.eval_on_selector("#mine-results li .fen", "e => e.textContent")
+    assert first.count("/") == 7
+    page.click("#mine-results li")
+    page.wait_for_selector("#panel-explorer:not([hidden])")
+    # The click sets location.hash; panels.js and explorer.js both react to
+    # hashchange, and explorer's render() is async -- so wait for the value
+    # rather than reading it in the same tick.
+    page.wait_for_function(
+        "want => document.getElementById('fen-input').value === want", arg=first)

@@ -1,42 +1,107 @@
 /* helpmate dashboard.
    An instrument, not an essay: one sans for the interface, monospace for
-   everything that is data, and a single green accent that means exactly one
-   thing -- "this keeps the shortest mate". Neutrals are warmed slightly
-   toward the board's tan so the board does not look pasted onto the page. */
+   everything that is data.
+
+   The palette is lichess's, read off its shipped theme
+   (ui/lib/css/theme/_theme.default.scss and _theme.light.scss). Two rules
+   run the whole system:
+
+     1. GROUNDS carry one hue -- 37deg, at 5-10% saturation. Lichess declares
+        it once as ---site-hue and derives every surface from it.
+     2. INK AND RULES are exactly achromatic -- hue 0, saturation 0.
+
+   That split is why the page reads warm while no text ever looks tinted. The
+   palette this replaced was hue 37 as well, at 30-40% saturation, which is
+   the difference between a tint and a colour.
+
+   ONE accent, and it is blue. Every instrument surveyed lands in hue
+   203-220deg: Primer #0969da, Grafana #1f62e0, Datasette #276890, lichess
+   #1b78d0. The discipline is not desaturation -- those run 56-93% saturated
+   -- it is hue-lock plus restraint about placement. Here the accent touches
+   links, focus rings and hover borders. It is never a field, never a header
+   fill, and never the move list: that ordinal carries no hue at all (see
+   "move list" below).
+
+   syzygy-tables.info's dark mode IS this palette -- #161512, #262421,
+   #bababa, #404040, #3692e7 all match lichess exactly -- so adopting it makes
+   us consistent with the nearest neighbour tool rather than merely inspired
+   by it. Its light mode is stock Bootstrap 3 and is not copied.
+
+   --flag is a genuine, saturated red (#b3261e is hue ~3deg at 71% saturation
+   -- the most saturated value in this file, not an "achromatic-adjacent"
+   one), used for exactly one thing: the error banner and the "server
+   unreachable" chip. An error is the one place on this page where a warning
+   hue is telling the truth. */
 
 :root {
-  --ground: #f7f5f0;
-  --panel: #fffefb;
-  --sunk: #f1eee6;
-  --ink: #1b1a16;
-  --ink-soft: #6d6659;
-  --rule: #e3ded2;
-  --accent: #0d7a53;
-  --accent-soft: #d9ece3;
-  --flag: #a4542a;
-  --flag-soft: #f6e7dc;
-  --info-soft: #e2e9f2;
+  --ground: #edebe9;
+  --panel: #ffffff;
+  --sunk: #f5f4f2;
+  --ink: #2b2b2b;
+  --ink-soft: #6b6b6b;
+  /* #949494 measured 2.55:1 against --ground here -- illegible, below even
+     the 3:1 large-text floor. #757575 (the mid-grey syzygy's own draw-result
+     scale uses, see "the ordinal is encoded without hue" below) measures
+     3.87:1 on --ground and 4.61:1 on --panel: comfortably legible, and still
+     visibly fainter than --ink-soft, because the bottom rung of the move-list
+     ordinal is also marked by strikethrough and a lighter weight -- colour
+     was never carrying it alone. Dark mode's #787878 measures 4.14:1 on
+     --ground and 3.51:1 on --panel -- both above the 3:1 floor already --
+     and is left untouched. */
+  --ink-faint: #757575;
+  --rule: #d9d9d9;
+  --rule-strong: #b4b4b4;
+  --accent: #1b78d0;
+  --on-ink: #ffffff;
+  --flag: #b3261e;
+  --flag-soft: #fbeae9;
+  --info-soft: #e3eef9;
+
+  /* Type scale. Replaces fourteen ad-hoc rem values (.7 .74 .76 .78 .8 .82
+     .84 .85 .86 .88 .9 .95 1.05 1.15). */
+  --f0: .75rem;   /* eyebrows, chips, tile keys */
+  --f1: .82rem;   /* data rows, hints, form labels */
+  --f2: .9rem;    /* help copy, verdicts, inputs */
+  --f3: 1rem;     /* emphasised data */
+  --f4: 1.15rem;  /* headings */
+
+  /* Spacing scale. --step was declared and never used; this replaces it. */
+  --s1: .35rem;
+  --s2: .6rem;
+  --s3: 1rem;
+  --s4: 1.6rem;
+
+  /* Instruments have small radii: lichess ships 7px, Primer 6px. */
+  --r: 6px;
+
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --step: .5rem;
 }
 
+/* The viewer has THREE states, not two: an explicit choice stamps
+   data-theme, and the default "system" setting stamps nothing. So the bare
+   :root above is the complete light palette; the media query below redefines
+   only the tokens and is guarded so an explicit light choice still beats a
+   dark OS; and the [data-theme="dark"] block redefines them again so the
+   toggle wins in the other direction. Defined twice, not the three times it
+   was. */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --ground: #141310; --panel: #1d1b16; --sunk: #24211a; --ink: #ece7db;
-    --ink-soft: #a0988a; --rule: #302c24; --accent: #4dc797; --accent-soft: #1d3a30;
-    --flag: #dd8f6a; --flag-soft: #3a2418; --info-soft: #1e2733;
+  :root:not([data-theme="light"]) {
+    --ground: #161512; --panel: #262421; --sunk: #33312e;
+    --ink: #bababa; --ink-soft: #949494; --ink-faint: #787878;
+    --rule: #404040; --rule-strong: #5c5c5c;
+    --accent: #3692e7;
+    --on-ink: #161512;
+    --flag: #e8837b; --flag-soft: #3a1f1d; --info-soft: #1f2d3a;
   }
 }
 :root[data-theme="dark"] {
-  --ground: #141310; --panel: #1d1b16; --sunk: #24211a; --ink: #ece7db;
-  --ink-soft: #a0988a; --rule: #302c24; --accent: #4dc797; --accent-soft: #1d3a30;
-  --flag: #dd8f6a; --flag-soft: #3a2418; --info-soft: #1e2733;
-}
-:root[data-theme="light"] {
-  --ground: #f7f5f0; --panel: #fffefb; --sunk: #f1eee6; --ink: #1b1a16;
-  --ink-soft: #6d6659; --rule: #e3ded2; --accent: #0d7a53; --accent-soft: #d9ece3;
-  --flag: #a4542a; --flag-soft: #f6e7dc; --info-soft: #e2e9f2;
+  --ground: #161512; --panel: #262421; --sunk: #33312e;
+  --ink: #bababa; --ink-soft: #949494; --ink-faint: #787878;
+  --rule: #404040; --rule-strong: #5c5c5c;
+  --accent: #3692e7;
+  --on-ink: #161512;
+  --flag: #e8837b; --flag-soft: #3a1f1d; --info-soft: #1f2d3a;
 }
 
 * { box-sizing: border-box; }
@@ -58,17 +123,20 @@ header {
   border-bottom: 1px solid var(--rule);
 }
 .brand { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; }
-.brand h1 { font-size: 1.05rem; font-weight: 650; letter-spacing: -.01em; margin: 0; }
-.tagline { margin: 0; color: var(--ink-soft); font-size: .85rem; }
+.brand h1 { font-size: var(--f4); font-weight: 650; letter-spacing: -.01em; margin: 0; }
+.tagline { margin: 0; color: var(--ink-soft); font-size: var(--f2); }
 nav { display: flex; gap: .25rem; }
 nav button {
   border: 0; background: none; color: var(--ink-soft); font: inherit;
-  padding: .3rem .7rem; cursor: pointer; border-radius: 4px;
+  padding: .3rem .7rem; cursor: pointer; border-radius: var(--r);
 }
 nav button:hover { background: var(--sunk); color: var(--ink); }
 nav button.active { background: var(--sunk); color: var(--ink); font-weight: 600; }
+.header-end { margin-left: auto; display: flex; align-items: center; gap: var(--s2); }
+#theme-toggle { font-size: var(--f0); color: var(--ink-soft); }
+#theme-toggle:hover { color: var(--ink); }
 .chip {
-  margin-left: auto; font-family: var(--mono); font-size: .74rem;
+  font-family: var(--mono); font-size: var(--f0);
   color: var(--ink-soft); border: 1px solid var(--rule);
   border-radius: 999px; padding: .15rem .65rem; white-space: nowrap;
 }
@@ -79,49 +147,65 @@ nav button.active { background: var(--sunk); color: var(--ink); font-weight: 600
 main { padding: 1.5rem 1.25rem 4rem; max-width: 1200px; margin: 0 auto; }
 h2 { margin: 0; }
 .eyebrow {
-  display: block; font-size: .7rem; font-weight: 600; letter-spacing: .1em;
+  display: block; font-size: var(--f0); font-weight: 600; letter-spacing: .1em;
   text-transform: uppercase; color: var(--ink-soft);
 }
-.help { margin: .35rem 0 0; color: var(--ink-soft); font-size: .88rem; max-width: 62ch; }
-.hint { margin: 0; color: var(--ink-soft); font-size: .8rem; max-width: 46ch; }
+.help { margin: var(--s1) 0 0; color: var(--ink-soft); font-size: var(--f2); max-width: 62ch; }
+.hint { margin: 0; color: var(--ink-soft); font-size: var(--f1); max-width: 46ch; }
 .row { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap; }
 .spacer { flex: 1; }
 
 button, select, input {
-  font: inherit; color: inherit; border-radius: 4px;
-  border: 1px solid var(--rule); background: var(--panel); padding: .28rem .6rem;
+  font: inherit; color: inherit; border-radius: var(--r);
+  border: 1px solid var(--rule); background: var(--panel); padding: .28rem var(--s2);
 }
 button { cursor: pointer; }
 button:hover:not(:disabled) { border-color: var(--ink-soft); }
 button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.verdict { font-family: var(--mono); font-size: .9rem; margin: 1rem 0 0; }
+.verdict { font-family: var(--mono); font-size: var(--f2); margin: var(--s3) 0 0; }
 .verdict.muted { color: var(--ink-soft); }
 
 #error-banner {
   background: var(--flag-soft); color: var(--flag);
-  border-bottom: 1px solid var(--flag); padding: .6rem 1.25rem; font-size: .9rem;
+  border-bottom: 1px solid var(--flag); padding: var(--s2) 1.25rem; font-size: var(--f2);
 }
 #error-banner.info { background: var(--info-soft); color: var(--ink); border-color: var(--rule); }
 
 .empty {
-  color: var(--ink-soft); font-size: .88rem; border: 1px dashed var(--rule);
-  border-radius: 5px; padding: 1.1rem; margin: .75rem 0 0;
+  color: var(--ink-soft); font-size: var(--f2); border: 1px dashed var(--rule);
+  border-radius: var(--r); padding: 1.1rem; margin: .75rem 0 0;
 }
 
 /* ---------- explorer ---------- */
 
-#panel-explorer { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
-.board-col { display: flex; flex-direction: column; gap: 1rem; flex: 0 1 auto; }
+/* Mobile is the default; two columns are the enhancement. 460px board +
+   32px gap + 300px minimum side + 40px of main padding = 832, so the two
+   columns need ~840px and the breakpoint sits just above at 860. */
+#panel-explorer { display: flex; flex-direction: column; gap: var(--s4); }
+.board-col { display: flex; flex-direction: column; gap: var(--s3); }
 #board { width: min(88vw, 460px); aspect-ratio: 1; }
-.side { flex: 1 1 340px; min-width: 300px; display: flex; flex-direction: column; gap: 1.1rem; }
+.side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
 
+@media (min-width: 860px) {
+  #panel-explorer {
+    display: grid;
+    grid-template-columns: min(460px, 40%) minmax(300px, 1fr);
+    gap: var(--s4);
+    align-items: start;
+  }
+  /* The board pane stays put and only the answer pane scrolls, so a long
+     move list never drags the board out of view. No sticky headers, no
+     scroll-sync JavaScript. */
+  .board-col { position: sticky; top: var(--s3); }
+}
+
 .palette {
-  display: flex; flex-direction: column; gap: .55rem;
-  border: 1px solid var(--rule); border-radius: 6px;
-  background: var(--panel); padding: .7rem .8rem;
+  display: flex; flex-direction: column; gap: var(--s2);
+  border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--panel); padding: var(--s2) var(--s3);
   width: min(88vw, 460px);
 }
 /* Six columns: White on the first row, Black on the second, in the order a
@@ -133,37 +217,83 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 }
 .palette-pieces button svg { width: 100%; height: 100%; display: block; }
 .palette-actions { display: flex; gap: .4rem; }
+/* The armed piece has to be unmistakable, and these buttons are icon-only --
+   there is no text for a weight change to act on -- so the cue cannot be
+   typographic. It is the same device the move list uses for "only reply": a
+   ring. The fill inverts to --panel as well, because .palette-pieces button
+   already sits on --sunk by default, so a --sunk "pressed" state would be no
+   change at all. */
 .palette button[aria-pressed="true"] {
-  border-color: var(--accent); background: var(--accent-soft); font-weight: 600;
+  border-color: var(--ink);
+  background: var(--panel);
+  box-shadow: inset 0 0 0 2px var(--ink);
+  font-weight: 600;
 }
 
 #fen-form { display: flex; flex-direction: column; gap: .45rem; }
-#fen-input { width: 100%; font-family: var(--mono); font-size: .85rem; }
-label.inline { display: inline-flex; align-items: center; gap: .35rem; color: var(--ink-soft); font-size: .85rem; }
+#fen-input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
+label.inline { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ink-soft); font-size: var(--f2); }
 
-#move-list { list-style: none; padding: 0; margin: .5rem 0 0; display: flex; flex-wrap: wrap; gap: .35rem; }
-#move-list li {
-  border: 1px solid var(--rule); border-radius: 4px; padding: .2rem .55rem;
-  cursor: pointer; font-family: var(--mono); font-size: .84rem; background: var(--panel);
+/* Optimal -> Slower -> No mate is ONE ordinal axis, not three categories, so
+   it is encoded by LUMINANCE AND WEIGHT with no hue at all: filled, then
+   outlined, then faded and struck.
+
+   This is syzygy's own device rather than an invention. It renders a
+   five-level win / cursed-win / draw / blessed-loss / loss scale in white,
+   mid-grey (#757575) and black -- the colours of the game itself, so it needs
+   no legend -- and marks the two degraded levels with a 3px inset ring in the
+   draw grey rather than a fourth hue. Its dark mode shifts that grey so the
+   midpoint holds RELATIVE to the ground; ours does the same via --ink.
+
+   Green -> amber -> red was the obvious move and is the wrong one: a slower
+   move is not a warning. (Where lichess does use hue for move quality it runs
+   blue -> amber -> red, holding green back for the exceptional case.) */
+
+#move-list { display: flex; flex-direction: column; gap: var(--s3); margin: var(--s2) 0 0; }
+.move-group { display: flex; flex-direction: column; gap: var(--s1); }
+.move-group h3 { margin: 0; }
+.move-group h3 .n { font-family: var(--mono); color: var(--ink-faint); font-weight: 400; }
+.move-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* 4px on the row, 3px on the badge below -- not --r (6px). Deliberate: rows
+   and badges read tighter than the panels that contain them, so they are not
+   tokenized to the shared radius. */
+.move-group li {
+  display: flex; align-items: center; gap: var(--s2);
+  padding: .4rem .55rem; border-radius: 4px; border: 1px solid transparent;
+  cursor: pointer;
 }
-#move-list li:hover { border-color: var(--ink-soft); }
-#move-list li.optimal { border-color: var(--accent); background: var(--accent-soft); font-weight: 600; }
-#move-list li.dead { color: var(--ink-soft); background: var(--sunk); cursor: default; }
-#move-list li.dead:hover { border-color: var(--rule); }
+.move-group li:hover { border-color: var(--accent); }
+.move-group li .san { font-family: var(--mono); font-size: var(--f2); font-weight: 600; min-width: 4.5em; }
+.move-group li .badge {
+  margin-left: auto; font-family: var(--mono); font-size: var(--f0);
+  font-variant-numeric: tabular-nums; white-space: nowrap;
+  padding: .2rem .45rem; border-radius: 3px;
+}
 
-.legend { display: flex; align-items: center; gap: .4rem; flex-wrap: wrap;
-          margin: .5rem 0 0; font-size: .78rem; color: var(--ink-soft); }
-.legend .key { width: .85rem; height: .85rem; border-radius: 3px; border: 1px solid var(--rule); }
-.legend .key.optimal { border-color: var(--accent); background: var(--accent-soft); }
-.legend .key.dead { background: var(--sunk); }
-.legend .key + .key { margin-left: .9rem; }
+/* top of the scale: solid, maximum contrast, and a bar in the gutter */
+.move-group li.optimal { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
+.move-group li.optimal .badge { background: var(--ink); color: var(--on-ink); }
+/* The qualifier is a RING, not a hue, so it survives greyscale and every form
+   of colour blindness -- and the badge already says "only reply" in words. */
+.move-group li.optimal.only .badge { box-shadow: inset 0 0 0 2px var(--on-ink); }
 
-#lines { margin: .5rem 0 0; padding-left: 1.4rem; font-family: var(--mono); font-size: .84rem; }
+/* middle: outlined, same ink, no fill */
+.move-group li.slower .san { font-weight: 400; }
+.move-group li.slower .badge { color: var(--ink-soft); border: 1px solid var(--rule); }
+
+/* bottom: faded and struck through */
+.move-group li.dead .san {
+  color: var(--ink-faint); font-weight: 400;
+  text-decoration: line-through; text-decoration-thickness: 1px;
+}
+.move-group li.dead .badge { color: var(--ink-faint); }
+
+#lines { margin: .5rem 0 0; padding-left: 1.4rem; font-family: var(--mono); font-size: var(--f1); }
 #lines li { padding: .1rem 0; }
 #btn-export-pgn { align-self: flex-start; }
 
 .primer {
-  border-top: 1px solid var(--rule); padding-top: .9rem; font-size: .86rem; color: var(--ink-soft);
+  border-top: 1px solid var(--rule); padding-top: .9rem; font-size: var(--f2); color: var(--ink-soft);
 }
 .primer summary { cursor: pointer; color: var(--ink); font-weight: 600; }
 .primer p { max-width: 62ch; }
@@ -177,54 +307,57 @@ label.inline { display: inline-flex; align-items: center; gap: .35rem; color: va
 
 #material-list, #mine-results, #material-samples { list-style: none; padding: 0; margin: .75rem 0 0; }
 #material-list li, #mine-results li, #material-samples li {
-  border: 1px solid var(--rule); border-radius: 5px; background: var(--panel);
+  border: 1px solid var(--rule); border-radius: var(--r); background: var(--panel);
   padding: .4rem .65rem; margin-bottom: .3rem; cursor: pointer;
-  font-family: var(--mono); font-size: .82rem;
+  font-family: var(--mono); font-size: var(--f1);
 }
 #material-list li:hover, #mine-results li:hover, #material-samples li:hover { border-color: var(--accent); }
-#material-list li[aria-selected="true"] { border-color: var(--accent); background: var(--accent-soft); }
+#material-list li[aria-selected="true"] { border-color: var(--rule-strong); background: var(--sunk); font-weight: 600; }
 #material-list .name { font-weight: 650; }
 #material-list .meta { color: var(--ink-soft); }
 
 .stats-head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
-.stats-head h2 { font-family: var(--mono); font-size: 1.15rem; font-weight: 650; }
-.stats-head .sub { color: var(--ink-soft); font-size: .85rem; }
+.stats-head h2 { font-family: var(--mono); font-size: var(--f4); font-weight: 650; }
+.stats-head .sub { color: var(--ink-soft); font-size: var(--f2); }
 
 .tiles { display: flex; flex-wrap: wrap; gap: .5rem; margin: .9rem 0 0; }
 .tile {
-  border: 1px solid var(--rule); border-radius: 5px; background: var(--panel);
+  border: 1px solid var(--rule); border-radius: var(--r); background: var(--panel);
   padding: .45rem .7rem; min-width: 8.5rem;
 }
-.tile .k { display: block; font-size: .7rem; letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
-.tile .v { font-family: var(--mono); font-size: .95rem; font-variant-numeric: tabular-nums; }
+.tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+.tile .v { font-family: var(--mono); font-size: var(--f3); font-variant-numeric: tabular-nums; }
 
 .chart { margin: 1.4rem 0 0; }
 .chart > .eyebrow + .hint { margin-bottom: .5rem; }
-.hist { display: grid; grid-template-columns: auto 1fr auto; gap: .18rem .6rem; align-items: center; margin-top: .55rem; }
-.hist .k, .hist .v { font-family: var(--mono); font-size: .78rem; font-variant-numeric: tabular-nums; }
+.hist { display: grid; grid-template-columns: auto 1fr auto; gap: .18rem var(--s2); align-items: center; margin-top: .55rem; }
+.hist .k, .hist .v { font-family: var(--mono); font-size: var(--f1); font-variant-numeric: tabular-nums; }
 .hist .k { color: var(--ink-soft); text-align: right; white-space: nowrap; }
 .hist .v { text-align: right; }
 .hist .bar { background: var(--sunk); border-radius: 2px; height: .72rem; overflow: hidden; }
-.hist .bar > i { display: block; height: 100%; background: var(--accent); min-width: 1px; }
-.hist .bar.wtm > i { background: var(--ink-soft); }
+/* Two luminance levels, not two hues -- black-to-move and white-to-move are
+   the two sides of the game, the same reasoning as the move list above. The
+   accent is reserved for links and focus. */
+.hist .bar > i { display: block; height: 100%; background: var(--ink); min-width: 1px; }
+.hist .bar.wtm > i { background: var(--ink-faint); }
 
-.chart-legend { display: flex; gap: .9rem; flex-wrap: wrap; margin-top: .5rem;
-                font-size: .76rem; color: var(--ink-soft); }
-.chart-legend span { display: inline-flex; align-items: center; gap: .35rem; }
-.chart-legend i { width: .8rem; height: .55rem; border-radius: 2px; background: var(--accent); }
-.chart-legend i.wtm { background: var(--ink-soft); }
+.chart-legend { display: flex; gap: .9rem; flex-wrap: wrap; margin-top: var(--s2);
+                font-size: var(--f0); color: var(--ink-soft); }
+.chart-legend span { display: inline-flex; align-items: center; gap: var(--s1); }
+.chart-legend i { width: .8rem; height: .55rem; border-radius: 2px; background: var(--ink); }
+.chart-legend i.wtm { background: var(--ink-faint); }
 
 /* ---------- search ---------- */
 
 #panel-mine { max-width: 900px; }
 #mine-form {
-  display: flex; flex-wrap: wrap; align-items: end; gap: .6rem 1rem;
-  margin: 1rem 0 0; padding: .85rem 1rem; background: var(--panel);
-  border: 1px solid var(--rule); border-radius: 6px;
+  display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2) var(--s3);
+  margin: var(--s3) 0 0; padding: .85rem var(--s3); background: var(--panel);
+  border: 1px solid var(--rule); border-radius: var(--r);
 }
 #mine-form label { display: flex; flex-direction: column; gap: .2rem;
-                   font-size: .78rem; color: var(--ink-soft); }
-#mine-form input { width: 6.5rem; font-family: var(--mono); font-size: .85rem; }
+                   font-size: var(--f1); color: var(--ink-soft); }
+#mine-form input { width: 6.5rem; font-family: var(--mono); font-size: var(--f2); }
 #mine-form input[name="material"] { width: 9rem; }
 #mine-form button { align-self: end; }
 #panel-mine .row { margin-top: .75rem; }
@@ -240,3 +373,10 @@ label.inline { display: inline-flex; align-items: center; gap: .35rem; color: va
    The title attribute carries the explanation; this just makes the option
    findable at a glance. */
 #mine-form select[multiple] option.theme-answers-saturated { font-style: italic; }
+
+#mine-results li { display: flex; align-items: baseline; gap: var(--s2); }
+#mine-results li .idx {
+  color: var(--ink-faint); font-variant-numeric: tabular-nums;
+  min-width: 2.5ch; text-align: right; flex: none;
+}
+#mine-results li .fen { overflow-wrap: anywhere; }

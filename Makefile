@@ -70,7 +70,19 @@ test-cli: build
 	ctest --test-dir $(BUILD) --output-on-failure -R "^cli_"
 test-api:
 	python -m pytest src/packages/api/tests -v
+# The UI fixture serves the INSTALLED helpmate_web package, not the source
+# tree (conftest.py starts uvicorn, which imports it from site-packages), and
+# the wheel is a copy rather than an editable install. Without this refresh a
+# regression in the dashboard passes silently against a stale copy -- a new
+# test would fail loudly, but an old one would keep passing on old assets.
+# GIT_CONFIG_GLOBAL=/dev/null: this machine's gitconfig rewrites HTTPS to SSH,
+# and a stray fetch hangs on an invisible passphrase prompt.
+# This install is a real side effect on whatever Python this runs under: fine
+# in CI and in a venv, but on a PEP-668 externally-managed Python outside a
+# venv it now hard-fails where it previously just ran the (possibly stale)
+# suite -- run this target inside a venv on such a system.
 test-web: jstest
+	GIT_CONFIG_GLOBAL=/dev/null python -m pip install -q ./src/packages/web
 	python -m pytest src/packages/web/tests/ui -v
 test-bindings:
 	python -m pytest src/packages/bindings/tests -v

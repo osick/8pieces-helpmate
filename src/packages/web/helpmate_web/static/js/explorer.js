@@ -10,6 +10,7 @@ import { encodeState, decodeState } from "./lib/state.js";
 import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
 import { themeSummary } from "./lib/themes.js";
+import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
@@ -57,10 +58,69 @@ function syncControls(fen) {
   document.getElementById("stm-select").value = splitFen(fen).stm;
 }
 
+// #move-list is a <div> of <section class="move-group">, not a <ul>. Seven UI
+// tests use `#move-list li` as their "the page is ready" idiom and two COUNT
+// it, so a group header must never be an <li> -- it is the section's <h3>,
+// outside the <ul>. `#move-list li` then still selects exactly the move rows.
+function renderMoveList(el, moves) {
+  el.textContent = "";
+  const groups = groupMoves(moves);
+  if (!groups.length) {
+    // A mated or stalemated position has no legal moves. Say so as prose: an
+    // <li> here would be counted as a move by every selector above.
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.textContent = "no legal moves — this position is mate or stalemate";
+    el.appendChild(p);
+    return;
+  }
+  for (const g of groups) {
+    const sec = document.createElement("section");
+    sec.className = "move-group";
+    sec.dataset.group = g.key;
+
+    const h = document.createElement("h3");
+    h.className = "eyebrow";
+    h.append(g.label, " ");
+    const n = document.createElement("span");
+    n.className = "n";
+    n.textContent = g.moves.length;
+    h.appendChild(n);
+
+    const ul = document.createElement("ul");
+    for (const m of g.moves) {
+      const li = document.createElement("li");
+      li.className = moveClass(m);
+      li.dataset.san = m.san;
+      const san = document.createElement("span");
+      san.className = "san";
+      san.textContent = m.san;
+      const badge = document.createElement("span");
+      badge.className = "badge";
+      badge.textContent = moveBadge(m);
+      li.append(san, badge);
+      // Every row is clickable, including the dead ones: walking into a
+      // position with no helpmate is a legitimate thing to want to look at,
+      // and that is the behaviour the list has today.
+      li.addEventListener("click", () => { history.push(current); render(m.fen); });
+      ul.appendChild(li);
+    }
+    sec.append(h, ul);
+    el.appendChild(sec);
+  }
+}
+
 async function render(fen, { push = true, retries = 0 } = {}) {
   const seq = ++renderSeq;
   current = fen;
   syncControls(fen);
+  // Reference material is for a newcomer meeting the landing position; once
+  // the user has a position of their own it gets out of the way. The
+  // benchmark does the same with its About/Download copy, and the reasoning
+  // is the same: a published tool explains itself, then stops talking.
+  const landing = fen === START;
+  document.getElementById("explorer-help").hidden = !landing;
+  document.getElementById("primer").hidden = !landing;
   // A hand-typed FEN may be malformed (wrong rank count, stray characters).
   // cm-chessboard's own FEN parser rejects that -- setPosition is `async`, so
   // the rejection surfaces on the returned promise, not as a synchronous
@@ -127,9 +187,18 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   const b = res.body;
   lastMoves = b.moves;
   summary.classList.toggle("muted", b.solvable === false);
+  // b.count is min(255, sum of the optimal children's counts), so the moment
+  // any child badge below reads "255+ ways" this position's own count is
+  // guaranteed to have saturated too -- a bare "255 optimal line(s)" here
+  // would present that ceiling as a measurement, inches above badges that
+  // correctly say otherwise. COUNT_SAT is the one source of truth for the
+  // ceiling; no second 255 literal.
+  const lines = b.count >= COUNT_SAT
+    ? `${COUNT_SAT}+ optimal lines`
+    : `${b.count} optimal line(s)`;
   summary.textContent = b.solvable === false
     ? "no helpmate from this position"
-    : `dtm ${b.dtm} (${b.notation}) · ${b.count} optimal line(s)` +
+    : `dtm ${b.dtm} (${b.notation}) · ${lines}` +
       (b.flipped ? " · colors flipped" : "");
 
   if (b.solvable !== false) {
@@ -144,19 +213,7 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     }).catch(() => { /* annotation is a nicety; never break the board on it */ });
   }
 
-  for (const m of b.moves) {
-    const li = document.createElement("li");
-    li.textContent = m.solvable ? `${m.san} → ${m.notation}` : `${m.san} → –`;
-    li.className = m.optimal ? "optimal" : (m.solvable ? "" : "dead");
-    li.dataset.san = m.san;
-    li.addEventListener("click", () => { history.push(current); render(m.fen); });
-    moveList.appendChild(li);
-  }
-  if (!b.moves.length) {
-    const li = document.createElement("li");
-    li.className = "dead"; li.textContent = "no legal moves";
-    moveList.appendChild(li);
-  }
+  renderMoveList(moveList, b.moves);
 
   if (b.solvable !== false) {
     try {
