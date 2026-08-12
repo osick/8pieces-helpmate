@@ -11,6 +11,8 @@ import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
 import { themeSummary } from "./lib/themes.js";
 import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
+import { renderStats } from "./stats-view.js";
+import { showPanel } from "./panels.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
@@ -33,6 +35,38 @@ const history = [];
 // trusts, so a stale overwrite there would let the user "play" a move that
 // no longer applies to the position on the board.
 let renderSeq = 0;
+
+// The material whose statistics the band is showing, and the payloads we have
+// already fetched. Walking a game keeps the same material until a capture or
+// a promotion, so this is a cache with a very high hit rate, not an
+// optimisation for its own sake.
+let bandMaterial = null;
+const statsCache = new Map();
+
+async function showTableStats(material) {
+  const band = document.getElementById("table-stats");
+  const body = document.getElementById("table-stats-body");
+  if (!material) { band.hidden = true; bandMaterial = null; return; }
+  if (material === bandMaterial) return;
+  bandMaterial = material;
+  band.hidden = false;
+  band.dataset.material = material;
+
+  if (!statsCache.has(material)) {
+    try {
+      const res = await api.stats(material);
+      // A 202 means the table is still downloading. The band is context, not
+      // an answer; it stays quiet rather than starting a second poll loop
+      // beside the one render() is already running for this position.
+      if (res.status !== 200) { band.hidden = true; bandMaterial = null; return; }
+      statsCache.set(material, res.body);
+    } catch {
+      band.hidden = true; bandMaterial = null; return;   // never break the board on context
+    }
+  }
+  if (bandMaterial !== material) return;                 // superseded while awaiting
+  renderStats(body, statsCache.get(material), { idPrefix: "tbl-", samples: false });
+}
 
 function showError(err) {
   const el = document.getElementById("error-banner");
@@ -154,6 +188,7 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     summary.classList.add("muted");
     clearBanner();
     lastMoves = [];
+    showTableStats(null);
     return;
   }
 
@@ -186,6 +221,7 @@ async function render(fen, { push = true, retries = 0 } = {}) {
 
   const b = res.body;
   lastMoves = b.moves;
+  showTableStats(b.material);
   summary.classList.toggle("muted", b.solvable === false);
   // b.count is min(255, sum of the optimal children's counts), so the moment
   // any child badge below reads "255+ ways" this position's own count is
@@ -289,6 +325,7 @@ function setArmed(piece, { commit = true } = {}) {
     const linesEl = document.getElementById("lines");
     linesEl.textContent = ""; linesEl.dataset.lines = "[]";
     lastMoves = [];
+    showTableStats(null);
   }
 }
 
@@ -416,6 +453,14 @@ export function initExplorer() {
     a.download = "helpmate.pgn";
     a.click();
     URL.revokeObjectURL(a.href);
+  });
+  document.getElementById("btn-open-material").addEventListener("click", () => {
+    const material = document.getElementById("table-stats").dataset.material;
+    if (!material) return;
+    location.hash = encodeState({ fen: current, panel: "materials" });
+    showPanel("materials");
+    const li = document.querySelector(`#material-list li[data-material="${material}"]`);
+    if (li) li.click();
   });
   window.addEventListener("hashchange", () => {
     const { fen } = decodeState(location.hash);

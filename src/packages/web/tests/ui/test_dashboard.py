@@ -543,6 +543,46 @@ def test_the_board_stays_put_while_the_readout_scrolls(page, server):
     assert after >= -1, "the board is above the viewport"
 
 
+def test_the_explorer_shows_the_table_this_position_came_from(page, server):
+    page.goto(server)
+    page.wait_for_selector("#table-stats .stats-head")
+    assert "KQvk" in page.inner_text("#table-stats .stats-head")
+    # its own ids, so the Materials panel's charts stay uniquely selectable
+    assert page.eval_on_selector_all("#tbl-dtm-hist", "e => e.length") == 1
+    assert page.eval_on_selector_all("#dtm-hist", "e => e.length") == 0
+    # and no sample list -- the explorer already is a position
+    assert page.eval_on_selector_all("#tbl-material-samples", "e => e.length") == 0
+
+
+def test_the_table_band_is_not_refetched_while_the_material_holds(page, server):
+    page.goto(server)
+    page.wait_for_selector("#table-stats .stats-head")
+    # Match /v1/materials/<name>/stats only. A bare "/stats" would also match
+    # the corpus aggregate, which initMaterials() requests on load -- an async
+    # call that can land after this patch and turn the test flaky.
+    page.evaluate("""() => {
+      window.__statsCalls = 0;
+      const orig = window.fetch;
+      window.fetch = (...a) => {
+        if (/\\/v1\\/materials\\/[^/]+\\/stats/.test(String(a[0]))) window.__statsCalls++;
+        return orig(...a);
+      };
+    }""")
+    page.click("#move-list li.optimal")
+    page.wait_for_function(
+        "document.getElementById('position-summary').textContent.includes('dtm')")
+    assert page.evaluate("window.__statsCalls") == 0, "refetched the same material"
+
+
+def test_the_table_band_opens_the_material(page, server):
+    page.goto(server)
+    page.wait_for_selector("#table-stats .stats-head")
+    page.click("#btn-open-material")
+    page.wait_for_selector("#panel-materials:not([hidden])")
+    assert page.get_attribute(
+        "#material-list li[data-material=KQvk]", "aria-selected") == "true"
+
+
 def test_the_rail_matches_the_readout_height_on_a_tall_move_list(page, server):
     # Fix round 1 / C2 regression: #panel-explorer is a grid with
     # `align-items: start` (pre-fix), so .rail/.board-col sized itself to its
