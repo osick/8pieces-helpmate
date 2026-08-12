@@ -42,3 +42,9 @@ def test_corrupt_table_500_envelope(tmp_path):
     r = c.get("/v1/materials/KQvk/stats")
     assert r.status_code == 500
     assert r.json()["error"]["code"] == "internal"
+
+def test_health_reports_the_mine_timeout_budget(client):
+    # The search screen counts up against this budget, so it must not be a
+    # number hardcoded in JavaScript.
+    body = client.get("/v1/health").json()
+    assert body["mine_timeout"] == 30.0

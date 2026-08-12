@@ -24,7 +24,21 @@ def _free_port():
 
 
 @pytest.fixture(scope="session")
-def server(tables):
+def empty_tables(tmp_path_factory):
+    """A tables dir with nothing in it -- the state of every fresh install.
+
+    The dashboard's first-run screen is not a hypothetical: it is what
+    someone who has just installed the server and not yet generated a table
+    sees, so it gets a fixture of its own rather than being reasoned about.
+    """
+    return str(tmp_path_factory.mktemp("uitables_empty"))
+
+
+# A uvicorn serving the installed helpmate-server against `tables`, as a
+# generator so each fixture below can `yield from` it: two session-scoped
+# servers (a populated corpus and an empty one) with one copy of the
+# start/wait/terminate dance between them.
+def _serve(tables):
     port = _free_port()
     log = tempfile.TemporaryFile(mode="w+")
     p = subprocess.Popen(
@@ -55,6 +69,16 @@ def server(tables):
         p.kill()
         p.wait()
     log.close()
+
+
+@pytest.fixture(scope="session")
+def server(tables):
+    yield from _serve(tables)
+
+
+@pytest.fixture(scope="session")
+def empty_server(empty_tables):
+    yield from _serve(empty_tables)
 
 
 @pytest.fixture(scope="session")

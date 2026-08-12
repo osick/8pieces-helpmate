@@ -5,16 +5,25 @@ import {
   PromotionDialog,
   PROMOTION_DIALOG_RESULT_TYPE,
 } from "../vendor/cm-chessboard/extensions/promotion-dialog/PromotionDialog.js";
+import { MOVE_CANCELED_REASON } from "../vendor/cm-chessboard/view/VisualMoveInput.js";
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { encodeState, decodeState } from "./lib/state.js";
 import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
 import { themeSummary } from "./lib/themes.js";
 import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
+import { renderStats } from "./stats-view.js";
+import { showPanel } from "./panels.js";
+import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
 const PALETTE = ["wk", "wq", "wr", "wb", "wn", "wp", "bk", "bq", "br", "bb", "bn", "bp"];
+// The fourth arming state. A piece name places, "" erases, null plays -- and
+// this drags what is already on the board. It is a distinct value rather than
+// a flag because click-to-place and drag-to-rearrange both bind pointerdown,
+// so exactly one of them may be live at a time.
+const ARRANGE = "arrange";
 
 let board = null;
 let current = START;
@@ -23,6 +32,16 @@ let lastMoves = [];      // the move list from the last /v1/moves call, for drag
 // the board is in play mode (drag = play a move). Editing and playing are
 // mutually exclusive on the same pointer, so arming swaps the board's input.
 let armed = null;
+// `current` as it stood when the present edit session began, or null when no
+// session is open. Every placement path (palette drop, click-to-place,
+// Arrange, Clear board, the side-to-move select) writes the new FEN straight
+// into `current`, so `current` cannot also serve as the "what did we start
+// from" baseline -- comparing the committed FEN against it was always false,
+// which is why an edit never reached the hash or the history. Capturing the
+// baseline once, when the session opens, is the smallest thing that survives
+// however many placements happen in between, and it is also the value Back
+// has to return to.
+let editBaseline = null;
 const history = [];
 
 // Monotonic token guarding render(): every call captures its own seq at
@@ -33,6 +52,74 @@ const history = [];
 // trusts, so a stale overwrite there would let the user "play" a move that
 // no longer applies to the position on the board.
 let renderSeq = 0;
+
+// The material whose statistics the band is showing, and the payloads we have
+// already fetched. Walking a game keeps the same material until a capture or
+// a promotion, so this is a cache with a very high hit rate, not an
+// optimisation for its own sake.
+let bandMaterial = null;
+const statsCache = new Map();
+
+async function showTableStats(material) {
+  const band = document.getElementById("table-stats");
+  const body = document.getElementById("table-stats-body");
+  // Retire the band, but only if it is still OUR band: a failure path that
+  // fires after the user has moved on belongs to a material nobody is
+  // looking at any more, and hiding the band then would blank the CURRENT
+  // material's context with nothing to restore it. Same guard the success
+  // path below applies before it renders.
+  const retire = () => {
+    if (bandMaterial !== material) return;
+    band.hidden = true;
+    bandMaterial = null;
+  };
+  if (!material) { band.hidden = true; bandMaterial = null; return; }
+  if (material === bandMaterial) return;
+  bandMaterial = material;
+  band.hidden = false;
+  band.dataset.material = material;
+
+  if (!statsCache.has(material)) {
+    // materials.js's showStats() sets the same precedent: write a placeholder
+    // before the await, not after. Without this the PREVIOUS material's
+    // rendered chart -- headed by the previous material's name -- stays on
+    // screen for the entire fetch, under a band whose dataset.material has
+    // already flipped to the new one.
+    body.textContent = "";
+    const loading = document.createElement("p");
+    loading.className = "empty";
+    loading.textContent = `Loading ${material}…`;
+    body.appendChild(loading);
+    try {
+      const res = await api.stats(material);
+      // A 202 means the table is still downloading. The band is context, not
+      // an answer; it stays quiet rather than starting a second poll loop
+      // beside the one render() is already running for this position.
+      if (res.status !== 200) { retire(); return; }
+      statsCache.set(material, res.body);
+    } catch {
+      retire(); return;                                  // never break the board on context
+    }
+  }
+  if (bandMaterial !== material) return;                 // superseded while awaiting
+  renderStats(body, statsCache.get(material), { idPrefix: "tbl-", samples: false });
+}
+
+// initMaterials() populates #material-list asynchronously and signals
+// completion by setting window.__materialsReady = true -- the same flag
+// three existing UI tests already poll for this purpose. #btn-open-material
+// can be clicked before that fetch resolves (a slow /v1/materials on the
+// real 295-table corpus, or simply a click during first paint), and the
+// list it queries would still be empty; wait for the existing signal rather
+// than querying too early and silently selecting nothing.
+function whenMaterialsReady() {
+  if (window.__materialsReady === true) return Promise.resolve();
+  return new Promise((resolve) => {
+    const id = setInterval(() => {
+      if (window.__materialsReady === true) { clearInterval(id); resolve(); }
+    }, 20);
+  });
+}
 
 function showError(err) {
   const el = document.getElementById("error-banner");
@@ -154,6 +241,7 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     summary.classList.add("muted");
     clearBanner();
     lastMoves = [];
+    showTableStats(null);
     return;
   }
 
@@ -186,6 +274,7 @@ async function render(fen, { push = true, retries = 0 } = {}) {
 
   const b = res.body;
   lastMoves = b.moves;
+  showTableStats(b.material);
   summary.classList.toggle("muted", b.solvable === false);
   // b.count is min(255, sum of the optimal children's counts), so the moment
   // any child badge below reads "255+ ways" this position's own count is
@@ -238,13 +327,78 @@ async function render(fen, { push = true, retries = 0 } = {}) {
 // user leaves edit mode, not on every click.
 function commitBoard() {
   const fen = withPlacement(current, board.getPosition());
+  // The position this edit session started from -- NOT `current`, which every
+  // placement has already advanced to the edited FEN.
+  const before = editBaseline;
+  editBaseline = null;
   // Arming and disarming without touching a square must not cost a request
-  // or leave a duplicate entry for Back to walk through. `current` already
-  // tracks each placement, so an unchanged FEN means nothing was edited --
-  // but the panel still has to be redrawn, because entering edit mode
-  // retired the previous value.
-  if (fen !== current) history.push(current);
-  render(fen, { push: fen !== current });
+  // or leave a duplicate entry for Back to walk through -- but the panel
+  // still has to be redrawn, because entering edit mode retired the previous
+  // value. An edit that DID change something is a position in its own right:
+  // it goes into the hash (so a copied link reopens it) and onto the history
+  // stack (so Back returns to what the user started from).
+  const changed = before === null || fen !== before;
+  if (changed && before !== null) history.push(before);
+  render(fen, { push: changed });
+}
+
+// Dragging a piece out of the palette and onto a square. cm-chessboard has no
+// notion of an external drag source, so this is ours: capture the pointer,
+// carry a ghost, and ask the document what is under the pointer on release.
+// The board's own data-square attributes do the hit testing, so orientation
+// and the coordinate frame need no arithmetic here.
+function enablePaletteDrag(btn, piece) {
+  btn.addEventListener("pointerdown", (down) => {
+    if (down.button !== 0) return;
+    const from = { x: down.clientX, y: down.clientY };
+    let ghost = null;
+
+    const move = (e) => {
+      if (!ghost) {
+        if (!exceedsDragThreshold(from, { x: e.clientX, y: e.clientY })) return;
+        // Past the threshold this is a drag, so arm the piece (which puts the
+        // board in edit mode) and stop the click handler from also firing.
+        if (armed !== piece) setArmed(piece);
+        ghost = btn.cloneNode(true);
+        ghost.className = "drag-ghost";
+        ghost.removeAttribute("id");
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = `${e.clientX - 20}px`;
+      ghost.style.top = `${e.clientY - 20}px`;
+    };
+
+    const up = (e) => {
+      btn.removeEventListener("pointermove", move);
+      btn.removeEventListener("pointerup", up);
+      btn.removeEventListener("pointercancel", up);
+      if (!ghost) return;                       // it was a click; let click handle it
+      ghost.remove();
+      ghost = null;
+      // A pointercancel is not a completed drag -- nothing was dropped, and
+      // per spec a cancel never produces a click, so there is no click to
+      // suppress. Setting the flag anyway would leave it stuck forever
+      // (only a click clears it), silently swallowing the user's next tap
+      // on this button. A cancel can happen for reasons that have nothing
+      // to do with us (e.g. the browser reclaiming the gesture for a page
+      // scroll), so this path has to stay inert rather than guess at where
+      // the pointer ended up.
+      if (e.type === "pointercancel") return;
+      btn.dataset.dragged = "1";
+      const square = squareFromTarget(document.elementFromPoint(e.clientX, e.clientY));
+      if (!square) return;                      // dropped off the board: no-op
+      board.setPiece(square, piece).then(() => {
+        const fen = withPlacement(current, board.getPosition());
+        current = fen;
+        syncControls(fen);
+      });
+    };
+
+    btn.setPointerCapture(down.pointerId);
+    btn.addEventListener("pointermove", move);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointercancel", up);
+  });
 }
 
 function onSquareClick(event) {
@@ -267,28 +421,44 @@ function setArmed(piece, { commit = true } = {}) {
   for (const btn of document.querySelectorAll("#palette button"))
     btn.setAttribute("aria-pressed", String(btn.dataset.piece === piece && piece !== null));
 
+  const done = document.getElementById("btn-done-editing");
+
+  // Exactly one input binding is live at a time. Rebinding unconditionally is
+  // cheaper to reason about than working out which transitions need which
+  // call, and cm-chessboard's disable* calls are safe when nothing is bound.
+  board.disableSquareSelect(POINTER_EVENTS.pointerdown);
+  board.disableMoveInput();
+
   if (armed === null) {
-    if (wasEditing) {
-      board.disableSquareSelect(POINTER_EVENTS.pointerdown);
-      enableDragToPlay();
-      if (commit) commitBoard();
-    }
+    enableDragToPlay();
+    done.hidden = true;
+    if (wasEditing && commit) commitBoard();
+    // `commit: false` means something else is about to set the position: drop
+    // the baseline unconditionally so it can never leak into a later session.
+    editBaseline = null;
     return;
   }
+
+  if (armed === ARRANGE) enableDragToEdit();
+  else board.enableSquareSelect(POINTER_EVENTS.pointerdown, onSquareClick);
+  done.hidden = false;
+
   if (!wasEditing) {
-    board.disableMoveInput();
-    board.enableSquareSelect(POINTER_EVENTS.pointerdown, onSquareClick);
+    // The session opens here, so this is the last moment `current` still
+    // holds the position the user is editing away from.
+    editBaseline = current;
     // The previous position's value belongs to a position that no longer
     // exists. Leaving it on screen while pieces move around would present a
     // stale dtm as the current one; say what is happening instead.
     const summary = document.getElementById("position-summary");
-    summary.textContent = "editing — click the armed piece again to evaluate";
+    summary.textContent = "editing — press Done to evaluate";
     summary.classList.add("muted");
     document.getElementById("position-themes").textContent = "";
     document.getElementById("move-list").textContent = "";
     const linesEl = document.getElementById("lines");
     linesEl.textContent = ""; linesEl.dataset.lines = "[]";
     lastMoves = [];
+    showTableStats(null);
   }
 }
 
@@ -309,12 +479,19 @@ function buildPalette() {
     btn.appendChild(svg);
     // Clicking the armed piece again puts the board back in play mode, so a
     // round trip through the palette is never needed to resume exploring.
-    btn.addEventListener("click", () => setArmed(armed === piece ? null : piece));
+    btn.addEventListener("click", () => {
+      if (btn.dataset.dragged === "1") { delete btn.dataset.dragged; return; }
+      setArmed(armed === piece ? null : piece);
+    });
+    enablePaletteDrag(btn, piece);
     box.appendChild(btn);
   }
   const erase = document.getElementById("btn-erase");
   erase.setAttribute("aria-pressed", "false");
   erase.addEventListener("click", () => setArmed(armed === "" ? null : ""));
+  const arrange = document.getElementById("btn-arrange");
+  arrange.setAttribute("aria-pressed", "false");
+  arrange.addEventListener("click", () => setArmed(armed === ARRANGE ? null : ARRANGE));
   document.getElementById("btn-clear-board").addEventListener("click", () => {
     board.setPosition(EMPTY_PLACEMENT, false).then(() => {
       const fen = composeFen(EMPTY_PLACEMENT, splitFen(current).stm);
@@ -326,6 +503,28 @@ function buildPalette() {
 }
 
 // ---- board input -----------------------------------------------------
+
+// While editing, a drag means "move this piece there" (any square, legal or
+// not) and a drag off the board means "remove it". cm-chessboard raises both;
+// we simply stopped ignoring them.
+function enableDragToEdit() {
+  board.enableMoveInput((event) => {
+    if (event.type === INPUT_EVENT_TYPE.validateMoveInput) return true;
+    if (event.type === INPUT_EVENT_TYPE.moveInputCanceled
+        && event.reason === MOVE_CANCELED_REASON.movedOutOfBoard) {
+      board.setPiece(event.squareFrom, null).then(syncFromBoard);
+      return;
+    }
+    if (event.type === INPUT_EVENT_TYPE.moveInputFinished) syncFromBoard();
+    return true;
+  });
+}
+
+function syncFromBoard() {
+  const fen = withPlacement(current, board.getPosition());
+  current = fen;
+  syncControls(fen);
+}
 
 function enableDragToPlay() {
   // Dragging a piece plays the corresponding legal move, when there is one.
@@ -408,6 +607,7 @@ export function initExplorer() {
     const prev = history.pop();
     if (prev) render(prev);
   });
+  document.getElementById("btn-done-editing").addEventListener("click", () => setArmed(null));
   document.getElementById("btn-export-pgn").addEventListener("click", () => {
     const lines = JSON.parse(document.getElementById("lines").dataset.lines || "[]");
     const blob = new Blob([toPgn(current, lines)], { type: "application/x-chess-pgn" });
@@ -416,6 +616,15 @@ export function initExplorer() {
     a.download = "helpmate.pgn";
     a.click();
     URL.revokeObjectURL(a.href);
+  });
+  document.getElementById("btn-open-material").addEventListener("click", async () => {
+    const material = document.getElementById("table-stats").dataset.material;
+    if (!material) return;
+    location.hash = encodeState({ fen: current, panel: "materials" });
+    showPanel("materials");
+    await whenMaterialsReady();
+    const li = document.querySelector(`#material-list li[data-material="${material}"]`);
+    if (li) li.click();
   });
   window.addEventListener("hashchange", () => {
     const { fen } = decodeState(location.hash);

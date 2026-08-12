@@ -74,6 +74,14 @@
   /* Instruments have small radii: lichess ships 7px, Primer 6px. */
   --r: 6px;
 
+  /* Grey is what you manipulate, white is what the tables say. Aliases, not
+     new values: --panel (#262421) sits ABOVE --ground (#161512) in dark mode,
+     so the rail recedes and the readout advances in BOTH themes rather than
+     inverting. Defining them here and nowhere else means the dark blocks
+     below need no counterpart. */
+  --rail: var(--ground);
+  --readout: var(--panel);
+
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -178,35 +186,91 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
   border-radius: var(--r); padding: 1.1rem; margin: .75rem 0 0;
 }
 
+/* ---------- rail and readout ---------- */
+
+/* One card per panel, split into a rail and a readout. No `overflow: hidden`
+   anywhere on this path: it would create a scroll container and silently
+   cancel the rail's `position: sticky`.
+
+   #panel-explorer, #panel-materials and #panel-mine all wrap their children
+   in .rail/.readout, so all three share this border/background. */
+#panel-explorer, #panel-materials, #panel-mine {
+  border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--readout);
+}
+.rail { background: var(--rail); padding: var(--s3); border-radius: var(--r) var(--r) 0 0; }
+/* The panel wrapper already paints --readout underneath, but a computed
+   style of transparent on this element specifically is indistinguishable
+   from a missing surface -- so the readout carries the same token directly,
+   not just its ancestor. */
+.readout { background: var(--readout); padding: var(--s3); }
+
+@media (min-width: 860px) {
+  .rail { border-radius: var(--r) 0 0 var(--r); }
+  .readout { border-left: 1px solid var(--rule); }
+  /* The rounding above assumes the rail reaches the panel's bottom edge, as
+     it does in Materials and Mine. The explorer's table band spans both
+     columns UNDER the rail, so there the rounded bottom-left corner sits in
+     the middle of the panel -- a quarter-circle notch of the readout colour
+     biting into the rail, with the band's own square corner right below it.
+     Only round that corner while the band is hidden, which is exactly when
+     the rail IS the bottom of the panel again. */
+  #panel-explorer:has(> .table-band:not([hidden])) .rail {
+    border-bottom-left-radius: 0;
+  }
+}
+
 /* ---------- explorer ---------- */
 
-/* Mobile is the default; two columns are the enhancement. 460px board +
-   32px gap + 300px minimum side + 40px of main padding = 832, so the two
-   columns need ~840px and the breakpoint sits just above at 860. */
-#panel-explorer { display: flex; flex-direction: column; gap: var(--s4); }
-.board-col { display: flex; flex-direction: column; gap: var(--s3); }
-#board { width: min(88vw, 460px); aspect-ratio: 1; }
+/* Mobile is the default; two columns are the enhancement. The rail's maximum
+   is the board's maximum, so the board can size itself from its column
+   instead of from the viewport -- one rule, and the overlap that two rules
+   produced between 860px and ~1150px is impossible by construction. */
+#panel-explorer { display: flex; flex-direction: column; }
+.board-col { display: flex; flex-direction: column; }
+/* The surface (.rail, full column height) and the sticky element (.board-pin,
+   only as tall as the board + palette) are deliberately different elements.
+   Fix round 1: giving .board-col itself `position: sticky` left it sized to
+   its own content while the grid row's height followed the taller .readout
+   -- a hard colour seam below the board, in both themes, on any move list
+   long enough to make the two columns' heights diverge (the landing
+   position's short list never showed it). .board-pin carries the sticky
+   behaviour at the old, short height; .rail/.board-col stretches to the
+   row's full height (grid's default align-items is stretch; the explicit
+   `align-items: start` that caused this is gone) and its background now
+   covers the seam instead of leaving it to show the readout's colour
+   through. */
+.board-pin { display: flex; flex-direction: column; gap: var(--s3); }
+#board { width: 100%; max-width: 460px; margin-inline: auto; aspect-ratio: 1; }
 .side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
 
 @media (min-width: 860px) {
   #panel-explorer {
     display: grid;
-    grid-template-columns: min(460px, 40%) minmax(300px, 1fr);
-    gap: var(--s4);
-    align-items: start;
+    grid-template-columns: minmax(300px, 460px) minmax(320px, 1fr);
   }
-  /* The board pane stays put and only the answer pane scrolls, so a long
-     move list never drags the board out of view. No sticky headers, no
-     scroll-sync JavaScript. */
-  .board-col { position: sticky; top: var(--s3); }
+  /* .board-pin stays put and only the readout scrolls, so a long move list
+     never drags the board out of view. No sticky headers, no scroll-sync JS.
+     Its containing block for the sticky offset is .rail/.board-col, which is
+     now stretched to the full row height, so the sticking range is the same
+     as when sticky sat directly on the (formerly short) .board-col inside
+     the grid container -- only the element carrying the surface colour
+     changed. */
+  .board-pin { position: sticky; top: var(--s3); }
 }
+
+/* The band spans both columns: it is context for the whole panel, not an
+   answer belonging to the readout. */
+.table-band { padding: var(--s3); border-top: 1px solid var(--rule); }
+@media (min-width: 860px) { .table-band { grid-column: 1 / -1; } }
+.table-band-head { display: flex; align-items: center; gap: var(--s2); }
+.table-band-head .eyebrow { margin-right: auto; }
 
 .palette {
   display: flex; flex-direction: column; gap: var(--s2);
-  border: 1px solid var(--rule); border-radius: var(--r);
-  background: var(--panel); padding: var(--s2) var(--s3);
-  width: min(88vw, 460px);
+  border-top: 1px solid var(--rule); padding-top: var(--s3);
+  width: 100%; max-width: 460px; margin-inline: auto;
 }
 /* Six columns: White on the first row, Black on the second, in the order a
    chess player names them. A wrapping flex row would break 10/2. */
@@ -214,6 +278,12 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 .palette-pieces button {
   width: 2.35rem; height: 2.35rem; padding: .15rem; display: grid; place-items: center;
   background: var(--sunk);
+  /* Without this, a touch drag started on the button can lose the gesture to
+     the browser's own scroll-vs-drag heuristic mid-move -- it wins, fires
+     pointercancel, and our drag never completes. Scoped to these twelve
+     buttons rather than the page, so it costs nothing but the ability to
+     start a page scroll from inside a drag handle. */
+  touch-action: none;
 }
 .palette-pieces button svg { width: 100%; height: 100%; display: block; }
 .palette-actions { display: flex; gap: .4rem; }
@@ -229,6 +299,15 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
   box-shadow: inset 0 0 0 2px var(--ink);
   font-weight: 600;
 }
+
+/* The piece under the pointer during a palette drag. Fixed to the viewport
+   and inert, so elementFromPoint sees the square underneath rather than the
+   ghost itself. */
+.drag-ghost {
+  position: fixed; z-index: 10; width: 2.6rem; height: 2.6rem;
+  pointer-events: none; opacity: .85;
+}
+#btn-done-editing { font-weight: 600; }
 
 #fen-form { display: flex; flex-direction: column; gap: .45rem; }
 #fen-input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
@@ -301,9 +380,52 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 
 /* ---------- materials ---------- */
 
-#panel-materials { display: flex; gap: 2rem; flex-wrap: wrap; align-items: flex-start; }
-.list-col { flex: 0 1 300px; min-width: 260px; }
-.detail-col { flex: 1 1 420px; min-width: 300px; }
+#panel-materials { display: flex; flex-direction: column; }
+.list-col { display: flex; flex-direction: column; }
+/* The surface (.rail/.list-col, full column height) and the sticky element
+   (.materials-pin, only as tall as the filter + list) are deliberately
+   different elements -- the same split #panel-explorer's .board-col /
+   .board-pin uses, and for the same reason (see the Fix round 1 comment at
+   .board-pin above): sticky positioned directly on .list-col left it sized
+   to its own content while the grid row's height followed the taller
+   .readout, so at corpus scale (where the two columns' heights genuinely
+   diverge -- the 2-material fixture never shows it) the exposed strip below
+   the rail read as --readout, not --rail: the wrong surface colour, not an
+   unpainted gap. .materials-pin carries the sticky behaviour at the short
+   height; .list-col stretches to the row's full height (grid's default
+   align-items is stretch) and its background now covers that strip. */
+.materials-pin { display: flex; flex-direction: column; gap: var(--s2); }
+#material-filter { width: 100%; font-size: var(--f2); }
+/* The rail scrolls, so the page height stops being a function of how many
+   tables the server can reach. 295 of them rendered 12,005px tall. */
+#material-list { overflow-y: auto; max-height: 60vh; margin: 0; }
+#material-list li.group {
+  border: 0; background: none; cursor: default; padding: var(--s3) 0 .2rem;
+  font-size: var(--f0); font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-soft);
+}
+#material-list li.all { font-weight: 650; }
+.name-list { list-style: none; padding: 0; margin: var(--s2) 0 0;
+             display: flex; flex-wrap: wrap; gap: .3rem;
+             font-family: var(--mono); font-size: var(--f1); }
+.name-list li { border: 1px solid var(--rule); border-radius: 3px; padding: .1rem .4rem; }
+/* Visible to a screen reader, out of the way of the eye: the filter's
+   placeholder is a hint, not a label. */
+.sr-label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+
+@media (min-width: 860px) {
+  #panel-materials {
+    display: grid; grid-template-columns: minmax(240px, 320px) minmax(320px, 1fr);
+  }
+  /* Its containing block for the sticky offset is .list-col, now stretched
+     to the full row height -- same reasoning as .board-pin's media-query
+     comment above. */
+  .materials-pin { position: sticky; top: var(--s3); }
+  #material-list { max-height: calc(100vh - 12rem); }
+}
 
 #material-list, #mine-results, #material-samples { list-style: none; padding: 0; margin: .75rem 0 0; }
 #material-list li, #mine-results li, #material-samples li {
@@ -315,17 +437,36 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 #material-list li[aria-selected="true"] { border-color: var(--rule-strong); background: var(--sunk); font-weight: 600; }
 #material-list .name { font-weight: 650; }
 #material-list .meta { color: var(--ink-soft); }
+/* .meta's --ink-soft passes against its usual --panel background (5.103:1
+   dark, 5.329:1 light) but the selected row's background is --sunk, and
+   --ink-soft measures 4.275:1 there in dark mode -- below the 4.5:1 AA floor
+   (light is fine at 4.848:1). Same failure class as .tile .k below, and
+   fixed the same way: bump to full --ink only where the sunk fill applies,
+   rather than softening the row's whole selected state. --ink on --sunk
+   measures 6.681:1 dark, 12.881:1 light. */
+#material-list li[aria-selected="true"] .meta { color: var(--ink); }
 
 .stats-head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
 .stats-head h2 { font-family: var(--mono); font-size: var(--f4); font-weight: 650; }
 .stats-head .sub { color: var(--ink-soft); font-size: var(--f2); }
 
 .tiles { display: flex; flex-wrap: wrap; gap: .5rem; margin: .9rem 0 0; }
+/* On the readout these sit on --panel, so a --panel fill would leave them
+   invisible except for their rule. Fill from --sunk and drop the border. */
 .tile {
-  border: 1px solid var(--rule); border-radius: var(--r); background: var(--panel);
+  border-radius: var(--r); background: var(--sunk);
   padding: .45rem .7rem; min-width: 8.5rem;
 }
-.tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
+/* --ink-soft measures 4.275:1 against --sunk in dark mode -- below the 4.5:1
+   AA floor (light is fine at 4.848:1) -- so this is full --ink, not
+   --ink-soft, even though .k reads as the muted eyebrow label above .v's
+   value. That relationship is carried four times over without colour's
+   help: .k is --f0 (12px) vs .v's --f3 (1rem), uppercase vs sentence case,
+   letter-spaced vs not, and sans vs .v's mono -- so colour was a fifth,
+   redundant cue, and it was the one that failed. --ink on --sunk measures
+   6.681:1 dark, 12.881:1 light. Do not "restore" the softer grey here: it
+   silently reintroduces the AA failure with no legibility gained. */
+.tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
 .tile .v { font-family: var(--mono); font-size: var(--f3); font-variant-numeric: tabular-nums; }
 
 .chart { margin: 1.4rem 0 0; }
@@ -347,25 +488,42 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 .chart-legend i { width: .8rem; height: .55rem; border-radius: 2px; background: var(--ink); }
 .chart-legend i.wtm { background: var(--ink-faint); }
 
+/* A ranked list, not a histogram: some data (the ten deepest tables) is too
+   close together in magnitude for a bar's width to carry any signal -- see
+   the comment in stats-view.js at the "Deepest tables" call site. */
+.ranked-list { list-style: none; padding: 0; margin: .55rem 0 0;
+               display: flex; flex-direction: column; gap: 2px; }
+.ranked-list li { display: flex; align-items: baseline; gap: var(--s2); padding: .18rem 0; }
+.ranked-list .rank { font-family: var(--mono); font-size: var(--f0); color: var(--ink-faint);
+                      min-width: 1.4em; text-align: right; }
+.ranked-list .name { font-family: var(--mono); font-size: var(--f1); flex: 1; }
+.ranked-list .v { font-family: var(--mono); font-size: var(--f1);
+                   font-variant-numeric: tabular-nums; color: var(--ink-soft); }
+
 /* ---------- search ---------- */
 
-#panel-mine { max-width: 900px; }
-#mine-form {
-  display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2) var(--s3);
-  margin: var(--s3) 0 0; padding: .85rem var(--s3); background: var(--panel);
-  border: 1px solid var(--rule); border-radius: var(--r);
-}
+#panel-mine { display: flex; flex-direction: column; }
+#mine-form { display: flex; flex-direction: column; margin: 0; border: 0; }
+/* The surface (#mine-form/.rail, full column height) and the sticky element
+   (.mine-pin, only as tall as the form fields) are deliberately different
+   elements -- the same split #panel-explorer's .board-col/.board-pin and
+   #panel-materials' .list-col/.materials-pin use, and for the same reason
+   (see the Fix round 1 comment at .board-pin above): sticky positioned
+   directly on #mine-form/.rail would leave it sized to its own content while
+   the grid row's height followed the taller .readout -- a hard colour seam
+   below the form at corpus scale, in both themes, once a search returns
+   enough rows to out-grow the six-field form (the empty landing state never
+   shows it). .mine-pin carries the sticky behaviour at the short height;
+   #mine-form/.rail stretches to the row's full height (grid's default
+   align-items is stretch) and its background now covers the seam instead of
+   leaving it to show the readout's colour through. */
+.mine-pin { display: flex; flex-direction: column; gap: var(--s2); }
 #mine-form label { display: flex; flex-direction: column; gap: .2rem;
                    font-size: var(--f1); color: var(--ink-soft); }
-#mine-form input { width: 6.5rem; font-family: var(--mono); font-size: var(--f2); }
-#mine-form input[name="material"] { width: 9rem; }
-#mine-form button { align-self: end; }
-#panel-mine .row { margin-top: .75rem; }
-
-/* The theme picker is taller than the numeric inputs beside it, so let it
-   claim its own row rather than stretching the whole form's line height. */
-#mine-form select[multiple] { min-width: 14rem; }
+#mine-form input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
+#mine-form select[multiple] { width: 100%; }
 #mine-form .hint { display: block; opacity: 0.7; font-size: 0.85em; }
+#panel-mine .row { margin-top: .75rem; }
 #position-themes { margin-top: 0.25rem; opacity: 0.85; }
 
 /* Themes whose `needs` isn't "solutions" still answer on positions whose
@@ -373,6 +531,16 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
    The title attribute carries the explanation; this just makes the option
    findable at a glance. */
 #mine-form select[multiple] option.theme-answers-saturated { font-style: italic; }
+
+@media (min-width: 860px) {
+  #panel-mine {
+    display: grid; grid-template-columns: minmax(220px, 300px) minmax(320px, 1fr);
+  }
+  /* Its containing block for the sticky offset is #mine-form/.rail, now
+     stretched to the full row height -- same reasoning as .board-pin's and
+     .materials-pin's media-query comments above. */
+  .mine-pin { position: sticky; top: var(--s3); }
+}
 
 #mine-results li { display: flex; align-items: baseline; gap: var(--s2); }
 #mine-results li .idx {

@@ -39,25 +39,29 @@
 
 <main>
   <section id="panel-explorer">
-    <div class="board-col">
-      <div id="board"></div>
+    <div class="rail board-col">
+      <div class="board-pin">
+        <div id="board"></div>
 
-      <div id="palette" class="palette">
-        <span class="eyebrow">Edit position</span>
-        <div id="palette-pieces" class="palette-pieces"></div>
-        <div class="palette-actions">
-          <button type="button" id="btn-erase" data-piece="">Erase</button>
-          <button type="button" id="btn-clear-board">Clear board</button>
+        <div id="palette" class="palette">
+          <span class="eyebrow">Edit position</span>
+          <div id="palette-pieces" class="palette-pieces"></div>
+          <div class="palette-actions">
+            <button type="button" id="btn-erase" data-piece="">Erase</button>
+            <button type="button" id="btn-arrange" data-piece="arrange">Arrange</button>
+            <button type="button" id="btn-clear-board">Clear board</button>
+            <button type="button" id="btn-done-editing" hidden>Done — evaluate</button>
+          </div>
+          <p id="edit-hint" class="hint">
+            Drag a piece from here onto the board, or pick one and click squares.
+            <b>Arrange</b> drags the pieces already on the board — off the edge
+            removes them.
+          </p>
         </div>
-        <p id="edit-hint" class="hint">
-          Pick a piece, then click squares to place it; <b>Erase</b> empties the
-          squares you click. Click the same palette entry again to stop editing
-          and evaluate the position.
-        </p>
       </div>
     </div>
 
-    <div class="side">
+    <div class="readout side">
       <p class="help" id="explorer-help">
         Drag a piece to play its move, or click one from the list. Moves are
         grouped: the ones that keep the shortest mate first, then those that
@@ -105,45 +109,64 @@
         sound problem; several mean duals. The counter saturates at 255.</p>
       </details>
     </div>
+
+    <section id="table-stats" class="table-band" hidden>
+      <div class="table-band-head">
+        <span class="eyebrow">This table</span>
+        <button type="button" id="btn-open-material">Open in Materials</button>
+      </div>
+      <div id="table-stats-body"></div>
+    </section>
   </section>
 
   <section id="panel-materials" hidden>
-    <div class="list-col">
-      <h2 class="eyebrow">Tables</h2>
-      <p class="help">Every table this server can reach. Pick one to see how its
-      solutions are distributed.</p>
-      <ul id="material-list"></ul>
+    <div class="rail list-col">
+      <div class="materials-pin">
+        <h2 class="eyebrow">Tables</h2>
+        <label class="sr-label" for="material-filter">Filter tables</label>
+        <input id="material-filter" type="search" autocomplete="off" spellcheck="false"
+               placeholder="filter, e.g. kq">
+        <ul id="material-list"></ul>
+      </div>
     </div>
-    <div id="material-stats" class="detail-col"></div>
+    <div id="material-stats" class="readout detail-col"></div>
   </section>
 
   <section id="panel-mine" hidden>
-    <h2 class="eyebrow">Search a material</h2>
-    <p class="help">
-      Find positions by mate length and by the shape of their solution set.
-      <b>starts</b> is how many different first moves the optimal solutions
-      use, <b>ends</b> how many different mating moves they finish on — one
-      start and one end is a clean single-solution problem; four starts
-      converging on one end is a theme.
-    </p>
-    <form id="mine-form">
-      <label>Material <input name="material" required placeholder="KQvk" autocomplete="off"></label>
-      <label>dtm (plies) <input name="dtm" type="number" min="0" required></label>
-      <label>count <input name="count" type="number" min="1" placeholder="any"></label>
-      <label>starts <input name="starts" type="number" min="1" placeholder="any"></label>
-      <label>ends <input name="ends" type="number" min="1" placeholder="any"></label>
-      <label>themes
-        <select id="mine-themes" name="theme" multiple size="6"></select>
-        <small class="hint">optional — a position must show every theme you pick, though not necessarily in the same solution</small>
-      </label>
-      <label>max results <input name="max" type="number" min="1" value="50"></label>
-      <button type="submit">Search</button>
+    <form id="mine-form" class="rail">
+      <div class="mine-pin">
+        <h2 class="eyebrow">Search a material</h2>
+        <label>Material <input name="material" required placeholder="KQvk" autocomplete="off"></label>
+        <label>dtm (plies) <input name="dtm" type="number" min="0" required></label>
+        <label>count <input name="count" type="number" min="1" placeholder="any"></label>
+        <label>starts <input name="starts" type="number" min="1" placeholder="any"></label>
+        <label>ends <input name="ends" type="number" min="1" placeholder="any"></label>
+        <label>themes
+          <select id="mine-themes" name="theme" multiple size="6"></select>
+          <small class="hint">optional — a position must show every theme you pick, though not necessarily in the same solution</small>
+        </label>
+        <label>max results <input name="max" type="number" min="1" value="50"></label>
+        <div class="row">
+          <button type="submit">Search</button>
+          <button type="button" id="btn-stop" hidden>Stop</button>
+        </div>
+      </div>
     </form>
-    <p id="mine-status" class="verdict"></p>
-    <ul id="mine-results"></ul>
-    <div class="row">
-      <button type="button" id="btn-export-fens">Download FENs</button>
-      <button type="button" id="btn-export-csv">Download CSV</button>
+
+    <div class="readout">
+      <p class="help">
+        Find positions by mate length and by the shape of their solution set.
+        <b>starts</b> is how many different first moves the optimal solutions
+        use, <b>ends</b> how many different mating moves they finish on — one
+        start and one end is a clean single-solution problem; four starts
+        converging on one end is a theme.
+      </p>
+      <p id="mine-status" class="verdict"></p>
+      <ul id="mine-results"></ul>
+      <div class="row">
+        <button type="button" id="btn-export-fens">Download FENs</button>
+        <button type="button" id="btn-export-csv">Download CSV</button>
+      </div>
     </div>
   </section>
 </main>

@@ -64,14 +64,24 @@ from a Hugging Face dataset for tables not stored locally) and
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
 
-The same process serves a **web dashboard** at `/` — a responsive,
-two-column explorer with a grouped, sorted move list (Optimal ranked by how
-forcing each move is, then Slower, then No mate; a saturated solution count
-always renders `255+`, never `255`), a material browser with mate-length and
-solution-count histograms, and composition search with the `starts`/`ends`
-shape filters and a theme multi-select. A three-state theme toggle
-(system/light/dark) remembers your choice and applies it before first paint.
-No build step, no CDN: plain ES modules with cm-chessboard vendored.
+The same process serves a **web dashboard** at `/`. Every screen is a grey
+**rail** (what you manipulate) beside a white **readout** (what the tables
+say) — one skeleton, no new colours. The **explorer** has a grouped, sorted
+move list (Optimal ranked by how forcing each move is, then Slower, then No
+mate; a saturated solution count always renders `255+`, never `255`) and a
+statistics band for the table the current position came from. Editing a
+position works by drag — a piece from the palette onto a square, a piece
+already on the board to another square, or off the board to remove it — or by
+**Arrange** plus **Done — evaluate**; click-to-place is unchanged and remains
+the keyboard/touch path. **Materials** lands on **All tables**, the whole
+corpus at once (including materials with no helpmate and the generator
+versions that built them), scrolling and filterable, grouped by piece count;
+selecting one shows its own mate-length and solution-count histograms.
+**Search** has the `starts`/`ends` shape filters, a theme multi-select, a
+**Stop** button, and elapsed time shown against the server's
+`--mine-timeout` budget. A three-state theme toggle (system/light/dark)
+remembers your choice and applies it before first paint. No build step, no
+CDN: plain ES modules with cm-chessboard vendored.
 
 ```bash
 helpmate-server --tables ~/tb --port 8642   # then open http://127.0.0.1:8642/
@@ -342,7 +352,7 @@ result](#two-things-to-know-before-you-trust-a-result) below and
 [USAGE.md](docs/USAGE.md#needs-what-a-theme-actually-reads) for the full
 explanation. `helpmate themes` is the authoritative source for the
 vocabulary and always matches this build exactly; the table below is copied
-verbatim from its real output on this checkout (`helpmate 0.10.0`):
+verbatim from its real output on this checkout (`helpmate 0.11.0`):
 
 | Theme | Needs | Definition |
 |---|---|---|

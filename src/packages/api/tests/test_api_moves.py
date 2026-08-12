@@ -66,9 +66,15 @@ def test_moves_uses_the_color_flip_fallback_like_probe(client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["flipped"] is True
+    assert body["material"] == "KQvk"
     assert body["dtm"] is not None and body["notation"].startswith("h#")
     p = client.get("/v1/probe", params={"fen": fen}).json()
     assert (body["dtm"], body["count"], body["flipped"]) == (p["dtm"], p["count"], p["flipped"])
+
+def test_moves_names_the_table_that_answered(client):
+    r = client.get("/v1/moves", params={"fen": "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"})
+    assert r.status_code == 200
+    assert r.json()["material"] == "KQvk"
 
 def test_a_king_capture_is_reported_not_raised(client):
     # The position editor can build a position where the side NOT to move is

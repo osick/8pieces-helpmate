@@ -137,3 +137,20 @@ test("an empty array param sends no key at all", async () => {
   const url = new URL(String(calls[0]));
   assert.deepEqual(url.searchParams.getAll("theme"), []);
 });
+
+test("an aborted request rethrows AbortError, not a network ApiError", async () => {
+  // The catch around fetch() turns every throw into ApiError(0, "network").
+  // An abort is not a network failure -- the caller asked for it -- and the
+  // search screen has to tell them apart to avoid reporting "cannot reach
+  // the server" every time the user presses Stop.
+  const ctl = new AbortController();
+  global.fetch = () => {
+    const e = new Error("aborted");
+    e.name = "AbortError";
+    return Promise.reject(e);
+  };
+  await assert.rejects(
+    () => getJson("/v1/mine", { material: "KQvk" }, { signal: ctl.signal }),
+    (err) => err.name === "AbortError",
+  );
+});

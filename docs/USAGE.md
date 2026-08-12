@@ -1313,6 +1313,12 @@ server still runs but `/` 404s — pass `--web-root DIR` to serve a dashboard
 checkout from an arbitrary directory instead, or `--no-web` to say
 explicitly that you want the API alone.
 
+Since v0.11.0, every screen is a grey **rail** — the board, the palette, the
+material list, the search form: what you manipulate — beside a white
+**readout** — the move list, the table stats, the results: what the tables
+say. Both surfaces are aliases over the existing palette; no new colours were
+introduced to build the split.
+
 Three screens:
 
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
@@ -1326,12 +1332,23 @@ Three screens:
   showing `themes_note` in place of the list for a color-flipped position
   rather than a blank field. The position is encoded in the URL
   (`/#fen=<urlencoded>`), so every position is a shareable link and the
-  browser's back button walks the history.
+  browser's back button walks the history. Since v0.11.0, a band below the
+  board and the move list shows the statistics of the table that answered the
+  current position (the `material` the API reports — see
+  [`GET /v1/probe`](#get-v1probe) below — which is the mirrored table
+  whenever colours were flipped to find an answer), with a link straight into
+  Materials for that entry.
 - **Materials** — every table the server can reach, with piece count, size and
-  location (`local` / `cached` / `remote`). Selecting one shows where its
-  cells went (solvable / no mate / illegal), a histogram of mate lengths split
-  by side to move, a histogram of how many optimal solutions positions have,
-  and the deepest sample positions — each clickable into the explorer.
+  location (`local` / `cached` / `remote`). Since v0.11.0 the list opens on a
+  pinned **All tables** entry showing the corpus aggregate from
+  [`GET /v1/stats`](#get-v1stats) — including the materials with no helpmate
+  at all and the spread of generator versions that built the corpus — and the
+  rest of the list scrolls inside its rail, filters on a substring of the
+  material name, and is grouped by piece count. Selecting a single material
+  shows where its cells went (solvable / no mate / illegal), a histogram of
+  mate lengths split by side to move, a histogram of how many optimal
+  solutions positions have, and the deepest sample positions — each clickable
+  into the explorer.
 - **Search** — a form over [`/v1/mine`](#get-v1mine), including the `starts` /
   `ends` shape filters and (since v0.8.0) a theme multi-select populated from
   [`/v1/themes`](#get-v1themes), so the picker's vocabulary always matches the
@@ -1339,7 +1356,17 @@ Three screens:
   FENs, exportable as a FEN list or CSV. Results are numbered so a row is
   nameable. Impossible filter combinations (`starts` greater than `count`)
   are rejected before the request; the server stays the authority for the
-  rest.
+  rest. Since v0.11.0 the form is itself a rail, with a **Stop** button next
+  to Search and a live elapsed-time counter shown against the server's own
+  `--mine-timeout` budget (read from [`GET /v1/health`](#get-v1health)'s
+  `mine_timeout`, so the countdown is never a number hard-coded on the
+  client). A search that runs out the clock is reported honestly as a
+  timeout, not as "0 position(s)". **Stop only abandons the browser's
+  request** — the scan itself runs in the server's thread pool, and dropping
+  the client side of an HTTP response does not cancel the work already
+  queued there; the server still finishes or drops the scan on its own
+  `--mine-timeout` clock. Pressing Stop says this in the status line rather
+  than implying the server stopped too.
 
 **Theme.** The header's `Theme:` button cycles through three states — system,
 light, dark — rather than a plain on/off switch. System means "follow the
@@ -1350,13 +1377,25 @@ remembered (`localStorage`) and survives a reload. It is also applied
 of the page's own module — so a dark-mode user never sees a flash of the
 light page on load.
 
-**Editing a position.** Under the board, a palette places pieces: pick one,
-then click squares. `Erase` empties the squares you click, `Clear board`
-empties all of them, and the `To move` selector sets the side. While editing,
-the board is not probed on every click — a half-built position is illegal by
-definition — so click the armed palette entry again (or press `Set`) to
-evaluate what you have built. A position with no king, or two of one colour,
-says so directly instead of spending a request to be told `invalid_fen`.
+**Editing a position.** Under the board, a palette places pieces. There are
+two ways to do it, and both stay available side by side:
+
+- **Click-to-place** — pick a palette piece, then click squares (this is also
+  the keyboard/touch path: it needs no drag gesture). Clicking the armed
+  piece again disarms it.
+- **Drag**, added in v0.11.0, in three gestures: drag a piece from the
+  palette onto a square to place it there; click **Arrange** and drag a piece
+  already on the board to another square to move it (legal or not — the
+  editor does not judge placement, only the final position); or drag a piece
+  off the edge of the board to remove it.
+
+`Erase` empties the squares you click, `Clear board` empties all of them, and
+the `To move` selector sets the side. While editing, the board is not probed
+on every click or drop — a half-built position is illegal by definition — so
+either click the armed palette entry again or press the visible **Done —
+evaluate** button to evaluate what you have built. A position with no king,
+or two of one colour, says so directly instead of spending a request to be
+told `invalid_fen`.
 
 **What it needs from the server.** Only the read-only `/v1` routes. Every
 contract the API defines is surfaced rather than hidden: `202 fetching` shows
@@ -1434,8 +1473,12 @@ uncaught exceptions) has the same shape:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/health
-{"status":"ok","version":"0.6.0.dev0","tables_local":2,"tables_remote":0}
+{"status":"ok","version":"0.11.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
 ```
+
+`mine_timeout` (since v0.11.0) echoes the server's `--mine-timeout` setting
+in seconds, so a client — the dashboard's search screen, in particular — can
+show a countdown against the real budget instead of a guessed one.
 
 ### `GET /v1/materials`
 
@@ -1449,7 +1492,10 @@ $ curl -s http://127.0.0.1:8642/v1/materials
 ```
 
 `max_dtm`/`cells` are `null` for a `remote` entry (not yet downloaded, so the
-stats sidecar hasn't been read).
+stats sidecar hasn't been read), and for a local table whose sidecar is
+missing or unreadable — a run interrupted mid-write leaves a truncated
+`.stats.json`, and that costs the one table its two fields rather than
+failing the listing (or `/v1/stats`, which walks the same catalog).
 
 ### `GET /v1/themes`
 
@@ -1480,19 +1526,80 @@ $ curl -s http://127.0.0.1:8642/v1/materials/KNvkqr/stats
 {"error":{"code":"unknown_material","message":"no table for material 'KNvkqr'","hint":"generate it with: helpmate gen KNvkqr --tables <dir>"}}
 ```
 
+### `GET /v1/stats`
+
+Since v0.11.0. The corpus-wide aggregate over every sidecar the chain of
+local dirs + remote manifest can see — what the dashboard's Materials screen
+shows for its pinned **All tables** entry. Unlike
+`/v1/materials/{name}/stats`, this never 404s: an empty tables dir answers
+with zeroed counters, not an error.
+
+```
+$ curl -s http://127.0.0.1:8642/v1/stats
+{"tables":2,"tables_by_pieces":{"2":1,"3":1},"tables_without_stats":0,
+ "size_bytes":146585,
+ "cells":{"solvable":45723,"unsolvable":1338,"invalid":12999,"total":60060},
+ "dtm_histogram":{"btm":{...},"wtm":{...}},
+ "uniqueness":{"btm":{"all":{...}},"wtm":{"all":{...}}},
+ "max_dtm":14,
+ "deepest":[{"material":"KQvk","max_dtm":14}],
+ "no_helpmate":["Kvk"],
+ "generators":{"0.10.0":2}}
+```
+
+- `tables` / `tables_by_pieces` / `size_bytes` come from the catalog alone, so
+  they count every table the server can reach, including one whose sidecar
+  is missing or unreadable (`tables_without_stats` counts those; a truncated
+  sidecar from an interrupted generation run is treated the same way, not as
+  a hard failure of the whole endpoint).
+- `cells`, `dtm_histogram`, `uniqueness`, `max_dtm` and `deepest` are summed
+  only over materials that actually **have** a helpmate — a table storing the
+  `DTM_UNSOLVABLE` sentinel everywhere (nothing solvable in that material)
+  would otherwise corrupt `max_dtm` and the mate-length histograms. `deepest`
+  is the ten materials with the longest mate, ties broken by name.
+- `no_helpmate` lists every material that has no helpmate at all — sorted by
+  name, not counted into any of the histograms above. On the reference
+  corpus this is 67 of 295 tables.
+- `generators` tallies each sidecar's `generator_version`, so the spread of
+  builds that produced the corpus is visible at a glance.
+
+The response is cached on the identity of every sidecar involved (existence,
+mtime, size) — recomputing means re-reading every `.stats.json` in the
+corpus, which is not free — so the cache invalidates whenever a table is
+newly generated or downloaded, or an existing sidecar is rewritten in place
+(a corrected regeneration) even with its `.hm` untouched. Every field of that
+key comes from `stat()` alone, so the cache is consulted before any sidecar
+is read: measured over the 295-table reference corpus (13 MB of sidecars),
+0.41s cold and 0.124s warm per call. Most of what remains on the warm path is
+the catalog walk itself, which parses every sidecar to report each table's
+`max_dtm`/`cells` on `/v1/materials`.
+
 ### `GET /v1/probe`
 
 ```
 $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
-{"dtm":2,"count":4,"flipped":false,"notation":"h#1"}
+{"dtm":2,"count":4,"flipped":false,"material":"KQvk","notation":"h#1"}
 ```
 
-A legal but unsolvable position reports `{"solvable": false}` (no `dtm`
-field):
+A legal but unsolvable position reports `{"solvable": false, "material": ...}`
+(no `dtm` field):
 
 ```
 $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/8/8/8/4k3/8/4K3 w - - 0 1"
-{"solvable":false}
+{"solvable":false,"material":"Kvk"}
+```
+
+`material` names the table that answered here too. There is no `flipped` flag
+to read on an unsolvable position — the probe returns no result at all — so
+it reports whichever direction resolved: the FEN's own material when that
+table exists, and the mirrored one when only the mirror does. Naming the
+FEN's material unconditionally advertised a table that cannot exist (had it
+existed, no flip would have happened), and every such name 404s on
+`/v1/materials/{name}/stats`:
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/Kq6/8/8/5k2/8/8 w - - 0 1"
+{"solvable":false,"material":"KQvk"}
 ```
 
 A malformed FEN is a 400, not a 404:
@@ -1504,6 +1611,12 @@ $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=garbage"
 
 Like the CLI, `probe` transparently falls back to the color-flipped material
 when only that slice is generated, and reports it via `"flipped": true`.
+`material` (since v0.11.0) names the table that actually answered — the
+mirrored material whenever `flipped` is true, not the one derived from the
+FEN as queried. It is what the dashboard's explorer uses to fetch the
+per-table statistics band and to link into Materials, and it is deliberately
+not something a client should derive itself from the FEN: that would be
+wrong in exactly the case that matters.
 
 `?themes=true` (opt-in) adds a `themes` array; see [Themes](#themes) above
 for the full semantics, the flip-fallback limitation (`themes: null` +
@@ -1530,6 +1643,7 @@ browser would otherwise need its own move generator and one `probe` per move.
 ```
 $ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
 {"fen":"8/7k/5K2/8/8/8/8/6Q1 b - - 0 1","dtm":2,"count":4,"notation":"h#1","flipped":false,
+ "material":"KQvk",
  "moves":[
   {"uci":"h7h6","san":"Kh6","fen":"8/8/5K1k/8/8/8/8/6Q1 w - - 0 1","dtm":1,"count":3,
    "solvable":true,"optimal":true,"notation":"h#0.5"},
@@ -1548,7 +1662,15 @@ $ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8
   rather than being omitted.
 - An unsolvable query position reports `"solvable": false` at the top level
   and still enumerates its moves — a composer may want to walk into a
-  solvable branch.
+  solvable branch. `material` is the table that answered there too (the
+  mirrored one when only the mirror resolved), exactly as on `/v1/probe`.
+- `material` (since v0.11.0) names the table that answered the *query*
+  position, same meaning as on [`/v1/probe`](#get-v1probe) — the mirrored
+  material whenever `flipped` is true. It is not per-move: each move's own
+  `fen` may belong to a different material again (a capture or promotion), so
+  the dashboard calls `/v1/moves` fresh for the position it lands on after
+  following a move, and re-reads `material` from that response, rather than
+  reusing the value from the position it moved away from.
 - Errors follow `probe`: 400 `invalid_fen`, 404 `unknown_material` with the
   `helpmate gen …` hint, and the 202-fetching contract for remote-only
   material. The color-flip fallback applies too, reported as `"flipped": true`.
