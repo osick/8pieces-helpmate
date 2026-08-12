@@ -1565,10 +1565,14 @@ $ curl -s http://127.0.0.1:8642/v1/stats
 
 The response is cached on the identity of every sidecar involved (existence,
 mtime, size) — recomputing means re-reading every `.stats.json` in the
-corpus, which is cheap per call (0.17s measured over the 295-table reference
-corpus) but not free — so the cache invalidates whenever a table is newly
-generated or downloaded, or an existing sidecar is rewritten in place (a
-corrected regeneration) even with its `.hm` untouched.
+corpus, which is not free — so the cache invalidates whenever a table is
+newly generated or downloaded, or an existing sidecar is rewritten in place
+(a corrected regeneration) even with its `.hm` untouched. Every field of that
+key comes from `stat()` alone, so the cache is consulted before any sidecar
+is read: measured over the 295-table reference corpus (13 MB of sidecars),
+0.41s cold and 0.124s warm per call. Most of what remains on the warm path is
+the catalog walk itself, which parses every sidecar to report each table's
+`max_dtm`/`cells` on `/v1/materials`.
 
 ### `GET /v1/probe`
 

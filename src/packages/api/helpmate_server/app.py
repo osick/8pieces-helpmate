@@ -138,42 +138,58 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return resp
         return _tb(chain, d).stats(name)
 
-    # Recomputing this walks every sidecar (295 files / 13 MB / 0.17s measured
-    # on the reference corpus) -- but chain.catalog() already parses every
-    # sidecar's JSON on every call via _info_from_files, so /v1/stats was
-    # already paying that cost before this cache ever ran; stat()-ing each
-    # sidecar again below is negligible against it. The cache key covers each
-    # sidecar's own identity (existence, mtime, size), not just the .hm's
-    # (material, size_bytes, location), so it invalidates both when a table
-    # is newly generated or downloaded AND when an existing material's
-    # sidecar is rewritten in place with the .hm untouched -- e.g. a
-    # corrected regeneration. Closure state, not module state, so each
-    # create_app() in the test suite starts cold.
+    # Recomputing this walks every sidecar (295 files / 13 MB on the reference
+    # corpus). The cache key covers each sidecar's own identity (existence,
+    # mtime, size), not just the .hm's (material, size_bytes, location), so it
+    # invalidates both when a table is newly generated or downloaded AND when
+    # an existing material's sidecar is rewritten in place with the .hm
+    # untouched -- e.g. a corrected regeneration. Every field of that key
+    # comes from stat() alone, so the cache is consulted BEFORE any sidecar
+    # is read here: a hit neither parses 13 MB of JSON nor holds 295 parsed
+    # dicts live for the duration of the request, which it did while the key
+    # was built after the reads. Measured on the 295-table reference corpus
+    # (13 MB of sidecars): cold 0.39s -> 0.41s, warm 0.246s -> 0.124s per
+    # call. What remains of the warm path is chain.catalog(), which parses
+    # every sidecar itself on every call (0.118s of that 0.124s) to fill in
+    # each SliceInfo's max_dtm/cells -- a cache belonging in storage.py, and
+    # deliberately not this endpoint's business.
+    # Closure state, not module state, so each create_app() in the test
+    # suite starts cold.
     agg_cache: dict[str, object] = {}
 
     @app.get("/v1/stats")
     def stats_overall():
         cat = chain.catalog()
-        sidecars = []
+        paths = []
         sig = []
         for s in cat:
             d = chain.resolve(s.material)
             p = Path(d) / f"{s.material}.stats.json" if d is not None else None
-            st = p.stat() if p is not None and p.exists() else None
+            try:
+                # One syscall, and no exists()/stat() window for a sidecar to
+                # be deleted in -- that race used to 500 the endpoint from
+                # outside the read loop's own except.
+                st = p.stat() if p is not None else None
+            except OSError:
+                st = None
             sig.append((s.material, s.size_bytes, s.location,
                        st.st_mtime_ns if st is not None else -1,
                        st.st_size if st is not None else -1))
-            if st is None:
-                continue
+            if st is not None:
+                paths.append(p)
+        key = tuple(sorted(sig))
+        if agg_cache.get("key") == key:
+            return agg_cache["value"]
+        sidecars = []
+        for p in paths:
             try:
-                sidecars.append(json.loads(p.read_text()))
+                doc = json.loads(p.read_text())
             except (OSError, ValueError):
                 # A truncated sidecar (an interrupted generation run) must not
                 # take the whole summary down; it counts as "without stats".
                 continue
-        key = tuple(sorted(sig))
-        if agg_cache.get("key") == key:
-            return agg_cache["value"]
+            if isinstance(doc, dict):
+                sidecars.append(doc)
         value = aggregate_stats(sidecars, cat)
         agg_cache["key"] = key
         agg_cache["value"] = value
