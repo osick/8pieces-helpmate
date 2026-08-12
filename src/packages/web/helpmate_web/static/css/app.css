@@ -360,7 +360,20 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 /* ---------- materials ---------- */
 
 #panel-materials { display: flex; flex-direction: column; }
-.list-col { display: flex; flex-direction: column; gap: var(--s2); }
+.list-col { display: flex; flex-direction: column; }
+/* The surface (.rail/.list-col, full column height) and the sticky element
+   (.materials-pin, only as tall as the filter + list) are deliberately
+   different elements -- the same split #panel-explorer's .board-col /
+   .board-pin uses, and for the same reason (see the Fix round 1 comment at
+   .board-pin above): sticky positioned directly on .list-col left it sized
+   to its own content while the grid row's height followed the taller
+   .readout, so at corpus scale (where the two columns' heights genuinely
+   diverge -- the 2-material fixture never shows it) the exposed strip below
+   the rail read as --readout, not --rail: the wrong surface colour, not an
+   unpainted gap. .materials-pin carries the sticky behaviour at the short
+   height; .list-col stretches to the row's full height (grid's default
+   align-items is stretch) and its background now covers that strip. */
+.materials-pin { display: flex; flex-direction: column; gap: var(--s2); }
 #material-filter { width: 100%; font-size: var(--f2); }
 /* The rail scrolls, so the page height stops being a function of how many
    tables the server can reach. 295 of them rendered 12,005px tall. */
@@ -385,9 +398,11 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 @media (min-width: 860px) {
   #panel-materials {
     display: grid; grid-template-columns: minmax(240px, 320px) minmax(320px, 1fr);
-    align-items: start;
   }
-  .list-col { position: sticky; top: var(--s3); }
+  /* Its containing block for the sticky offset is .list-col, now stretched
+     to the full row height -- same reasoning as .board-pin's media-query
+     comment above. */
+  .materials-pin { position: sticky; top: var(--s3); }
   #material-list { max-height: calc(100vh - 12rem); }
 }
 
@@ -451,6 +466,18 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 .chart-legend span { display: inline-flex; align-items: center; gap: var(--s1); }
 .chart-legend i { width: .8rem; height: .55rem; border-radius: 2px; background: var(--ink); }
 .chart-legend i.wtm { background: var(--ink-faint); }
+
+/* A ranked list, not a histogram: some data (the ten deepest tables) is too
+   close together in magnitude for a bar's width to carry any signal -- see
+   the comment in stats-view.js at the "Deepest tables" call site. */
+.ranked-list { list-style: none; padding: 0; margin: .55rem 0 0;
+               display: flex; flex-direction: column; gap: 2px; }
+.ranked-list li { display: flex; align-items: baseline; gap: var(--s2); padding: .18rem 0; }
+.ranked-list .rank { font-family: var(--mono); font-size: var(--f0); color: var(--ink-faint);
+                      min-width: 1.4em; text-align: right; }
+.ranked-list .name { font-family: var(--mono); font-size: var(--f1); flex: 1; }
+.ranked-list .v { font-family: var(--mono); font-size: var(--f1);
+                   font-variant-numeric: tabular-nums; color: var(--ink-soft); }
 
 /* ---------- search ---------- */
 

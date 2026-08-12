@@ -678,3 +678,28 @@ def test_the_rail_groups_by_piece_count(page, server):
     page.wait_for_function("window.__materialsReady === true")
     heads = page.eval_on_selector_all("#material-list li.group", "els => els.map(e => e.textContent)")
     assert any("PIECES" in h.upper() for h in heads)
+
+
+def test_the_materials_rail_matches_the_readout_height(page, server):
+    # Review fix round 1: #panel-materials is a grid. With `align-items:
+    # start` (pre-fix) .rail/.list-col sized itself to its own short content
+    # (heading + filter + list) while the grid row's height followed the
+    # taller .readout -- the "All tables" summary, with its histograms and
+    # name lists, is reliably taller than a materials list short enough to
+    # fit the fixture's two tables. Below the rail's content the ancestor
+    # panel's --readout background showed through where --rail was expected:
+    # the wrong surface colour, not an unpainted gap, which is exactly why a
+    # full-page screenshot missed it (both are painted; only the token
+    # differs). Assert equality, not "at least as tall" -- with the default
+    # `align-items: stretch` this holds by construction regardless of how
+    # many materials the corpus has, so it does not depend on generating
+    # enough rows to out-grow the readout the way the explorer's analogous
+    # test drives a long move list.
+    page.set_viewport_size({"width": 1280, "height": 800})
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    page.wait_for_selector("#material-stats .stats-head")
+    rail = page.eval_on_selector(".list-col", "e => e.getBoundingClientRect()")
+    readout = page.eval_on_selector(".detail-col", "e => e.getBoundingClientRect()")
+    assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
+        f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")

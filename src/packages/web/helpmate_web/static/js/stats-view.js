@@ -6,7 +6,7 @@
 // unprefixed second copy would not merely duplicate an id -- it would make
 // every existing `#dtm-hist` query resolve to the explorer's chart.
 import { encodeState } from "./lib/state.js";
-import { dtmBars, uniquenessBuckets, cellSummary, fmtCount, mateLengthLabel } from "./lib/stats.js";
+import { dtmBars, uniquenessBuckets, cellSummary, fmtCount, mateLengthLabel, hasHelpmate } from "./lib/stats.js";
 
 export function fmtSize(n) {
   if (n >= 1e9) return `${(n / 1e9).toFixed(2)} GB`;
@@ -130,7 +130,11 @@ export function renderAggregate(box, agg) {
   head.appendChild(el("h2", null, "All tables"));
   head.appendChild(el("span", "sub",
     `${fmtCount(agg.tables)} tables · ${fmtSize(agg.size_bytes)}`
-    + (agg.max_dtm != null ? ` · longest mate h#${agg.max_dtm / 2}` : "")));
+    // hasHelpmate, not a bare `!= null` check: aggregate_stats() guarantees
+    // max_dtm is real or None today, so the sentinel is unreachable here --
+    // but a second, unguarded copy of the h#(max_dtm/2) arithmetic is
+    // exactly the hazard Task 1 introduced hasHelpmate() to eliminate.
+    + (hasHelpmate(agg) ? ` · longest mate h#${agg.max_dtm / 2}` : "")));
   box.appendChild(head);
 
   const cells = agg.cells || {};
@@ -173,17 +177,24 @@ export function renderAggregate(box, agg) {
   }
 
   if ((agg.deepest || []).length) {
-    const rows = agg.deepest.map((d) => ({
-      label: d.material, positions: d.max_dtm,
-      share: d.max_dtm / agg.deepest[0].max_dtm,
-    }));
-    const h = histogram(rows);
-    h.id = "agg-deepest";
-    // The bar values are plies; relabel them as distances.
-    for (const v of h.querySelectorAll(".v"))
-      v.textContent = `h#${Number(v.textContent.replace(/,/g, "")) / 2}`;
+    // Not a histogram: this corpus's ten deepest tables are 34, 33, 32, 32,
+    // 32, 32, 32, 32, 32, 32 plies -- every bar would render between 94% and
+    // 100% width, ten visually identical bars carrying none of the signal
+    // (the h#17 / h#16.5 / h#16 labels would carry it all). Rescaling from a
+    // non-zero floor would manufacture false precision out of one- and
+    // two-ply differences instead. A ranked list states the same facts
+    // (rank, material, distance) without pretending they are proportions.
+    const ol = el("ol", "ranked-list");
+    ol.id = "agg-deepest";
+    agg.deepest.forEach((d, i) => {
+      const li = el("li");
+      li.append(el("span", "rank", String(i + 1)),
+                el("span", "name", d.material),
+                el("span", "v", `h#${d.max_dtm / 2}`));
+      ol.appendChild(li);
+    });
     box.appendChild(chart("Deepest tables",
-      "The longest helpmate each of these materials contains.", h));
+      "The longest helpmate each of these materials contains.", ol));
   }
 
   const none = agg.no_helpmate || [];
