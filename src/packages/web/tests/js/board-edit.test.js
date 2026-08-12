@@ -36,3 +36,7 @@ test("a small movement is a click, not a drag", () => {
   assert.equal(exceedsDragThreshold({ x: 0, y: 0 }, { x: DRAG_THRESHOLD_PX + 1, y: 0 }), true);
   assert.equal(exceedsDragThreshold({ x: 10, y: 10 }, { x: 10, y: 10 - DRAG_THRESHOLD_PX - 1 }), true);
 });
+
+test("a movement of exactly the threshold is still a click -- the boundary is strict >", () => {
+  assert.equal(exceedsDragThreshold({ x: 0, y: 0 }, { x: DRAG_THRESHOLD_PX, y: 0 }), false);
+});

@@ -910,3 +910,53 @@ def test_done_evaluates_and_leaves_edit_mode(page, server):
     page.wait_for_function(
         "document.getElementById('position-summary').textContent.length > 0")
     assert page.is_hidden("#btn-done-editing")
+
+
+def test_a_cancelled_drag_does_not_swallow_the_next_tap(page, server):
+    # Fix round 1 (code review): pointerup and pointercancel shared one `up`
+    # handler, which unconditionally set btn.dataset.dragged = "1" to
+    # suppress the click that follows a completed drag. But a pointercancel
+    # never produces a click (per spec), so that flag had no click left to
+    # consume it -- it stayed stuck until some LATER click silently ate
+    # itself clearing it, meaning the user's very next tap on that button
+    # after any cancelled drag did nothing at all.
+    #
+    # touchCancel via CDP is the same signature Step 10's hand check saw on
+    # a real touchscreen (pointerdown, pointermove, pointercancel, no
+    # pointerup) -- the browser's scroll-vs-drag heuristic reclaiming the
+    # gesture -- but dispatched deterministically rather than relying on
+    # that heuristic to fire.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+
+    box = page.locator("#palette-pieces button[data-piece=wr]").bounding_box()
+    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+    cdp = page.context.new_cdp_session(page)
+
+    def touch_point(x, y):
+        return [{"x": x, "y": y, "radiusX": 5, "radiusY": 5, "force": 1}]
+
+    cdp.send("Input.dispatchTouchEvent", {
+        "type": "touchStart", "touchPoints": touch_point(cx, cy)})
+    cdp.send("Input.dispatchTouchEvent", {
+        "type": "touchMove", "touchPoints": touch_point(cx + 30, cy + 30)})
+    cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
+    page.wait_for_timeout(150)
+
+    # The move past the threshold armed wr before the cancel arrived --
+    # that part is unaffected by this bug.
+    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true"
+
+    # Return to the unarmed state through a DIFFERENT control -- Erase has
+    # no drag handling of its own, so this can't itself be the tap that
+    # clears a stuck flag on wr's button.
+    page.click("#btn-erase")
+    page.click("#btn-erase")
+    assert page.get_attribute("#btn-erase", "aria-pressed") == "false"
+    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "false"
+
+    # The tap that a stuck dataset.dragged flag would silently swallow.
+    page.click("#palette-pieces button[data-piece=wr]")
+    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true", \
+        "the tap after a cancelled drag was silently swallowed"

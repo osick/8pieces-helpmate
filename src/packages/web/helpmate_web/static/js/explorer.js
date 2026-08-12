@@ -349,6 +349,15 @@ function enablePaletteDrag(btn, piece) {
       if (!ghost) return;                       // it was a click; let click handle it
       ghost.remove();
       ghost = null;
+      // A pointercancel is not a completed drag -- nothing was dropped, and
+      // per spec a cancel never produces a click, so there is no click to
+      // suppress. Setting the flag anyway would leave it stuck forever
+      // (only a click clears it), silently swallowing the user's next tap
+      // on this button. A cancel can happen for reasons that have nothing
+      // to do with us (e.g. the browser reclaiming the gesture for a page
+      // scroll), so this path has to stay inert rather than guess at where
+      // the pointer ended up.
+      if (e.type === "pointercancel") return;
       btn.dataset.dragged = "1";
       const square = squareFromTarget(document.elementFromPoint(e.clientX, e.clientY));
       if (!square) return;                      // dropped off the board: no-op
