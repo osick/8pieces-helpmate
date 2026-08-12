@@ -647,9 +647,12 @@ print('generators', b['generators'])
 "
 ```
 
-Expected, measured on this corpus: 295 tables; `{"3":1,"4":10,"5":55,"6":220,"7":9}`;
-67 with no helpmate; `max_dtm` 34; deepest `KBvkqp`/`KBvkrp`/`KRBvkp`;
-seven generator versions. Warm must be far below cold — that is the cache.
+Expected, measured on this corpus: 295 tables;
+`{"2":1,"3":10,"4":55,"5":220,"6":9}` (the repo's `_piece_count` counts every
+character except the `v` separator, so `Kvk` is two pieces); 67 with no
+helpmate; `max_dtm` 34; deepest `KBvkqp` (34), `KBvkrp` (33), then a three-way
+tie at 32 broken alphabetically so `KBBvkp` comes third; seven generator
+versions with `0.8.0` at 159. Warm must be far below cold — that is the cache.
 **Record this output in the task report.**
 
 - [ ] **Step 7: Lint and typecheck**

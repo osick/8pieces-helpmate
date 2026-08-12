@@ -195,15 +195,18 @@ height stops being a function of the corpus size.
 statistics." It answers the brief's "overall statistics (any piece
 combination)":
 
-- tables, and their breakdown by piece count — measured on this corpus:
-  1 three-piece, 10 four, 55 five, 220 six, **9 seven**
+- tables, and their breakdown by piece count — measured on this corpus, using
+  the repo's own `_piece_count` rule (every character except the `v`
+  separator): 1 two-piece (bare kings), 10 three, 55 four, 220 five, **9 six**.
+  The largest material present is `KNvknnn`; there are no seven-piece tables
 - total size on disk — 41.4 GB
 - summed cells: solvable / no mate / illegal / total
 - the mate-length histogram summed over every table (**71,007,150,643**
   positions that have a mate, across 35 distance buckets)
 - solutions-per-position, summed
-- **deepest tables**, ranked — `KBvkqp` h#17, `KBvkrp` h#16.5, `KRBvkp` h#16 —
-  a cross-table fact that is invisible anywhere today
+- **deepest tables**, ranked — `KBvkqp` h#17, `KBvkrp` h#16.5, then a tie at
+  h#16 broken alphabetically (`KBBvkp` ahead of `KQBvkp`, `KRBvkp`) — a
+  cross-table fact that is invisible anywhere today
 - **the 67 tables in which no helpmate exists at all**, named as such
 - the generator-version spread, because the corpus is genuinely mixed —
   **seven versions, 0.1.0 through 0.9.1**, with 0.8.0 covering 159 of the 295
@@ -224,7 +227,7 @@ corpus's real values where they are known and `…` where they are per-corpus:
 ```json
 {
   "tables": 295,
-  "tables_by_pieces": {"3": 1, "4": 10, "5": 55, "6": 220, "7": 9},
+  "tables_by_pieces": {"2": 1, "3": 10, "4": 55, "5": 220, "6": 9},
   "tables_without_stats": 0,
   "size_bytes": 41378247168,
   "cells": {"solvable": "…", "unsolvable": "…", "invalid": "…", "total": "…"},
