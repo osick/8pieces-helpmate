@@ -1,5 +1,5 @@
 import {
-  Chessboard, INPUT_EVENT_TYPE, COLOR, POINTER_EVENTS,
+  Chessboard, INPUT_EVENT_TYPE, COLOR,
 } from "../vendor/cm-chessboard/Chessboard.js";
 import {
   PromotionDialog,
@@ -19,29 +19,10 @@ import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
 const PALETTE = ["wk", "wq", "wr", "wb", "wn", "wp", "bk", "bq", "br", "bb", "bn", "bp"];
-// The fourth arming state. A piece name places, "" erases, null plays -- and
-// this drags what is already on the board. It is a distinct value rather than
-// a flag because click-to-place and drag-to-rearrange both bind pointerdown,
-// so exactly one of them may be live at a time.
-const ARRANGE = "arrange";
 
 let board = null;
 let current = START;
 let lastMoves = [];      // the move list from the last /v1/moves call, for drag input
-// The armed palette entry: a piece name to place, "" to erase, or null when
-// the board is in play mode (drag = play a move). Editing and playing are
-// mutually exclusive on the same pointer, so arming swaps the board's input.
-let armed = null;
-// `current` as it stood when the present edit session began, or null when no
-// session is open. Every placement path (palette drop, click-to-place,
-// Arrange, Clear board, the side-to-move select) writes the new FEN straight
-// into `current`, so `current` cannot also serve as the "what did we start
-// from" baseline -- comparing the committed FEN against it was always false,
-// which is why an edit never reached the hash or the history. Capturing the
-// baseline once, when the session opens, is the smallest thing that survives
-// however many placements happen in between, and it is also the value Back
-// has to return to.
-let editBaseline = null;
 const history = [];
 
 // Monotonic token guarding render(): every call captures its own seq at
@@ -323,25 +304,6 @@ async function render(fen, { push = true, retries = 0 } = {}) {
 
 // ---- position editor -------------------------------------------------
 
-// Read the placement back off the board and evaluate it. Called when the
-// user leaves edit mode, not on every click.
-function commitBoard() {
-  const fen = withPlacement(current, board.getPosition());
-  // The position this edit session started from -- NOT `current`, which every
-  // placement has already advanced to the edited FEN.
-  const before = editBaseline;
-  editBaseline = null;
-  // Arming and disarming without touching a square must not cost a request
-  // or leave a duplicate entry for Back to walk through -- but the panel
-  // still has to be redrawn, because entering edit mode retired the previous
-  // value. An edit that DID change something is a position in its own right:
-  // it goes into the hash (so a copied link reopens it) and onto the history
-  // stack (so Back returns to what the user started from).
-  const changed = before === null || fen !== before;
-  if (changed && before !== null) history.push(before);
-  render(fen, { push: changed });
-}
-
 // Dragging a piece out of the palette and onto a square. cm-chessboard has no
 // notion of an external drag source, so this is ours: capture the pointer,
 // carry a ghost, and ask the document what is under the pointer on release.
@@ -356,9 +318,6 @@ function enablePaletteDrag(btn, piece) {
     const move = (e) => {
       if (!ghost) {
         if (!exceedsDragThreshold(from, { x: e.clientX, y: e.clientY })) return;
-        // Past the threshold this is a drag, so arm the piece (which puts the
-        // board in edit mode) and stop the click handler from also firing.
-        if (armed !== piece) setArmed(piece);
         ghost = btn.cloneNode(true);
         ghost.className = "drag-ghost";
         ghost.removeAttribute("id");
@@ -384,14 +343,9 @@ function enablePaletteDrag(btn, piece) {
       // scroll), so this path has to stay inert rather than guess at where
       // the pointer ended up.
       if (e.type === "pointercancel") return;
-      btn.dataset.dragged = "1";
       const square = squareFromTarget(document.elementFromPoint(e.clientX, e.clientY));
       if (!square) return;                      // dropped off the board: no-op
-      board.setPiece(square, piece).then(() => {
-        const fen = withPlacement(current, board.getPosition());
-        current = fen;
-        syncControls(fen);
-      });
+      board.setPiece(square, piece).then(commitPlacement);
     };
 
     btn.setPointerCapture(down.pointerId);
@@ -401,74 +355,12 @@ function enablePaletteDrag(btn, piece) {
   });
 }
 
-function onSquareClick(event) {
-  if (armed === null || !event.square) return;
-  // setPiece is async; the board is the source of truth for the placement, so
-  // update the FEN box only once it has actually applied.
-  board.setPiece(event.square, armed || null).then(() => {
-    const fen = withPlacement(current, board.getPosition());
-    current = fen;
-    syncControls(fen);
-  });
-}
-
-// `commit` is false when something else is about to set the position anyway
-// (typing a FEN, following a link): committing there would spend a request on
-// a position the very next line replaces, and push a bogus history entry.
-function setArmed(piece, { commit = true } = {}) {
-  const wasEditing = armed !== null;
-  armed = piece;
-  for (const btn of document.querySelectorAll("#palette button"))
-    btn.setAttribute("aria-pressed", String(btn.dataset.piece === piece && piece !== null));
-
-  const done = document.getElementById("btn-done-editing");
-
-  // Exactly one input binding is live at a time. Rebinding unconditionally is
-  // cheaper to reason about than working out which transitions need which
-  // call, and cm-chessboard's disable* calls are safe when nothing is bound.
-  board.disableSquareSelect(POINTER_EVENTS.pointerdown);
-  board.disableMoveInput();
-
-  if (armed === null) {
-    enableDragToPlay();
-    done.hidden = true;
-    if (wasEditing && commit) commitBoard();
-    // `commit: false` means something else is about to set the position: drop
-    // the baseline unconditionally so it can never leak into a later session.
-    editBaseline = null;
-    return;
-  }
-
-  if (armed === ARRANGE) enableDragToEdit();
-  else board.enableSquareSelect(POINTER_EVENTS.pointerdown, onSquareClick);
-  done.hidden = false;
-
-  if (!wasEditing) {
-    // The session opens here, so this is the last moment `current` still
-    // holds the position the user is editing away from.
-    editBaseline = current;
-    // The previous position's value belongs to a position that no longer
-    // exists. Leaving it on screen while pieces move around would present a
-    // stale dtm as the current one; say what is happening instead.
-    const summary = document.getElementById("position-summary");
-    summary.textContent = "editing — press Done to evaluate";
-    summary.classList.add("muted");
-    document.getElementById("position-themes").textContent = "";
-    document.getElementById("move-list").textContent = "";
-    const linesEl = document.getElementById("lines");
-    linesEl.textContent = ""; linesEl.dataset.lines = "[]";
-    lastMoves = [];
-    showTableStats(null);
-  }
-}
-
 function buildPalette() {
   const box = document.getElementById("palette-pieces");
   for (const piece of PALETTE) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.dataset.piece = piece;
-    btn.setAttribute("aria-pressed", "false");
     btn.title = piece;
     btn.setAttribute("aria-label", piece);
     const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -477,71 +369,59 @@ function buildPalette() {
     use.setAttribute("href", `${SPRITE}#${piece}`);
     svg.appendChild(use);
     btn.appendChild(svg);
-    // Clicking the armed piece again puts the board back in play mode, so a
-    // round trip through the palette is never needed to resume exploring.
-    btn.addEventListener("click", () => {
-      if (btn.dataset.dragged === "1") { delete btn.dataset.dragged; return; }
-      setArmed(armed === piece ? null : piece);
-    });
     enablePaletteDrag(btn, piece);
     box.appendChild(btn);
   }
-  const erase = document.getElementById("btn-erase");
-  erase.setAttribute("aria-pressed", "false");
-  erase.addEventListener("click", () => setArmed(armed === "" ? null : ""));
-  const arrange = document.getElementById("btn-arrange");
-  arrange.setAttribute("aria-pressed", "false");
-  arrange.addEventListener("click", () => setArmed(armed === ARRANGE ? null : ARRANGE));
   document.getElementById("btn-clear-board").addEventListener("click", () => {
     board.setPosition(EMPTY_PLACEMENT, false).then(() => {
       const fen = composeFen(EMPTY_PLACEMENT, splitFen(current).stm);
-      current = fen;
-      syncControls(fen);
-      if (armed === null) render(fen);
+      history.push(current);
+      render(fen);
     });
   });
 }
 
 // ---- board input -----------------------------------------------------
 
-// While editing, a drag means "move this piece there" (any square, legal or
-// not) and a drag off the board means "remove it". cm-chessboard raises both;
-// we simply stopped ignoring them.
-function enableDragToEdit() {
+// One rule, no modes. A drag whose from/to matches a legal move plays it; any
+// other drag relocates the piece; a drag off the board deletes it. Editing is
+// never gated behind a control, which is what lets three buttons and the whole
+// armed-state machinery go.
+//
+// `playedMove` exists because BOTH outcomes travel through the same event
+// pair: validateMoveInput decides, moveInputFinished fires afterwards either
+// way. Without the flag, a legal move would render its child position and then
+// moveInputFinished would immediately overwrite it with whatever the board's
+// DOM happens to hold mid-animation.
+let playedMove = false;
+
+function commitPlacement() {
+  const fen = withPlacement(current, board.getPosition());
+  if (fen === current) return;        // nothing actually moved
+  history.push(current);
+  render(fen);
+}
+
+function enableBoardInput() {
   board.enableMoveInput((event) => {
-    if (event.type === INPUT_EVENT_TYPE.validateMoveInput) return true;
-    if (event.type === INPUT_EVENT_TYPE.moveInputCanceled
-        && event.reason === MOVE_CANCELED_REASON.movedOutOfBoard) {
-      board.setPiece(event.squareFrom, null).then(syncFromBoard);
+    if (event.type === INPUT_EVENT_TYPE.moveInputCanceled) {
+      if (event.reason === MOVE_CANCELED_REASON.movedOutOfBoard)
+        board.setPiece(event.squareFrom, null).then(commitPlacement);
       return;
     }
-    if (event.type === INPUT_EVENT_TYPE.moveInputFinished) syncFromBoard();
-    return true;
-  });
-}
-
-function syncFromBoard() {
-  const fen = withPlacement(current, board.getPosition());
-  current = fen;
-  syncControls(fen);
-}
-
-function enableDragToPlay() {
-  // Dragging a piece plays the corresponding legal move, when there is one.
-  // The board is a view over the server's move list: we never invent a move
-  // client-side, we look up the drag in what /v1/moves returned.
-  //
-  // A drag only tells us from/to squares (a 4-char uci prefix); it never
-  // tells us which piece to promote to. If several promotion moves share
-  // that prefix (e.g. e7e8q/e7e8r/e7e8b/e7e8n) we must not guess -- show
-  // the vendored promotion dialog and play exactly the uci the user picks.
-  board.enableMoveInput((event) => {
+    if (event.type === INPUT_EVENT_TYPE.moveInputFinished) {
+      if (playedMove) { playedMove = false; return; }
+      commitPlacement();
+      return;
+    }
     if (event.type !== INPUT_EVENT_TYPE.validateMoveInput) return true;
+
     const uci = `${event.squareFrom}${event.squareTo}`;
     const moves = lastMoves || [];
 
     const exact = moves.find((m) => m.uci === uci);
     if (exact) {
+      playedMove = true;
       history.push(current);
       render(exact.fen);
       return true;
@@ -550,15 +430,20 @@ function enableDragToPlay() {
     const candidates = moves.filter(
       (m) => m.uci.length === uci.length + 1 && m.uci.startsWith(uci)
     );
-    if (candidates.length === 0) return false; // not a legal move: snap back
+    // Not a legal move: accept the drag anyway and let moveInputFinished
+    // commit it as a relocation. Returning false here would snap the piece
+    // back, which is the old play-only behaviour.
+    if (candidates.length === 0) return true;
 
     if (candidates.length === 1) {
+      playedMove = true;
       history.push(current);
       render(candidates[0].fen);
       return true;
     }
 
     // Several underpromotion choices are legal: ask the user which piece.
+    playedMove = true;
     const fromFen = current;
     const color = event.piece.charAt(0); // "wp" -> "w", matches COLOR.white/black
     board.showPromotionDialog(event.squareTo, color, (result) => {
@@ -572,8 +457,6 @@ function enableDragToPlay() {
       history.push(fromFen);
       render(chosen.fen);
     });
-    // Let the piece land visually now; the dialog callback above resolves
-    // the exact move (or snaps back to fromFen if the user cancels).
     return true;
   });
 }
@@ -585,18 +468,16 @@ export function initExplorer() {
     style: { borderType: "frame" },
     extensions: [{ class: PromotionDialog }],
   });
-  enableDragToPlay();
+  enableBoardInput();
   buildPalette();
 
   document.getElementById("fen-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    setArmed(null, { commit: false });    // typing a FEN ends any editing session
     history.push(current);
     render(document.getElementById("fen-input").value.trim());
   });
   document.getElementById("stm-select").addEventListener("change", (e) => {
     const fen = withSideToMove(current, e.target.value);
-    if (armed !== null) { current = fen; syncControls(fen); return; }
     history.push(current);
     render(fen);
   });
@@ -607,7 +488,6 @@ export function initExplorer() {
     const prev = history.pop();
     if (prev) render(prev);
   });
-  document.getElementById("btn-done-editing").addEventListener("click", () => setArmed(null));
   document.getElementById("btn-export-pgn").addEventListener("click", () => {
     const lines = JSON.parse(document.getElementById("lines").dataset.lines || "[]");
     const blob = new Blob([toPgn(current, lines)], { type: "application/x-chess-pgn" });
@@ -628,10 +508,7 @@ export function initExplorer() {
   });
   window.addEventListener("hashchange", () => {
     const { fen } = decodeState(location.hash);
-    if (fen && fen !== current) {
-      setArmed(null, { commit: false }); // a link wins over an unfinished edit
-      render(fen, { push: false });
-    }
+    if (fen && fen !== current) render(fen, { push: false });
   });
 
   const { fen } = decodeState(location.hash);

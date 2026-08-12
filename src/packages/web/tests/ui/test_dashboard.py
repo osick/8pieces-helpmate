@@ -88,42 +88,70 @@ def test_material_stats_render_both_histograms(page, server):
     assert page.eval_on_selector("#dtm-hist .k", "e => e.textContent").startswith("h#")
 
 
-def test_the_palette_places_a_piece_and_evaluates_on_exit(page, server):
+def _square_box(page, square):
+    return page.locator(f"#board rect[data-square={square}]").bounding_box()
+
+
+def _drag_square_to_square(page, frm, to):
+    a, b = _square_box(page, frm), _square_box(page, to)
+    page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2, steps=10)
+    page.mouse.up()
+
+
+def test_a_legal_drag_plays_the_move(page, server):
+    # 8/7k/5K2/8/8/8/8/6Q1 b: Black to move, Kh7 may go to h8.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector("#stm-select", "e => e.value") == "b"
+    _drag_square_to_square(page, "h7", "h8")
+    page.wait_for_function(
+        "() => document.getElementById('stm-select').value === 'w'")
+    assert "8/7k" not in page.input_value("#fen-input")
+    assert "dtm" in page.inner_text("#position-summary")
+
+
+def test_an_illegal_drag_relocates_and_keeps_the_side_to_move(page, server):
+    # The white queen cannot legally move at all here -- it is Black's turn --
+    # so dragging it is unambiguously a relocation.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    _drag_square_to_square(page, "g1", "d4")
+    page.wait_for_function(
+        "() => document.getElementById('fen-input').value.startsWith('8/7k/5K2/8/3Q4/')")
+    assert page.eval_on_selector("#stm-select", "e => e.value") == "b", "a relocation flipped the turn"
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent.includes('dtm')")
+
+
+def test_back_undoes_a_relocation(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
     before = page.input_value("#fen-input")
-
-    # Move the queen from g1 to d4 by erasing and placing. Both ends stay
-    # inside KQvk, the only closure the fixture generated.
-    # rect[]: piece groups carry data-square too, and their layer has
-    # pointer-events: none, so only the square rects are clickable.
-    page.click("#btn-erase")
-    assert page.get_attribute("#btn-erase", "aria-pressed") == "true"
-    # entering edit mode retires the old position's value rather than
-    # leaving a stale dtm on screen
-    assert "dtm" not in page.inner_text("#position-summary")
-    assert page.eval_on_selector_all("#move-list li", "els => els.length") == 0
-
-    page.click("#board rect[data-square=g1]")
+    _drag_square_to_square(page, "g1", "d4")
     page.wait_for_function(
-        "before => document.getElementById('fen-input').value !== before", arg=before)
-    assert "Q" not in page.input_value("#fen-input").split()[0]
-
-    page.click("#palette-pieces button[data-piece=wq]")
-    assert page.get_attribute("#btn-erase", "aria-pressed") == "false"
-    assert page.get_attribute("#palette-pieces button[data-piece=wq]", "aria-pressed") == "true"
-    page.click("#board rect[data-square=d4]")
+        "b => document.getElementById('fen-input').value !== b", arg=before)
+    page.click("#btn-back")
     page.wait_for_function(
-        "document.getElementById('fen-input').value.startsWith('8/7k/5K2/8/3Q4/')")
+        "b => document.getElementById('fen-input').value === b", arg=before)
 
-    # Editing does not probe on every click -- the value appears when the
-    # user leaves edit mode by clicking the armed piece again.
-    page.click("#palette-pieces button[data-piece=wq]")
-    assert page.get_attribute("#palette-pieces button[data-piece=wq]", "aria-pressed") == "false"
-    page.wait_for_function(
-        "document.getElementById('position-summary').textContent.includes('dtm')")
-    assert page.eval_on_selector_all("#move-list li", "els => els.length") > 0
-    assert page.is_hidden("#error-banner")
+
+def test_a_relocation_reaches_the_url(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    _drag_square_to_square(page, "g1", "d4")
+    page.wait_for_function("() => location.hash.includes('3Q4')")
+
+
+def test_the_board_has_no_mode_controls(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    for gone in ("#btn-erase", "#btn-arrange", "#btn-done-editing", "#edit-hint"):
+        assert page.eval_on_selector_all(gone, "e => e.length") == 0, f"{gone} still exists"
+    # and a tray piece is draggable without arming anything first
+    assert page.eval_on_selector_all(
+        "#palette-pieces button[aria-pressed]", "e => e.length") == 0
 
 
 def test_clearing_the_board_names_the_missing_kings(page, server):
@@ -375,7 +403,7 @@ def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, serv
     side = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
     assert side["top"] >= board["bottom"] - 1, "columns did not stack"
     # Nothing is hidden on a small screen -- hiding controls is a support burden.
-    for sel in ("#palette", "#fen-form", "#move-list", "#btn-export-pgn"):
+    for sel in ("#palette-pieces", "#fen-form", "#move-list", "#btn-export-pgn"):
         assert page.is_visible(sel), f"{sel} disappeared at 420px"
     # And the page never scrolls sideways.
     assert page.evaluate(
@@ -854,18 +882,27 @@ def test_the_search_rail_matches_the_readout_height(page, server):
 
 
 def test_dragging_a_piece_from_the_palette_places_it(page, server):
+    # Dropping onto h7 overwrites the landing position's black king rather
+    # than adding a piece: the fixture only ever generates KQvk (and its
+    # capture closure, Kvk), so a drop that ADDED a rook alongside the
+    # existing queen would land on KQRvk -- a material the fixture never
+    # generated -- and 404 instead of ever showing "dtm". Overwriting the
+    # king instead exercises kingProblem's no-request short circuit, which
+    # answers instantly and deterministically, and still proves the point:
+    # the drop evaluates on its own, with nothing clicked first.
     page.goto(server)
     page.wait_for_selector("#move-list li")
     src = page.locator("#palette-pieces button[data-piece=wr]")
-    dst = page.locator("#board rect[data-square=d4]")
+    dst = page.locator("#board rect[data-square=h7]")
     src.drag_to(dst)
     page.wait_for_function(
         "document.getElementById('fen-input').value.split(' ')[0].includes('R')")
     placement = page.input_value("#fen-input").split()[0]
-    assert placement.split("/")[4].startswith("3R"), placement
-    # a drag enters edit mode, so the previous position's value is retired
-    assert "dtm" not in page.inner_text("#position-summary")
-    assert page.is_visible("#btn-done-editing")
+    assert placement.split("/")[1] == "7R", placement
+    # a drop evaluates immediately: no arming, no separate Done step
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent.includes('king')")
+    assert page.is_hidden("#error-banner")
 
 
 def _drag_piece_off_the_board(page, square):
@@ -874,7 +911,7 @@ def _drag_piece_off_the_board(page, square):
     Right of the board's right edge, at the same y. Straight down (as a naive
     brief once had it) can land below the fixture's 1280x720 viewport, where
     mouse events never dispatch; beside the board stays inside the viewport in
-    every layout. The caller must already be in Arrange mode.
+    every layout.
     """
     box = page.locator(f"#board rect[data-square={square}]").bounding_box()
     board_box = page.locator("#board").bounding_box()
@@ -887,186 +924,19 @@ def _drag_piece_off_the_board(page, square):
     page.mouse.up()
 
 
-# The verdict line setArmed() writes when an edit session opens. It is not an
-# evaluation: the tests below have to see the summary move OFF it, because a
-# bare "the summary says something" wait is satisfied by this text the instant
-# edit mode is entered -- which is how the old Done test passed with the whole
-# commit path deleted.
-EDITING = "editing"
-
-# The landing position is KQvk (white Kf6+Qg1, black Kh7) and the UI fixture
-# generates KQvk and nothing else, so any edit that ends outside that material
-# ends on a 404 banner instead of an evaluation. Dropping a second white queen
-# on d4 and then dragging the original off g1 stays in KQvk the whole way out:
-# the end state is 8/7k/5K2/8/3Q4/8/8/8 b - - 0 1, which the table answers
-# with dtm 2 / 1 optimal line (verified against helpmate.Tablebase.probe).
-EDITED_PLACEMENT = "8/7k/5K2/8/3Q4/8/8/8"
-
-
-def _edit_queen_to_d4(page):
-    page.locator("#palette-pieces button[data-piece=wq]").drag_to(
-        page.locator("#board rect[data-square=d4]"))
-    page.wait_for_function(
-        "document.getElementById('fen-input').value.split('/')[4].startsWith('3Q')")
-    page.click("#btn-arrange")            # arrange mode: drag, don't place
-    _drag_piece_off_the_board(page, "g1")
-    page.wait_for_function(
-        "p => document.getElementById('fen-input').value.split(' ')[0] === p",
-        arg=EDITED_PLACEMENT)
-
-
 def test_dragging_a_piece_off_the_board_removes_it(page, server):
-    # The landing position has a white queen on g1. Enter edit mode, drag it
-    # off the board, and it should be gone.
+    # The landing position has a white queen on g1. Drag it off the board and
+    # it should be gone -- no preparation needed first.
     page.goto(server)
     page.wait_for_selector("#move-list li")
     before = page.input_value("#fen-input")
     assert "Q" in before.split()[0]
-
-    page.click("#btn-arrange")            # arrange mode: drag, don't place
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    assert page.get_attribute("#btn-arrange", "aria-pressed") == "true"
 
     _drag_piece_off_the_board(page, "g1")
 
     page.wait_for_function(
         "before => document.getElementById('fen-input').value !== before", arg=before)
     assert "Q" not in page.input_value("#fen-input").split()[0]
-
-
-def test_done_evaluates_and_leaves_edit_mode(page, server):
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-
-    page.locator("#palette-pieces button[data-piece=wq]").drag_to(
-        page.locator("#board rect[data-square=d4]"))
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    # The state the old assertion mistook for an answer.
-    assert EDITING in page.inner_text("#position-summary")
-
-    page.click("#btn-arrange")
-    _drag_piece_off_the_board(page, "g1")
-    page.wait_for_function(
-        "p => document.getElementById('fen-input').value.split(' ')[0] === p",
-        arg=EDITED_PLACEMENT)
-
-    page.click("#btn-done-editing")
-
-    # A real evaluation: the move list repopulates and the verdict leaves the
-    # editing text for a distance. Neither happens on the 404 screen a
-    # closure-leaving edit lands on.
-    page.wait_for_selector("#move-list li")
-    summary = page.inner_text("#position-summary")
-    assert EDITING not in summary, summary
-    assert "dtm 2" in summary, summary
-    assert page.is_hidden("#error-banner")
-    assert page.is_hidden("#btn-done-editing")
-    assert page.get_attribute("#btn-arrange", "aria-pressed") == "false"
-
-
-def test_done_puts_the_edited_position_in_the_url_and_back_undoes_it(page, server):
-    # The edit is a position in its own right: index.html and docs/USAGE.md
-    # both promise that a copied link reopens what is on screen, and Back is
-    # the only way out of an edit. commitBoard() compared the committed FEN
-    # against `current`, which every placement path had already advanced to
-    # the edited FEN, so the comparison was always false: nothing reached the
-    # hash, nothing reached the history, and one nav click (panels.js
-    # re-encodes whatever the hash says) put the pre-edit position back.
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-    before = page.input_value("#fen-input")
-
-    _edit_queen_to_d4(page)
-    page.click("#btn-done-editing")
-    page.wait_for_selector("#move-list li")
-    edited = page.input_value("#fen-input")
-    assert edited.split(" ")[0] == EDITED_PLACEMENT
-    assert edited != before
-
-    hash_fen = page.evaluate("new URLSearchParams(location.hash.slice(1)).get('fen')")
-    assert hash_fen == edited, "the edited position never reached the URL"
-
-    # A round trip through another panel must not resurrect the pre-edit FEN.
-    page.click("nav button[data-panel=materials]")
-    page.click("nav button[data-panel=explorer]")
-    assert page.input_value("#fen-input") == edited
-
-    # ...and Back returns to what the edit session started from.
-    assert page.is_enabled("#btn-back"), "the edit left no history entry"
-    page.click("#btn-back")
-    page.wait_for_function(
-        "f => document.getElementById('fen-input').value === f", arg=before)
-    assert page.evaluate(
-        "new URLSearchParams(location.hash.slice(1)).get('fen')") == before
-
-
-def test_arming_and_disarming_without_editing_pushes_no_history(page, server):
-    # The other half of the same comparison: opening an edit session and
-    # closing it again without touching a square must not spend a request or
-    # leave a duplicate entry for Back to walk through.
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-    before = page.input_value("#fen-input")
-    assert page.get_attribute("#btn-back", "disabled") is not None
-
-    page.click("#palette-pieces button[data-piece=wq]")
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    page.click("#btn-done-editing")
-    page.wait_for_selector("#move-list li")
-
-    assert page.input_value("#fen-input") == before
-    assert page.get_attribute("#btn-back", "disabled") is not None, \
-        "an edit that changed nothing pushed a history entry"
-
-
-def test_a_cancelled_drag_does_not_swallow_the_next_tap(page, server):
-    # Fix round 1 (code review): pointerup and pointercancel shared one `up`
-    # handler, which unconditionally set btn.dataset.dragged = "1" to
-    # suppress the click that follows a completed drag. But a pointercancel
-    # never produces a click (per spec), so that flag had no click left to
-    # consume it -- it stayed stuck until some LATER click silently ate
-    # itself clearing it, meaning the user's very next tap on that button
-    # after any cancelled drag did nothing at all.
-    #
-    # touchCancel via CDP is the same signature Step 10's hand check saw on
-    # a real touchscreen (pointerdown, pointermove, pointercancel, no
-    # pointerup) -- the browser's scroll-vs-drag heuristic reclaiming the
-    # gesture -- but dispatched deterministically rather than relying on
-    # that heuristic to fire.
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-
-    box = page.locator("#palette-pieces button[data-piece=wr]").bounding_box()
-    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-
-    cdp = page.context.new_cdp_session(page)
-
-    def touch_point(x, y):
-        return [{"x": x, "y": y, "radiusX": 5, "radiusY": 5, "force": 1}]
-
-    cdp.send("Input.dispatchTouchEvent", {
-        "type": "touchStart", "touchPoints": touch_point(cx, cy)})
-    cdp.send("Input.dispatchTouchEvent", {
-        "type": "touchMove", "touchPoints": touch_point(cx + 30, cy + 30)})
-    cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
-    page.wait_for_timeout(150)
-
-    # The move past the threshold armed wr before the cancel arrived --
-    # that part is unaffected by this bug.
-    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true"
-
-    # Return to the unarmed state through a DIFFERENT control -- Erase has
-    # no drag handling of its own, so this can't itself be the tap that
-    # clears a stuck flag on wr's button.
-    page.click("#btn-erase")
-    page.click("#btn-erase")
-    assert page.get_attribute("#btn-erase", "aria-pressed") == "false"
-    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "false"
-
-    # The tap that a stuck dataset.dragged flag would silently swallow.
-    page.click("#palette-pieces button[data-piece=wr]")
-    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true", \
-        "the tap after a cancelled drag was silently swallowed"
 
 
 def test_filtering_an_empty_corpus_does_not_throw(page, empty_server):
