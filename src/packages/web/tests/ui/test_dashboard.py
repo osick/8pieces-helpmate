@@ -851,3 +851,62 @@ def test_the_search_rail_matches_the_readout_height(page, server):
     readout = page.eval_on_selector("#panel-mine .readout", "e => e.getBoundingClientRect()")
     assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
         f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
+
+
+def test_dragging_a_piece_from_the_palette_places_it(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    src = page.locator("#palette-pieces button[data-piece=wr]")
+    dst = page.locator("#board rect[data-square=d4]")
+    src.drag_to(dst)
+    page.wait_for_function(
+        "document.getElementById('fen-input').value.split(' ')[0].includes('R')")
+    placement = page.input_value("#fen-input").split()[0]
+    assert placement.split("/")[4].startswith("3R"), placement
+    # a drag enters edit mode, so the previous position's value is retired
+    assert "dtm" not in page.inner_text("#position-summary")
+    assert page.is_visible("#btn-done-editing")
+
+
+def test_dragging_a_piece_off_the_board_removes_it(page, server):
+    # The landing position has a white queen on g1. Enter edit mode, drag it
+    # to a point beside the board -- right of its right edge, at the same y
+    # -- and it should be gone. Straight down (as a naive brief once had it)
+    # can land below the fixture's 1280x720 viewport, where mouse events
+    # never dispatch; beside the board stays inside the viewport in every
+    # layout.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+    assert "Q" in before.split()[0]
+
+    page.click("#btn-arrange")            # arrange mode: drag, don't place
+    page.wait_for_selector("#btn-done-editing:not([hidden])")
+    assert page.get_attribute("#btn-arrange", "aria-pressed") == "true"
+
+    box = page.locator("#board rect[data-square=g1]").bounding_box()
+    board_box = page.locator("#board").bounding_box()
+    start_x = box["x"] + box["width"] / 2
+    start_y = box["y"] + box["height"] / 2
+    off_x = board_box["x"] + board_box["width"] + 100   # beside the board, same y
+    page.mouse.move(start_x, start_y)
+    page.mouse.down()
+    page.mouse.move(off_x, start_y, steps=12)
+    page.mouse.up()
+
+    page.wait_for_function(
+        "before => document.getElementById('fen-input').value !== before", arg=before)
+    assert "Q" not in page.input_value("#fen-input").split()[0]
+
+
+def test_done_evaluates_and_leaves_edit_mode(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    src = page.locator("#palette-pieces button[data-piece=wr]")
+    dst = page.locator("#board rect[data-square=d4]")
+    src.drag_to(dst)
+    page.wait_for_selector("#btn-done-editing:not([hidden])")
+    page.click("#btn-done-editing")
+    page.wait_for_function(
+        "document.getElementById('position-summary').textContent.length > 0")
+    assert page.is_hidden("#btn-done-editing")

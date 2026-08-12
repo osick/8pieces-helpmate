@@ -284,6 +284,15 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
   font-weight: 600;
 }
 
+/* The piece under the pointer during a palette drag. Fixed to the viewport
+   and inert, so elementFromPoint sees the square underneath rather than the
+   ghost itself. */
+.drag-ghost {
+  position: fixed; z-index: 10; width: 2.6rem; height: 2.6rem;
+  pointer-events: none; opacity: .85;
+}
+#btn-done-editing { font-weight: 600; }
+
 #fen-form { display: flex; flex-direction: column; gap: .45rem; }
 #fen-input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
 label.inline { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ink-soft); font-size: var(--f2); }

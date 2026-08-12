@@ -5,6 +5,7 @@ import {
   PromotionDialog,
   PROMOTION_DIALOG_RESULT_TYPE,
 } from "../vendor/cm-chessboard/extensions/promotion-dialog/PromotionDialog.js";
+import { MOVE_CANCELED_REASON } from "../vendor/cm-chessboard/view/VisualMoveInput.js";
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { encodeState, decodeState } from "./lib/state.js";
 import { toPgn } from "./lib/export.js";
@@ -13,10 +14,16 @@ import { themeSummary } from "./lib/themes.js";
 import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
 import { renderStats } from "./stats-view.js";
 import { showPanel } from "./panels.js";
+import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
 const PALETTE = ["wk", "wq", "wr", "wb", "wn", "wp", "bk", "bq", "br", "bb", "bn", "bp"];
+// The fourth arming state. A piece name places, "" erases, null plays -- and
+// this drags what is already on the board. It is a distinct value rather than
+// a flag because click-to-place and drag-to-rearrange both bind pointerdown,
+// so exactly one of them may be live at a time.
+const ARRANGE = "arrange";
 
 let board = null;
 let current = START;
@@ -309,6 +316,56 @@ function commitBoard() {
   render(fen, { push: fen !== current });
 }
 
+// Dragging a piece out of the palette and onto a square. cm-chessboard has no
+// notion of an external drag source, so this is ours: capture the pointer,
+// carry a ghost, and ask the document what is under the pointer on release.
+// The board's own data-square attributes do the hit testing, so orientation
+// and the coordinate frame need no arithmetic here.
+function enablePaletteDrag(btn, piece) {
+  btn.addEventListener("pointerdown", (down) => {
+    if (down.button !== 0) return;
+    const from = { x: down.clientX, y: down.clientY };
+    let ghost = null;
+
+    const move = (e) => {
+      if (!ghost) {
+        if (!exceedsDragThreshold(from, { x: e.clientX, y: e.clientY })) return;
+        // Past the threshold this is a drag, so arm the piece (which puts the
+        // board in edit mode) and stop the click handler from also firing.
+        if (armed !== piece) setArmed(piece);
+        ghost = btn.cloneNode(true);
+        ghost.className = "drag-ghost";
+        ghost.removeAttribute("id");
+        document.body.appendChild(ghost);
+      }
+      ghost.style.left = `${e.clientX - 20}px`;
+      ghost.style.top = `${e.clientY - 20}px`;
+    };
+
+    const up = (e) => {
+      btn.removeEventListener("pointermove", move);
+      btn.removeEventListener("pointerup", up);
+      btn.removeEventListener("pointercancel", up);
+      if (!ghost) return;                       // it was a click; let click handle it
+      ghost.remove();
+      ghost = null;
+      btn.dataset.dragged = "1";
+      const square = squareFromTarget(document.elementFromPoint(e.clientX, e.clientY));
+      if (!square) return;                      // dropped off the board: no-op
+      board.setPiece(square, piece).then(() => {
+        const fen = withPlacement(current, board.getPosition());
+        current = fen;
+        syncControls(fen);
+      });
+    };
+
+    btn.setPointerCapture(down.pointerId);
+    btn.addEventListener("pointermove", move);
+    btn.addEventListener("pointerup", up);
+    btn.addEventListener("pointercancel", up);
+  });
+}
+
 function onSquareClick(event) {
   if (armed === null || !event.square) return;
   // setPiece is async; the board is the source of truth for the placement, so
@@ -329,22 +386,31 @@ function setArmed(piece, { commit = true } = {}) {
   for (const btn of document.querySelectorAll("#palette button"))
     btn.setAttribute("aria-pressed", String(btn.dataset.piece === piece && piece !== null));
 
+  const done = document.getElementById("btn-done-editing");
+
+  // Exactly one input binding is live at a time. Rebinding unconditionally is
+  // cheaper to reason about than working out which transitions need which
+  // call, and cm-chessboard's disable* calls are safe when nothing is bound.
+  board.disableSquareSelect(POINTER_EVENTS.pointerdown);
+  board.disableMoveInput();
+
   if (armed === null) {
-    if (wasEditing) {
-      board.disableSquareSelect(POINTER_EVENTS.pointerdown);
-      enableDragToPlay();
-      if (commit) commitBoard();
-    }
+    enableDragToPlay();
+    done.hidden = true;
+    if (wasEditing && commit) commitBoard();
     return;
   }
+
+  if (armed === ARRANGE) enableDragToEdit();
+  else board.enableSquareSelect(POINTER_EVENTS.pointerdown, onSquareClick);
+  done.hidden = false;
+
   if (!wasEditing) {
-    board.disableMoveInput();
-    board.enableSquareSelect(POINTER_EVENTS.pointerdown, onSquareClick);
     // The previous position's value belongs to a position that no longer
     // exists. Leaving it on screen while pieces move around would present a
     // stale dtm as the current one; say what is happening instead.
     const summary = document.getElementById("position-summary");
-    summary.textContent = "editing — click the armed piece again to evaluate";
+    summary.textContent = "editing — press Done to evaluate";
     summary.classList.add("muted");
     document.getElementById("position-themes").textContent = "";
     document.getElementById("move-list").textContent = "";
@@ -372,12 +438,19 @@ function buildPalette() {
     btn.appendChild(svg);
     // Clicking the armed piece again puts the board back in play mode, so a
     // round trip through the palette is never needed to resume exploring.
-    btn.addEventListener("click", () => setArmed(armed === piece ? null : piece));
+    btn.addEventListener("click", () => {
+      if (btn.dataset.dragged === "1") { delete btn.dataset.dragged; return; }
+      setArmed(armed === piece ? null : piece);
+    });
+    enablePaletteDrag(btn, piece);
     box.appendChild(btn);
   }
   const erase = document.getElementById("btn-erase");
   erase.setAttribute("aria-pressed", "false");
   erase.addEventListener("click", () => setArmed(armed === "" ? null : ""));
+  const arrange = document.getElementById("btn-arrange");
+  arrange.setAttribute("aria-pressed", "false");
+  arrange.addEventListener("click", () => setArmed(armed === ARRANGE ? null : ARRANGE));
   document.getElementById("btn-clear-board").addEventListener("click", () => {
     board.setPosition(EMPTY_PLACEMENT, false).then(() => {
       const fen = composeFen(EMPTY_PLACEMENT, splitFen(current).stm);
@@ -389,6 +462,28 @@ function buildPalette() {
 }
 
 // ---- board input -----------------------------------------------------
+
+// While editing, a drag means "move this piece there" (any square, legal or
+// not) and a drag off the board means "remove it". cm-chessboard raises both;
+// we simply stopped ignoring them.
+function enableDragToEdit() {
+  board.enableMoveInput((event) => {
+    if (event.type === INPUT_EVENT_TYPE.validateMoveInput) return true;
+    if (event.type === INPUT_EVENT_TYPE.moveInputCanceled
+        && event.reason === MOVE_CANCELED_REASON.movedOutOfBoard) {
+      board.setPiece(event.squareFrom, null).then(syncFromBoard);
+      return;
+    }
+    if (event.type === INPUT_EVENT_TYPE.moveInputFinished) syncFromBoard();
+    return true;
+  });
+}
+
+function syncFromBoard() {
+  const fen = withPlacement(current, board.getPosition());
+  current = fen;
+  syncControls(fen);
+}
 
 function enableDragToPlay() {
   // Dragging a piece plays the corresponding legal move, when there is one.
@@ -471,6 +566,7 @@ export function initExplorer() {
     const prev = history.pop();
     if (prev) render(prev);
   });
+  document.getElementById("btn-done-editing").addEventListener("click", () => setArmed(null));
   document.getElementById("btn-export-pgn").addEventListener("click", () => {
     const lines = JSON.parse(document.getElementById("lines").dataset.lines || "[]");
     const blob = new Blob([toPgn(current, lines)], { type: "application/x-chess-pgn" });
