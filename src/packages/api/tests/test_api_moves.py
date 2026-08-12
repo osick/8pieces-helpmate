@@ -66,6 +66,7 @@ def test_moves_uses_the_color_flip_fallback_like_probe(client):
     assert r.status_code == 200, r.text
     body = r.json()
     assert body["flipped"] is True
+    assert body["material"] == "KQvk"
     assert body["dtm"] is not None and body["notation"].startswith("h#")
     p = client.get("/v1/probe", params={"fen": fen}).json()
     assert (body["dtm"], body["count"], body["flipped"]) == (p["dtm"], p["count"], p["flipped"])
