@@ -101,7 +101,17 @@ def _drag_square_to_square(page, frm, to):
 
 
 def test_a_legal_drag_plays_the_move(page, server):
-    # 8/7k/5K2/8/8/8/8/6Q1 b: Black to move, Kh7 may go to h8.
+    # 8/7k/5K2/8/8/8/8/6Q1 b: Black to move, Kh7 may go to h8, landing on
+    # 7k/8/5K2/8/8/8/8/6Q1 w -- dtm 1 (h#0.5), 1 optimal line. Measured
+    # against the KPvk fixture (whose closure contains KQvk) on 2026-08-12.
+    #
+    # render() never clears #position-summary before its /v1/moves await
+    # (only the move list, lines and themes), so a bare "dtm" substring
+    # check here is satisfied instantly by the PARENT's own verdict, still
+    # on screen from before the drag ever happened -- proven by fix round
+    # 1's route-blocking run, recorded in the report. Assert the actual
+    # child answer instead, which can only appear once the real fetch for
+    # THIS position has landed.
     page.goto(server)
     page.wait_for_selector("#move-list li")
     assert page.eval_on_selector("#stm-select", "e => e.value") == "b"
@@ -109,12 +119,23 @@ def test_a_legal_drag_plays_the_move(page, server):
     page.wait_for_function(
         "() => document.getElementById('stm-select').value === 'w'")
     assert "8/7k" not in page.input_value("#fen-input")
-    assert "dtm" in page.inner_text("#position-summary")
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent === "
+        "'dtm 1 (h#0.5) · 1 optimal line(s)'")
 
 
 def test_an_illegal_drag_relocates_and_keeps_the_side_to_move(page, server):
     # The white queen cannot legally move at all here -- it is Black's turn --
-    # so dragging it is unambiguously a relocation.
+    # so dragging it is unambiguously a relocation, landing on
+    # 8/7k/5K2/8/3Q4/8/8/8 b -- dtm 2 (h#1), 1 optimal line (Kh6 the only
+    # answer, the queen having lost its original mating square). Measured
+    # against the KPvk fixture on 2026-08-12.
+    #
+    # Same defect as test_a_legal_drag_plays_the_move above: a bare
+    # `includes('dtm')` wait is satisfied in under a millisecond by the
+    # PRE-drag summary, never actually observing the recomputed verdict --
+    # proven by fix round 1's route-blocking run. Assert the real,
+    # recomputed text.
     page.goto(server)
     page.wait_for_selector("#move-list li")
     _drag_square_to_square(page, "g1", "d4")
@@ -122,7 +143,8 @@ def test_an_illegal_drag_relocates_and_keeps_the_side_to_move(page, server):
         "() => document.getElementById('fen-input').value.startsWith('8/7k/5K2/8/3Q4/')")
     assert page.eval_on_selector("#stm-select", "e => e.value") == "b", "a relocation flipped the turn"
     page.wait_for_function(
-        "() => document.getElementById('position-summary').textContent.includes('dtm')")
+        "() => document.getElementById('position-summary').textContent === "
+        "'dtm 2 (h#1) · 1 optimal line(s)'")
 
 
 def test_back_undoes_a_relocation(page, server):
@@ -142,6 +164,46 @@ def test_a_relocation_reaches_the_url(page, server):
     page.wait_for_selector("#move-list li")
     _drag_square_to_square(page, "g1", "d4")
     page.wait_for_function("() => location.hash.includes('3Q4')")
+
+
+PROMOTION_START = "7k/4P3/5K2/8/8/8/8/8 w - - 0 1"
+
+
+def test_a_multi_candidate_promotion_drag_waits_for_the_dialog(page, server):
+    # e7-e8 alone is ambiguous -- four legal moves share the uci prefix
+    # (e7e8q/e7e8r/e7e8b/e7e8n) -- so this is the one path playedMove
+    # actually guards: validateMoveInput shows the dialog and returns
+    # before any piece is chosen, moveInputFinished fires a microtask
+    # later (well before the user has clicked anything), and without the
+    # flag commitPlacement() would commit whatever cm-chessboard's own
+    # movePiece() already dropped on e8 -- a bare, unpromoted pawn -- as a
+    # bogus relocation. Measured against a freshly generated KPvk table on
+    # 2026-08-12: dtm 3 (h#1.5) to start; e7e8q -> dtm 4 (h#2), 29 optimal
+    # lines (e7e8n/e7e8b are dead: not solvable at all).
+    page.goto(f"{server}/#fen={quote(PROMOTION_START)}")
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+
+    _drag_square_to_square(page, "e7", "e8")
+
+    page.wait_for_selector(".promotion-dialog-button[data-piece=wq]")
+    # The dialog is up and nothing has been picked yet: the position on
+    # screen must still be the one the drag started from.
+    assert page.input_value("#fen-input") == before
+
+    page.click(".promotion-dialog-button[data-piece=wq]")
+    page.wait_for_function(
+        "() => document.getElementById('fen-input').value.startsWith('4Q2k/8/5K2/')")
+    # Same staleness trap as test_a_legal_drag_plays_the_move: the summary
+    # is not cleared before the /v1/moves await, so read it only once it has
+    # actually become the CHILD's verdict, not the STARTING position's.
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent === "
+        "'dtm 4 (h#2) · 29 optimal line(s)'")
+
+    page.click("#btn-back")
+    page.wait_for_function(
+        "b => document.getElementById('fen-input').value === b", arg=before)
 
 
 def test_the_board_has_no_mode_controls(page, server):

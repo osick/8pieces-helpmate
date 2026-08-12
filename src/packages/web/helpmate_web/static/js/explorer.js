@@ -388,11 +388,30 @@ function buildPalette() {
 // never gated behind a control, which is what lets three buttons and the whole
 // armed-state machinery go.
 //
-// `playedMove` exists because BOTH outcomes travel through the same event
-// pair: validateMoveInput decides, moveInputFinished fires afterwards either
-// way. Without the flag, a legal move would render its child position and then
-// moveInputFinished would immediately overwrite it with whatever the board's
-// DOM happens to hold mid-animation.
+// `playedMove` guards exactly one path: the multi-candidate promotion branch
+// below, where several underpromotion moves share one uci prefix and the
+// actual choice is deferred to the vendored dialog. The real event order
+// (read from vendor/cm-chessboard/view/VisualMoveInput.js): validateMoveInput
+// runs synchronously inside validateMoveInputCallback (:61-65), which then
+// resolves moveInputProcess; moveInputFinished fires one MICROTASK later, via
+// the `.then()` registered at :47-52 -- it does not wait for the drop's
+// visual animation. board.getPosition() reads state.position.getFen(), a
+// plain data model that Chessboard.js's movePiece/setPosition update
+// synchronously, never the DOM.
+//
+// On the plain-move and single-candidate paths that timing is harmless: our
+// own render() call already ran synchronously inside validateMoveInput (it
+// sets `current` and calls board.setPosition() before its first await), so
+// by the time moveInputFinished's commitPlacement() runs a microtask later,
+// board.getPosition() already agrees with `current` -- and commitPlacement's
+// own `fen === current` check would no-op regardless. The promotion branch
+// is different: showPromotionDialog() only calls render() once the user
+// picks a piece, so nothing has touched `current` yet when moveInputFinished
+// fires -- but cm-chessboard's own movePiece() has already moved the PAWN
+// (not yet a queen) onto the promotion square. Without this flag,
+// commitPlacement() would commit that mismatch as a bogus relocation -- an
+// unpromoted pawn on the back rank -- before the dialog's own render() ever
+// gets a chance to land the real, chosen move.
 let playedMove = false;
 
 function commitPlacement() {
