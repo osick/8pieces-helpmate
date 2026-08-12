@@ -242,6 +242,32 @@ def test_the_fen_applies_on_enter_without_a_set_button(page, server):
         "() => document.getElementById('stm-select').value === 'w'")
 
 
+def test_the_fen_input_has_its_own_row_and_the_rest_share_one_line(page, server):
+    # Fix round 1: a 460px rail can't fit a FEN input, a select and three
+    # buttons on one line (measured: 764px of children in a 428px content
+    # box) -- the first cut's "one line" comment and the report that verified
+    # it were both wrong. The real, deliberate layout is two rows: the FEN
+    # input alone (it's the longest datum here, ~30 characters), then
+    # everything else -- To move / Flip / Clear board / Back, 335px against
+    # the same 428px -- sharing a single line at the >=860px breakpoint.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    fen = page.eval_on_selector("#fen-input", "e => e.getBoundingClientRect()")
+    select = page.eval_on_selector("#stm-select", "e => e.getBoundingClientRect()")
+    flip = page.eval_on_selector("#btn-flip", "e => e.getBoundingClientRect()")
+    clear = page.eval_on_selector("#btn-clear-board", "e => e.getBoundingClientRect()")
+    back = page.eval_on_selector("#btn-back", "e => e.getBoundingClientRect()")
+    assert select["top"] >= fen["bottom"] - 1, "the FEN input does not have its own row"
+    tops = [select["top"], flip["top"], clear["top"], back["top"]]
+    # align-items: center puts a <label> wrapping a <select> at a slightly
+    # different top than a plain <button> even on the same line (their
+    # heights differ by a few px), so the same-row tolerance is generous --
+    # a genuine wrap to a second line differs by a full row height (~30px+
+    # the row gap), nowhere close to this margin.
+    assert max(tops) - min(tops) <= 8, "the remaining controls do not share one row"
+
+
 def test_the_board_has_no_mode_controls(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")

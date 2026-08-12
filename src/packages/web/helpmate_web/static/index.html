@@ -49,15 +49,17 @@
           <label class="sr-label" for="fen-input">Position (FEN)</label>
           <input id="fen-input" type="text" spellcheck="false" autocomplete="off"
                  placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
-          <label class="inline" for="stm-select">To move
-            <select id="stm-select">
-              <option value="b">Black</option>
-              <option value="w">White</option>
-            </select>
-          </label>
-          <button type="button" id="btn-flip">Flip</button>
-          <button type="button" id="btn-clear-board">Clear board</button>
-          <button type="button" id="btn-back" disabled>Back</button>
+          <div class="board-controls-row">
+            <label class="inline" for="stm-select">To move
+              <select id="stm-select">
+                <option value="b">Black</option>
+                <option value="w">White</option>
+              </select>
+            </label>
+            <button type="button" id="btn-flip">Flip</button>
+            <button type="button" id="btn-clear-board">Clear board</button>
+            <button type="button" id="btn-back" disabled>Back</button>
+          </div>
         </form>
       </div>
     </div>

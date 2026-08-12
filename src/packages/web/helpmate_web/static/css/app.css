@@ -290,14 +290,23 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 .tray button:active { cursor: grabbing; }
 .tray button svg { width: 100%; height: 100%; display: block; }
 
-/* One line: the position, whose turn it is, and the three things you can do
-   to the board. */
+/* Two rows, deliberately -- not the one line the task started from. The FEN
+   is the longest datum here (~30 characters) and is the one field anyone
+   might select or paste into, so it gets a row to itself; a 460px rail with
+   a text input, a select and three buttons never fits on one line (measured:
+   764px of children in a 428px content box). The second row -- whose turn it
+   is and the three things you can do to the board -- is 335px against that
+   same 428px, so it stays one line down to a ~430px rail and only wraps
+   again below that. */
 .board-controls {
-  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
+  display: flex; flex-direction: column; gap: var(--s2);
   width: 100%; max-width: 460px; margin-inline: auto;
 }
 .board-controls #fen-input {
-  flex: 1 1 100%; font-family: var(--mono); font-size: var(--f1);
+  font-family: var(--mono); font-size: var(--f1);
+}
+.board-controls-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2);
 }
 .board-pin.flipped .board-controls { order: -1; }
 
