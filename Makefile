@@ -68,7 +68,21 @@ test-core: build
 	$(BUILD)/helpmate_tests "~[slow]"
 test-cli: build
 	ctest --test-dir $(BUILD) --output-on-failure -R "^cli_"
+# conftest.py imports `helpmate_server` directly (`from helpmate_server.app
+# import create_app`), which resolves from site-packages, not the source
+# tree, and the wheel is a copy rather than an editable install. Without this
+# refresh a regression in existing API behaviour passes silently against a
+# stale copy -- a new test would fail loudly on a missing symbol, but an old
+# one would keep passing against old code. Same hazard as test-web below,
+# same fix.
+# GIT_CONFIG_GLOBAL=/dev/null: this machine's gitconfig rewrites HTTPS to SSH,
+# and a stray fetch hangs on an invisible passphrase prompt.
+# This install is a real side effect on whatever Python this runs under: fine
+# in CI and in a venv, but on a PEP-668 externally-managed Python outside a
+# venv it now hard-fails where it previously just ran the (possibly stale)
+# suite -- run this target inside a venv on such a system.
 test-api:
+	GIT_CONFIG_GLOBAL=/dev/null python -m pip install -q ./src/packages/api
 	python -m pytest src/packages/api/tests -v
 # The UI fixture serves the INSTALLED helpmate_web package, not the source
 # tree (conftest.py starts uvicorn, which imports it from site-packages), and
@@ -103,11 +117,16 @@ test-all: test test-api test-web test-bindings test-repo
 # basename) so js/foo.js and js/lib/foo.js can't collide, and node's error
 # output -- which names the temp path, not the real one -- has the temp path
 # substituted back to the real source path before printing.
+# `git ls-files` alone only lists tracked files, so a brand-new .js dropped
+# into the tree and never `git add`-ed is invisible to it -- lint would exit
+# 0 having checked nothing of the new file. `--others --exclude-standard`
+# adds untracked-but-not-.gitignore'd files to the tracked set, so a new
+# module is checked before it is ever staged.
 lint:
 	ruff check .
 	@tmp="$$(mktemp -d)" || { echo "lint: cannot create a temp dir"; exit 2; }; \
 	status=0; \
-	for f in $$(git ls-files 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js'); do \
+	for f in $$(git ls-files --cached --others --exclude-standard 'src/packages/web/helpmate_web/static/js/*.js' 'src/packages/web/helpmate_web/static/js/lib/*.js'); do \
 	  copy="$$tmp/$$(echo "$$f" | tr '/' '_').mjs"; \
 	  cp "$$f" "$$copy"; \
 	  if ! err="$$(node --check "$$copy" 2>&1)"; then \
