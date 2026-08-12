@@ -129,10 +129,74 @@ function syncControls(fen) {
   document.getElementById("stm-select").value = splitFen(fen).stm;
 }
 
+// A single move row, used both for the optimal group's own <ul> and for a
+// band's <ul class="chips"> -- same element, same click behaviour, so a chip
+// IS a row rather than a lookalike of one.
+function renderMoveRow(m) {
+  const li = document.createElement("li");
+  li.className = moveClass(m);
+  li.dataset.san = m.san;
+  const san = document.createElement("span");
+  san.className = "san";
+  san.textContent = m.san;
+  li.appendChild(san);
+  const text = moveBadge(m);
+  if (text) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = text;
+    li.appendChild(badge);
+  }
+  // Every row is clickable, including the dead ones: walking into a
+  // position with no helpmate is a legitimate thing to want to look at,
+  // and that is the behaviour the list has today.
+  li.addEventListener("click", () => { history.push(current); render(m.fen); });
+  return li;
+}
+
+// A group with `bands` (Slower, No mate) renders one shared distance label
+// per band plus its moves as chips -- the distance is a fact of the band,
+// not of any one move, so stating it once removes the per-row repetition
+// that made the Slower group 25 rows of near-identical text. A group
+// without `bands` (Optimal) keeps full rows: its per-move solution count
+// differs move to move, which is exactly what the list exists to show.
+function renderGroup(sec, g) {
+  if (!g.bands) {
+    const ul = document.createElement("ul");
+    for (const m of g.moves) ul.appendChild(renderMoveRow(m));
+    sec.appendChild(ul);
+    return;
+  }
+  for (const band of g.bands) {
+    const wrap = document.createElement("div");
+    wrap.className = "band";
+    // The label cell is ALWAYS emitted, even empty (the no-mate group's
+    // band() returns null): .band is a two-column grid, and skipping the
+    // cell for a null label would leave the <ul class="chips"> as the
+    // grid's first child instead of its second -- landing it in the label
+    // column (3.2rem) rather than the chip column (1fr), which wraps every
+    // chip onto its own row. An empty span with no text content renders no
+    // visible character and no gap artefact; it is exactly as tall as the
+    // chips beside it, so nothing shifts.
+    const lab = document.createElement("span");
+    lab.className = "band-label";
+    if (band.label) lab.textContent = band.label;
+    wrap.appendChild(lab);
+    const ul = document.createElement("ul");
+    ul.className = "chips";
+    for (const m of band.moves) ul.appendChild(renderMoveRow(m));
+    wrap.appendChild(ul);
+    sec.appendChild(wrap);
+  }
+}
+
 // #move-list is a <div> of <section class="move-group">, not a <ul>. Seven UI
 // tests use `#move-list li` as their "the page is ready" idiom and two COUNT
 // it, so a group header must never be an <li> -- it is the section's <h3>,
-// outside the <ul>. `#move-list li` then still selects exactly the move rows.
+// outside the <ul>. A banded group nests its rows one level deeper still
+// (section > .band > ul.chips > li rather than section > ul > li), but
+// `#move-list li` is a descendant selector and does not care about depth, so
+// it keeps selecting exactly the move rows either way.
 function renderMoveList(el, moves) {
   el.textContent = "";
   const groups = groupMoves(moves);
@@ -157,26 +221,9 @@ function renderMoveList(el, moves) {
     n.className = "n";
     n.textContent = g.moves.length;
     h.appendChild(n);
+    sec.appendChild(h);
 
-    const ul = document.createElement("ul");
-    for (const m of g.moves) {
-      const li = document.createElement("li");
-      li.className = moveClass(m);
-      li.dataset.san = m.san;
-      const san = document.createElement("span");
-      san.className = "san";
-      san.textContent = m.san;
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = moveBadge(m);
-      li.append(san, badge);
-      // Every row is clickable, including the dead ones: walking into a
-      // position with no helpmate is a legitimate thing to want to look at,
-      // and that is the behaviour the list has today.
-      li.addEventListener("click", () => { history.push(current); render(m.fen); });
-      ul.appendChild(li);
-    }
-    sec.append(h, ul);
+    renderGroup(sec, g);
     el.appendChild(sec);
   }
 }

@@ -88,13 +88,16 @@ export function waysLabel(count) {
   return count === 1 ? "only reply" : `${count} ways`;
 }
 
-// A badge states a claim, never a bare number -- and a metric is omitted
-// where it would mislead. A slower move's child count is not comparable with
-// the optimal group's (they sit at different distances), so it is left off.
+// A badge earns its place only when it says something the group heading and
+// the band label cannot. That is true in exactly one group: the optimal
+// moves, whose child solution count differs per move and is the property a
+// composer is reading the list for. Slower and dead moves are banded by
+// distance, so a per-move badge would repeat the band label N times -- which
+// is what made the list 25 rows of identical text.
 export function moveBadge(move) {
-  if (move.solvable !== true) return "no mate";
-  if (move.optimal !== true) return `${move.notation} · slower`;
-  return `${move.notation} · ${waysLabel(move.count)}`;
+  if (move.solvable !== true) return null;
+  if (move.optimal !== true) return null;
+  return waysLabel(move.count);
 }
 
 // The row's class. "only" marks a child with a single continuation; it is

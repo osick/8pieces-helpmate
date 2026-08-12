@@ -339,40 +339,67 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 .move-group { display: flex; flex-direction: column; gap: var(--s1); }
 .move-group h3 { margin: 0; }
 .move-group h3 .n { font-family: var(--mono); color: var(--ink-faint); font-weight: 400; }
-.move-group ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+/* Direct-child, not descendant: a band's chips live in .move-group > .band
+   > ul.chips, one level deeper, and must not be reachable through this
+   selector -- at equal specificity with .chips the winner would be
+   whichever rule came last in the file. Narrowed together with the eleven
+   `.move-group li…` row selectors below, for the same reason. */
+.move-group > ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 /* 4px on the row, 3px on the badge below -- not --r (6px). Deliberate: rows
    and badges read tighter than the panels that contain them, so they are not
    tokenized to the shared radius. */
-.move-group li {
+.move-group > ul > li {
   display: flex; align-items: center; gap: var(--s2);
   padding: .4rem .55rem; border-radius: 4px; border: 1px solid transparent;
   cursor: pointer;
 }
-.move-group li:hover { border-color: var(--accent); }
-.move-group li .san { font-family: var(--mono); font-size: var(--f2); font-weight: 600; min-width: 4.5em; }
-.move-group li .badge {
+.move-group > ul > li:hover { border-color: var(--accent); }
+.move-group > ul > li .san { font-family: var(--mono); font-size: var(--f2); font-weight: 600; min-width: 4.5em; }
+.move-group > ul > li .badge {
   margin-left: auto; font-family: var(--mono); font-size: var(--f0);
   font-variant-numeric: tabular-nums; white-space: nowrap;
   padding: .2rem .45rem; border-radius: 3px;
 }
 
 /* top of the scale: solid, maximum contrast, and a bar in the gutter */
-.move-group li.optimal { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
-.move-group li.optimal .badge { background: var(--ink); color: var(--on-ink); }
+.move-group > ul > li.optimal { background: var(--sunk); box-shadow: inset 3px 0 0 var(--ink); }
+.move-group > ul > li.optimal .badge { background: var(--ink); color: var(--on-ink); }
 /* The qualifier is a RING, not a hue, so it survives greyscale and every form
    of colour blindness -- and the badge already says "only reply" in words. */
-.move-group li.optimal.only .badge { box-shadow: inset 0 0 0 2px var(--on-ink); }
+.move-group > ul > li.optimal.only .badge { box-shadow: inset 0 0 0 2px var(--on-ink); }
 
 /* middle: outlined, same ink, no fill */
-.move-group li.slower .san { font-weight: 400; }
-.move-group li.slower .badge { color: var(--ink-soft); border: 1px solid var(--rule); }
+.move-group > ul > li.slower .san { font-weight: 400; }
+.move-group > ul > li.slower .badge { color: var(--ink-soft); border: 1px solid var(--rule); }
 
 /* bottom: faded and struck through */
-.move-group li.dead .san {
+.move-group > ul > li.dead .san {
   color: var(--ink-faint); font-weight: 400;
   text-decoration: line-through; text-decoration-thickness: 1px;
 }
-.move-group li.dead .badge { color: var(--ink-faint); }
+.move-group > ul > li.dead .badge { color: var(--ink-faint); }
+
+/* A band is a shared fact stated once, then the moves it covers. */
+.band { display: grid; grid-template-columns: 3.2rem 1fr; gap: var(--s2);
+        align-items: start; margin-top: var(--s1); }
+.band-label { font-family: var(--mono); font-size: var(--f1);
+              color: var(--ink-soft); text-align: right; padding-top: .25rem; }
+.chips { list-style: none; margin: 0; padding: 0;
+         display: flex; flex-wrap: wrap; gap: .25rem; }
+.chips li {
+  font-family: var(--mono); font-size: var(--f1); font-weight: 600;
+  padding: .2rem .45rem; border-radius: 3px; border: 1px solid var(--rule);
+  cursor: pointer;
+}
+.chips li:hover { border-color: var(--accent); }
+.chips li .san { min-width: 0; }
+.chips li.dead .san { color: var(--ink-faint); text-decoration: line-through; }
+/* The no-mate group's band() returns a null label, so its .band-label span
+   is emitted empty rather than omitted (see renderGroup in explorer.js) --
+   .band is a two-column grid, and an omitted cell would push the chips
+   into the label column instead of the chip column, wrapping every chip
+   onto its own row. The empty span keeps the chips aligned under the
+   distance labels above rather than flush to the section's left edge. */
 
 #lines { margin: .5rem 0 0; padding-left: 1.4rem; font-family: var(--mono); font-size: var(--f1); }
 #lines li { padding: .1rem 0; }

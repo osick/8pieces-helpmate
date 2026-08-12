@@ -102,15 +102,14 @@ test("a saturated count is never rendered as a measurement", () => {
 
 test("badges state a claim, and the optimal group is sorted around them", () => {
   const [optimal, slower] = groupMoves(SATURATED);
-  assert.deepEqual(optimal.moves.map(moveBadge),
-                   ["h#4.5 · 246 ways", "h#4.5 · 255+ ways"]);
-  assert.deepEqual(slower.moves.map(moveBadge), ["h#5.5 · slower"]);
+  assert.deepEqual(optimal.moves.map(moveBadge), ["246 ways", "255+ ways"]);
+  assert.deepEqual(slower.moves.map(moveBadge), [null]);
 });
 
-test("a slower badge omits the count, a dead badge omits everything", () => {
+test("a slower badge and a dead badge are both null -- the band label says it instead", () => {
   const [, slower, dead] = groupMoves(THREE);
-  assert.equal(moveBadge(slower.moves[0]), "h#4.5 · slower");
-  assert.equal(moveBadge(dead.moves[0]), "no mate");
+  assert.equal(moveBadge(slower.moves[0]), null);
+  assert.equal(moveBadge(dead.moves[0]), null);
 });
 
 test("moveClass carries the group and marks a sole continuation", () => {
@@ -127,6 +126,15 @@ const M = (san, dtm, count, opts = {}) => ({
   notation: opts.notation ?? (dtm == null ? null : `h#${dtm / 2}`),
   uci: opts.uci ?? san.toLowerCase(),
   fen: opts.fen ?? `fen-${san}`,
+});
+
+test("a badge is only produced where it says something a band label cannot", () => {
+  // The optimal group's count differs per move: it keeps a badge.
+  assert.equal(moveBadge(M("Kh8", 1, 1, { optimal: true })), "only reply");
+  assert.equal(moveBadge(M("Kh6", 1, 3, { optimal: true })), "3 ways");
+  // Slower and dead moves are banded, so their badge would repeat the band.
+  assert.equal(moveBadge(M("Qa7", 2, 9)), null);
+  assert.equal(moveBadge(M("Qg8", null, 0, { solvable: false })), null);
 });
 
 test("the optimal group is never banded — its per-move count is the datum", () => {

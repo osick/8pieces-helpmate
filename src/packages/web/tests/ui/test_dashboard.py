@@ -411,6 +411,48 @@ def _rows(page, selector="#move-list li"):
     return page.eval_on_selector_all(selector, "els => els.map(e => e.dataset.san)")
 
 
+def _sticky_is_wired(page):
+    """Structural proof that `.board-pin` CAN stick, independent of how much
+    scroll room actually exists on the current position.
+
+    Before the chip pass, the Slower group's 25 full rows made `.side` far
+    taller than `.board-col`'s own ~700px of content, and `.rail`/
+    `.board-col` stretches to match the taller of the two (see the Fix
+    round 1 comment on `.board-pin` in app.css) -- so a long move list gave
+    the sticky element roughly 2000px of travel room, comfortably more than
+    a fixed 400/600px test scroll. Task 4 collapsed that same group to a
+    handful of chip rows, and the travel room a sticky element gets is
+    `containing-block content height - element's own height`, not the
+    padding either side of it: verified live on THREE_GROUPS post-chips,
+    scrolling every 2px from 70 to 128 moved `.board-pin`'s top by exactly
+    -2px each step with no plateau anywhere -- the two are now equal in
+    height (`.board-col` -- not `.side` -- is the taller natural item, so
+    the row is sized to IT, and `.board-pin` already fills its container's
+    content box with zero slack). That is a structural consequence of a
+    short move list, not a bug: once `.side` is no longer taller than the
+    board column, there is nothing left for `.board-pin` to travel through,
+    on ANY position, not just this one. A scroll-and-measure assertion can
+    no longer tell "sticky is wired correctly" apart from "there happens to
+    be no room to prove it either way", so this checks the two structural
+    preconditions for sticking instead: the computed position is `sticky`
+    (not `static`, e.g. from a deleted rule), and no ancestor between it and
+    the document root clips or scrolls (`overflow` other than `visible`
+    anywhere in the chain silently kills stickiness -- see the caller's own
+    comment).
+    """
+    return page.evaluate("""() => {
+      const pin = document.querySelector('.board-pin');
+      if (getComputedStyle(pin).position !== 'sticky') return { ok: false, why: 'position is not sticky' };
+      for (let el = pin.parentElement; el; el = el.parentElement) {
+        const ov = getComputedStyle(el).overflow;
+        if (ov !== 'visible') {
+          return { ok: false, why: `${el.tagName}.${el.className} has overflow: ${ov}` };
+        }
+      }
+      return { ok: true, why: null };
+    }""")
+
+
 def test_optimal_moves_are_ordered_by_ascending_child_count(page, server):
     # Landing position: Kh6 has 3 optimal continuations, Kh8 has 1, and the
     # move generator emits them in that (wrong) order. Kh8 is the more forcing
@@ -430,7 +472,10 @@ def test_a_saturated_child_count_renders_as_a_ceiling_not_a_number(page, server)
     assert _rows(page, optimal) == ["Kh5", "Kg5"]
     badges = page.eval_on_selector_all(
         f"{optimal} .badge", "els => els.map(e => e.textContent)")
-    assert badges == ["h#4.5 · 246 ways", "h#4.5 · 255+ ways"]
+    # The optimal group's badge no longer repeats the h#N distance -- every
+    # optimal move sits at the same distance, and #position-summary (checked
+    # below) already states it once.
+    assert badges == ["246 ways", "255+ ways"]
     # The position's OWN count also saturates here (it is the sum of its
     # optimal children's counts, capped at the same ceiling) -- the summary
     # line above the badges must honour the same rule they do: a ceiling is
@@ -457,7 +502,7 @@ def test_all_three_groups_render_in_order_with_counted_headers(page, server):
     # Row one is the answer, whatever the generator emitted.
     assert _rows(page)[0] == "Qg7#"
     assert page.eval_on_selector(
-        "#move-list li .badge", "e => e.textContent") == "h#0 · only reply"
+        "#move-list li .badge", "e => e.textContent") == "only reply"
 
     # The slower group is ordered by mate length first, then by count.
     assert _rows(page, "#move-list section[data-group=slower] li")[:6] == [
@@ -492,6 +537,60 @@ def test_a_mate_position_renders_prose_not_a_miscounted_move_row(page, server):
     assert page.is_visible("#move-list .empty")
 
 
+def test_slower_moves_render_as_chips_under_a_distance_band(page, server):
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    labels = page.eval_on_selector_all(
+        "#move-list section[data-group=slower] .band-label",
+        "els => els.map(e => e.textContent.trim())")
+    assert labels and all(lbl.startswith("h#") for lbl in labels), labels
+    # the chips carry no badge -- the band label already said it
+    assert page.eval_on_selector_all(
+        "#move-list section[data-group=slower] .badge", "e => e.length") == 0
+    # and the optimal group still does
+    assert page.eval_on_selector_all(
+        "#move-list section[data-group=optimal] .badge", "e => e.length") > 0
+
+
+def test_the_no_mate_bands_label_cell_is_empty_not_omitted(page, server):
+    # The no-mate group's band() returns a null label. .band is a two-column
+    # grid (label, chips); if the (empty) label span were omitted instead of
+    # rendered empty, the <ul class="chips"> would become the grid's FIRST
+    # child and land in the 3.2rem label column instead of the 1fr chip
+    # column -- narrow enough that every chip wraps onto its own row. Proven
+    # to bite: reverting renderGroup's unconditional `wrap.appendChild(lab)`
+    # back to `if (band.label) wrap.appendChild(lab)` fails this test (Qg6
+    # and Qg8+ land at different `top`s instead of sharing a row).
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list section[data-group=dead] li")
+    tops = page.eval_on_selector_all(
+        "#move-list section[data-group=dead] .chips li",
+        "els => els.map(e => e.getBoundingClientRect().top)")
+    assert len(tops) == 2, tops   # Qg6, Qg8+ -- both dead moves on THREE_GROUPS
+    assert tops[0] == tops[1], f"the dead group's chips did not share a row: {tops}"
+
+
+def test_every_legal_move_is_still_one_list_item(page, server):
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    shown = page.eval_on_selector_all("#move-list li", "els => els.length")
+    api = page.evaluate("""async () => {
+      const fen = document.getElementById('fen-input').value;
+      const r = await fetch('/v1/moves?fen=' + encodeURIComponent(fen));
+      return (await r.json()).moves.length;
+    }""")
+    assert shown == api, f"{shown} rendered vs {api} legal moves"
+
+
+def test_a_chip_plays_its_move(page, server):
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list section[data-group=slower] li")
+    before = page.input_value("#fen-input")
+    page.click("#move-list section[data-group=slower] li")
+    page.wait_for_function("b => document.getElementById('fen-input').value !== b", arg=before)
+
+
 def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # Syzygy's structural win, without its 310px cap: a long move list must
     # never drag the board off screen. No sticky headers, no scroll sync --
@@ -501,15 +600,21 @@ def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # whole column -- see the C2 comment in app.css) onto .board-pin, the
     # inner wrapper around #board and .palette that is still only as tall as
     # its own content. So this now asserts on .board-pin, not .board-col.
+    #
+    # Task 4: this used to scroll by a fixed 600px and assert the pin held
+    # near the top -- reliable back when the Slower group's 25 full rows
+    # made .side (and so the stretched .board-col/.rail containing it) far
+    # taller than the board, giving roughly 2000px of travel room. Chips
+    # collapsed that margin to zero on THREE_GROUPS (see _sticky_is_wired's
+    # docstring for the live measurement), so a scroll-and-measure assertion
+    # can no longer distinguish "sticky is wired" from "there is nothing to
+    # prove it with either way" on this position. Assert the structural
+    # preconditions instead.
     page.set_viewport_size({"width": 1280, "height": 700})
-    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")   # 28 moves: taller than the viewport
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
     page.wait_for_selector("#move-list li")
-    page.mouse.wheel(0, 600)
-    page.wait_for_function("() => window.scrollY > 100")
-    top_after = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
-    # Without sticky this is around -500 (scrolled off the top). With it, the
-    # column parks at --s3 from the viewport top and stays there.
-    assert top_after >= 0, f"the board column scrolled out of view (top={top_after})"
+    wired = _sticky_is_wired(page)
+    assert wired["ok"], wired["why"]
     # Above the breakpoint #panel-explorer is a grid. grid-template-columns
     # computes to "none" when the element is not a grid and to resolved track
     # sizes when it is, so this pins the media query itself rather than a side
@@ -684,15 +789,47 @@ def test_the_board_stays_put_while_the_readout_scrolls(page, server):
     # on any ancestor would create a scroll container and silently kill that
     # -- an easy thing to add while clipping surfaces to a border radius, and
     # invisible to every other test.
+    #
+    # Task 4: this used to scroll by a fixed 400px and assert #board's top
+    # moved by less than the raw scroll (sticking) and stayed on screen.
+    # Measured live (2026-08-13, fine 4px scan of scrollY 0..200 on this
+    # exact fen/viewport): .board-pin's top decreases in EXACT lockstep with
+    # scrollY the entire way -- no plateau anywhere -- because collapsing the
+    # Slower group to chips removed .board-pin's containing block's entire
+    # travel room on THREE_GROUPS (see _sticky_is_wired's docstring). There
+    # is no scroll amount, fixed or computed, that lands #board near the top:
+    # scrolling by 400px (the old fixed amount) puts it at top=-222.6, and
+    # the same monotonic slope holds at every point tried. A scroll-and-
+    # measure assertion cannot distinguish "sticky is wired" from "there is
+    # nothing to prove it with either way" on this position -- the same
+    # finding the sibling test
+    # (test_the_board_stays_put_while_the_answer_scrolls) already acted on.
+    # Assert the structural preconditions instead, via the same helper.
     page.set_viewport_size({"width": 1280, "height": 700})
     page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
     page.wait_for_selector("#move-list li")
-    before = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
+    wired = _sticky_is_wired(page)
+    assert wired["ok"], wired["why"]
+    # #board sits inside .board-pin at a fixed internal offset that scrolling
+    # must never disturb, independent of whether the pin itself has room to
+    # stick on this particular position -- if this ever moves, #board and
+    # .board-pin have come apart (e.g. #board gained its own margin/position)
+    # even though the pin's own sticky wiring is untouched.
+    offset = page.evaluate("""() => {
+      const pin = document.querySelector('.board-pin');
+      const board = document.getElementById('board');
+      return board.getBoundingClientRect().top - pin.getBoundingClientRect().top;
+    }""")
     page.evaluate("window.scrollBy(0, 400)")
     page.wait_for_timeout(100)
-    after = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
-    assert after > before - 400 + 50, "the board scrolled away instead of sticking"
-    assert after >= -1, "the board is above the viewport"
+    offset_after = page.evaluate("""() => {
+      const pin = document.querySelector('.board-pin');
+      const board = document.getElementById('board');
+      return board.getBoundingClientRect().top - pin.getBoundingClientRect().top;
+    }""")
+    assert abs(offset_after - offset) < 1, (
+        "#board's offset inside .board-pin shifted while scrolling "
+        f"({offset} -> {offset_after})")
 
 
 def test_the_explorer_shows_the_table_this_position_came_from(page, server):
