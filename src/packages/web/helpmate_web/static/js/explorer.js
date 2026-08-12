@@ -53,6 +53,16 @@ async function showTableStats(material) {
   band.dataset.material = material;
 
   if (!statsCache.has(material)) {
+    // materials.js's showStats() sets the same precedent: write a placeholder
+    // before the await, not after. Without this the PREVIOUS material's
+    // rendered chart -- headed by the previous material's name -- stays on
+    // screen for the entire fetch, under a band whose dataset.material has
+    // already flipped to the new one.
+    body.textContent = "";
+    const loading = document.createElement("p");
+    loading.className = "empty";
+    loading.textContent = `Loading ${material}…`;
+    body.appendChild(loading);
     try {
       const res = await api.stats(material);
       // A 202 means the table is still downloading. The band is context, not
@@ -66,6 +76,22 @@ async function showTableStats(material) {
   }
   if (bandMaterial !== material) return;                 // superseded while awaiting
   renderStats(body, statsCache.get(material), { idPrefix: "tbl-", samples: false });
+}
+
+// initMaterials() populates #material-list asynchronously and signals
+// completion by setting window.__materialsReady = true -- the same flag
+// three existing UI tests already poll for this purpose. #btn-open-material
+// can be clicked before that fetch resolves (a slow /v1/materials on the
+// real 295-table corpus, or simply a click during first paint), and the
+// list it queries would still be empty; wait for the existing signal rather
+// than querying too early and silently selecting nothing.
+function whenMaterialsReady() {
+  if (window.__materialsReady === true) return Promise.resolve();
+  return new Promise((resolve) => {
+    const id = setInterval(() => {
+      if (window.__materialsReady === true) { clearInterval(id); resolve(); }
+    }, 20);
+  });
 }
 
 function showError(err) {
@@ -454,11 +480,12 @@ export function initExplorer() {
     a.click();
     URL.revokeObjectURL(a.href);
   });
-  document.getElementById("btn-open-material").addEventListener("click", () => {
+  document.getElementById("btn-open-material").addEventListener("click", async () => {
     const material = document.getElementById("table-stats").dataset.material;
     if (!material) return;
     location.hash = encodeState({ fen: current, panel: "materials" });
     showPanel("materials");
+    await whenMaterialsReady();
     const li = document.querySelector(`#material-list li[data-material="${material}"]`);
     if (li) li.click();
   });

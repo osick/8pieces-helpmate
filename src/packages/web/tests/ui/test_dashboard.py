@@ -554,24 +554,54 @@ def test_the_explorer_shows_the_table_this_position_came_from(page, server):
     assert page.eval_on_selector_all("#tbl-material-samples", "e => e.length") == 0
 
 
-def test_the_table_band_is_not_refetched_while_the_material_holds(page, server):
-    page.goto(server)
+def test_the_table_band_refetches_only_when_the_material_actually_changes(page, server):
+    # A single-table fixture can never distinguish "correctly cached" from
+    # "never refetches at all" using only same-material moves -- KQvk -> KQvk
+    # moves prove nothing about the fetch-when-changed branch of the
+    # bandMaterial === material guard. Kxg1 is a real material transition
+    # reachable inside this very fixture: KQvk's own closure already
+    # generates a Kvk table too (see
+    # test_materials_panel_lists_tables_and_opens_a_sample), and capturing
+    # White's queen leaves exactly that material on the board. Verified with
+    # python-chess: from "K7/8/8/8/8/8/6k1/6Q1 b - - 0 1" (White Ka8+Qg1,
+    # Black kg2, Black to move) Kxg1 is a legal king move and lands on
+    # "K7/8/8/8/8/8/8/6k1 w - - 0 1", queried against the fixture on
+    # 2026-08-12: material "KQvk" before, "Kvk" after.
+    capture_fen = "K7/8/8/8/8/8/6k1/6Q1 b - - 0 1"
+    page.goto(f"{server}/#fen={quote(capture_fen)}")
     page.wait_for_selector("#table-stats .stats-head")
+    assert "KQvk" in page.inner_text("#table-stats .stats-head")
+
     # Match /v1/materials/<name>/stats only. A bare "/stats" would also match
     # the corpus aggregate, which initMaterials() requests on load -- an async
     # call that can land after this patch and turn the test flaky.
     page.evaluate("""() => {
-      window.__statsCalls = 0;
+      window.__statsCalls = [];
       const orig = window.fetch;
       window.fetch = (...a) => {
-        if (/\\/v1\\/materials\\/[^/]+\\/stats/.test(String(a[0]))) window.__statsCalls++;
+        const m = String(a[0]).match(/\\/v1\\/materials\\/([^/]+)\\/stats/);
+        if (m) window.__statsCalls.push(m[1]);
         return orig(...a);
       };
     }""")
-    page.click("#move-list li.optimal")
+
+    # Kh3 keeps the same material (KQvk): the guard's early-return branch,
+    # zero further fetches.
+    page.click("#move-list li[data-san='Kh3']")
     page.wait_for_function(
         "document.getElementById('position-summary').textContent.includes('dtm')")
-    assert page.evaluate("window.__statsCalls") == 0, "refetched the same material"
+    assert page.evaluate("window.__statsCalls") == [], "refetched a material that didn't change"
+
+    page.click("#btn-back")
+    page.wait_for_function(
+        "want => document.getElementById('fen-input').value === want", arg=capture_fen)
+
+    # Kxg1 changes the material (KQvk -> Kvk): the guard's fetch branch,
+    # exactly one new request, for the new material.
+    page.click("#move-list li[data-san='Kxg1']")
+    page.wait_for_function(
+        "document.getElementById('table-stats').dataset.material === 'Kvk'")
+    assert page.evaluate("window.__statsCalls") == ["Kvk"], "did not refetch for the changed material"
 
 
 def test_the_table_band_opens_the_material(page, server):
