@@ -98,3 +98,32 @@ def test_the_aggregate_is_recomputed_when_a_table_appears(kqvk_dir, tmp_path):
     second = c.get("/v1/stats").json()
     assert second["tables"] == 2, "the catalog changed and the cache did not"
     assert second["no_helpmate"] == ["Kvk"]            # bare kings cannot mate
+
+
+def test_the_aggregate_is_recomputed_when_a_sidecar_is_rewritten_in_place(kqvk_dir, tmp_path):
+    # The higher-frequency real-world case: a corrected regeneration rewrites
+    # only the .stats.json, leaving the .hm's name/size/location untouched.
+    # A key built only from the catalog's .hm-derived fields cannot see this
+    # -- it must be built from the sidecar's own identity too.
+    import json
+
+    from fastapi.testclient import TestClient
+    from helpmate_server.storage import LocalDir, ChainSource
+    from helpmate_server.app import create_app
+
+    for ext in (".hm", ".stats.json"):
+        (tmp_path / f"KQvk{ext}").write_bytes((kqvk_dir / f"KQvk{ext}").read_bytes())
+    c = TestClient(create_app(ChainSource([LocalDir(tmp_path)])))
+
+    first = c.get("/v1/stats").json()
+    assert c.get("/v1/stats").json() == first          # served from cache
+
+    assert first["max_dtm"] != 40   # sanity: distinct from the value written below
+
+    sidecar_path = tmp_path / "KQvk.stats.json"
+    sidecar = json.loads(sidecar_path.read_text())
+    sidecar["max_dtm"] = 40         # still a real distance, well under the 255 sentinel
+    sidecar_path.write_text(json.dumps(sidecar))
+
+    second = c.get("/v1/stats").json()
+    assert second["max_dtm"] == 40, "the sidecar changed in place and the cache did not"

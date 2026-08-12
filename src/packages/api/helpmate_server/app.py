@@ -139,25 +139,31 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         return _tb(chain, d).stats(name)
 
     # Recomputing this walks every sidecar (295 files / 13 MB / 0.17s measured
-    # on the reference corpus), so it is cached against a signature of the
-    # catalog itself: a newly generated or downloaded table invalidates it and
-    # nothing else does. Closure state, not module state, so each create_app()
-    # in the test suite starts cold.
+    # on the reference corpus) -- but chain.catalog() already parses every
+    # sidecar's JSON on every call via _info_from_files, so /v1/stats was
+    # already paying that cost before this cache ever ran; stat()-ing each
+    # sidecar again below is negligible against it. The cache key covers each
+    # sidecar's own identity (existence, mtime, size), not just the .hm's
+    # (material, size_bytes, location), so it invalidates both when a table
+    # is newly generated or downloaded AND when an existing material's
+    # sidecar is rewritten in place with the .hm untouched -- e.g. a
+    # corrected regeneration. Closure state, not module state, so each
+    # create_app() in the test suite starts cold.
     agg_cache: dict[str, object] = {}
 
     @app.get("/v1/stats")
     def stats_overall():
         cat = chain.catalog()
-        key = tuple(sorted((s.material, s.size_bytes, s.location) for s in cat))
-        if agg_cache.get("key") == key:
-            return agg_cache["value"]
         sidecars = []
+        sig = []
         for s in cat:
             d = chain.resolve(s.material)
-            if d is None:
-                continue
-            p = Path(d) / f"{s.material}.stats.json"
-            if not p.exists():
+            p = Path(d) / f"{s.material}.stats.json" if d is not None else None
+            st = p.stat() if p is not None and p.exists() else None
+            sig.append((s.material, s.size_bytes, s.location,
+                       st.st_mtime_ns if st is not None else -1,
+                       st.st_size if st is not None else -1))
+            if st is None:
                 continue
             try:
                 sidecars.append(json.loads(p.read_text()))
@@ -165,6 +171,9 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                 # A truncated sidecar (an interrupted generation run) must not
                 # take the whole summary down; it counts as "without stats".
                 continue
+        key = tuple(sorted(sig))
+        if agg_cache.get("key") == key:
+            return agg_cache["value"]
         value = aggregate_stats(sidecars, cat)
         agg_cache["key"] = key
         agg_cache["value"] = value
