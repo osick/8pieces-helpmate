@@ -1492,7 +1492,10 @@ $ curl -s http://127.0.0.1:8642/v1/materials
 ```
 
 `max_dtm`/`cells` are `null` for a `remote` entry (not yet downloaded, so the
-stats sidecar hasn't been read).
+stats sidecar hasn't been read), and for a local table whose sidecar is
+missing or unreadable — a run interrupted mid-write leaves a truncated
+`.stats.json`, and that costs the one table its two fields rather than
+failing the listing (or `/v1/stats`, which walks the same catalog).
 
 ### `GET /v1/themes`
 
@@ -1582,6 +1585,19 @@ $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/8/8/8/4k3/8/
 {"solvable":false,"material":"Kvk"}
 ```
 
+`material` names the table that answered here too. There is no `flipped` flag
+to read on an unsolvable position — the probe returns no result at all — so
+it reports whichever direction resolved: the FEN's own material when that
+table exists, and the mirrored one when only the mirror does. Naming the
+FEN's material unconditionally advertised a table that cannot exist (had it
+existed, no flip would have happened), and every such name 404s on
+`/v1/materials/{name}/stats`:
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=8/8/Kq6/8/8/5k2/8/8 w - - 0 1"
+{"solvable":false,"material":"KQvk"}
+```
+
 A malformed FEN is a 400, not a 404:
 
 ```
@@ -1642,7 +1658,8 @@ $ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8
   rather than being omitted.
 - An unsolvable query position reports `"solvable": false` at the top level
   and still enumerates its moves — a composer may want to walk into a
-  solvable branch.
+  solvable branch. `material` is the table that answered there too (the
+  mirrored one when only the mirror resolved), exactly as on `/v1/probe`.
 - `material` (since v0.11.0) names the table that answered the *query*
   position, same meaning as on [`/v1/probe`](#get-v1probe) — the mirrored
   material whenever `flipped` is true. It is not per-move: each move's own

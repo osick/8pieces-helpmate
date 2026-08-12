@@ -127,3 +127,59 @@ def test_the_aggregate_is_recomputed_when_a_sidecar_is_rewritten_in_place(kqvk_d
 
     second = c.get("/v1/stats").json()
     assert second["max_dtm"] == 40, "the sidecar changed in place and the cache did not"
+
+
+def test_a_wrong_typed_max_dtm_is_a_missing_one_not_a_500():
+    # A missing max_dtm already degrades ("this table has no helpmate"). A
+    # sidecar that carries a string there -- a hand-edited file, a half-written
+    # one, a future format -- must degrade the same way: int() letting the
+    # ValueError out turned one bad table into a 500 for the whole summary.
+    broken = {"material": "KXvk", "max_dtm": "deep", "plane_size": "lots",
+              "cells": {"invalid": {"btm": "?"}, "unsolvable": {"wtm": None}},
+              "dtm_histogram": {"btm": {"2": "many"}}}
+    agg = aggregate_stats([KQVK, broken],
+                          [_slice("KQvk", 3, 700), _slice("KXvk", 3, 300)])
+    assert agg["no_helpmate"] == ["KXvk"]
+    assert agg["max_dtm"] == 2                       # KQvk's, undisturbed
+    assert [d["material"] for d in agg["deepest"]] == ["KQvk"]
+    assert agg["cells"]["total"] == 200              # KQvk's plane_size * 2 only
+
+
+def test_a_truncated_sidecar_degrades_to_no_stats_not_a_500(tmp_path):
+    # An interrupted generation run leaves a half-written .stats.json next to
+    # a .hm. docs/USAGE.md promises that costs that ONE table its stats; an
+    # unguarded json.loads in _info_from_files made it a 500 for /v1/materials
+    # AND /v1/stats, i.e. for the whole corpus, and chain.catalog() runs
+    # before the guard /v1/stats had of its own.
+    import json
+
+    from fastapi.testclient import TestClient
+    from helpmate_server.storage import LocalDir, ChainSource
+    from helpmate_server.app import create_app
+
+    good = {"material": "KQvk", "max_dtm": 4, "plane_size": 100,
+            "generator_version": "0.11.0",
+            "cells": {"invalid": {"btm": 1, "wtm": 1},
+                      "unsolvable": {"btm": 1, "wtm": 1}},
+            "dtm_histogram": {"btm": {"4": 10}, "wtm": {"3": 10}}}
+    (tmp_path / "KQvk.hm").write_bytes(b"\x00" * 16)
+    (tmp_path / "KQvk.stats.json").write_text(json.dumps(good))
+    (tmp_path / "KRvk.hm").write_bytes(b"\x00" * 16)
+    (tmp_path / "KRvk.stats.json").write_text(json.dumps(good)[:40])   # truncated
+
+    c = TestClient(create_app(ChainSource([LocalDir(tmp_path)])),
+                   raise_server_exceptions=False)
+
+    mats = c.get("/v1/materials")
+    assert mats.status_code == 200, mats.text
+    cat = {m["material"]: m for m in mats.json()["materials"]}
+    assert set(cat) == {"KQvk", "KRvk"}
+    assert cat["KRvk"]["max_dtm"] is None and cat["KRvk"]["cells"] is None
+    assert cat["KQvk"]["max_dtm"] == 4
+
+    agg = c.get("/v1/stats")
+    assert agg.status_code == 200, agg.text
+    body = agg.json()
+    assert body["tables"] == 2                 # counted...
+    assert body["tables_without_stats"] == 1    # ...and declared unusable
+    assert body["max_dtm"] == 4

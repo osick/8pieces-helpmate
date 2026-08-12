@@ -39,3 +39,22 @@ def test_chain_prefers_first_local(tmp_path):
     assert chain.resolve("KQvk") == a and chain.resolve("KRvk") == b
     assert chain.status("KQvk") == ("local", a)
     assert chain.status("KNvkqr") == ("unknown", None)
+
+def test_localdir_truncated_sidecar_is_listed_without_stats(tmp_path):
+    # The unit under the endpoint test in test_api_stats.py: a sidecar left
+    # half-written by an interrupted `helpmate gen` costs that table its
+    # max_dtm/cells, exactly like a missing one, and nothing else.
+    make_slice(tmp_path, "KQvk")
+    (tmp_path / "KRvk.hm").write_bytes(b"\x00" * 8)
+    (tmp_path / "KRvk.stats.json").write_text('{"material": "KRvk", "max_')
+    cat = {s.material: s for s in LocalDir(tmp_path).catalog()}
+    assert set(cat) == {"KQvk", "KRvk"}
+    assert (cat["KRvk"].max_dtm, cat["KRvk"].cells) == (None, None)
+    assert (cat["KQvk"].max_dtm, cat["KQvk"].cells) == (4, 100)
+
+def test_localdir_sidecar_that_is_not_an_object_is_ignored(tmp_path):
+    # json.loads succeeds and .get() then does not exist. Same degradation.
+    (tmp_path / "KRvk.hm").write_bytes(b"\x00" * 8)
+    (tmp_path / "KRvk.stats.json").write_text("[1, 2, 3]")
+    (s,) = LocalDir(tmp_path).catalog()
+    assert (s.material, s.max_dtm, s.cells) == ("KRvk", None, None)

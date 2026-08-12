@@ -29,8 +29,18 @@ def _info_from_files(hm: Path, location: str) -> SliceInfo:
     material = hm.name[: -len(".hm")]
     max_dtm = cells = None
     sidecar = hm.with_name(material + ".stats.json")
-    if sidecar.exists():
+    # A sidecar that is missing, unreadable, truncated mid-write (an
+    # interrupted generation run -- the routine case, not an exotic one) or
+    # simply not a JSON object degrades to "this table has no stats". An
+    # unguarded json.loads here took down /v1/materials AND /v1/stats with a
+    # 500 for the whole corpus because of one bad file, which is the opposite
+    # of the tolerance docs/USAGE.md documents. read_text() raising
+    # FileNotFoundError covers the missing case, so no exists() race either.
+    try:
         s = json.loads(sidecar.read_text())
+    except (OSError, ValueError):
+        s = None
+    if isinstance(s, dict):
         max_dtm, cells = s.get("max_dtm"), s.get("plane_size")
     return SliceInfo(material, _piece_count(material), hm.stat().st_size,
                      max_dtm, cells, location)

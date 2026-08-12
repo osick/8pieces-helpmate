@@ -62,6 +62,9 @@ def test_probe_odd_dtm_notation(client):
     assert b["notation"] == "h#1.5"
 
 def test_probe_unsolvable_and_errors(client):
+    # Kvk is its own mirror, so this case cannot tell "the material the FEN
+    # spells out" from "the table that answered" -- see the asymmetric test
+    # below for that distinction.
     kvk = "8/8/8/8/8/4k3/8/4K3 w - - 0 1"
     assert client.get("/v1/probe", params={"fen": kvk}).json() == {
         "solvable": False, "material": "Kvk"}
@@ -80,6 +83,27 @@ def test_probe_names_the_table_that_answered(client):
     r = client.get("/v1/probe", params={"fen": "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"})
     assert r.status_code == 200
     assert r.json()["material"] == "KQvk"
+
+
+def test_an_unsolvable_position_names_the_table_that_answered(client):
+    # Black holds the queen, so the FEN's own material is Kvkq and only KQvk
+    # exists; the position is legal but has no helpmate, so probe() returns no
+    # result at all and there is no `flipped` flag to read. Reporting the
+    # FEN's material there named a table that CANNOT exist -- had Kvkq
+    # existed, resolve would have bound it and no flip would have happened --
+    # and every one of those names 404s on /v1/materials/{name}/stats, which
+    # is what the explorer's "This table" band asks for.
+    fen = "8/8/Kq6/8/8/5k2/8/8 w - - 0 1"
+    body = client.get("/v1/probe", params={"fen": fen}).json()
+    assert body["solvable"] is False
+    assert body["material"] == "KQvk"
+    assert client.get(f"/v1/materials/{body['material']}/stats").status_code == 200
+
+    # /v1/moves answers the same position from the same table and must agree.
+    moves = client.get("/v1/moves", params={"fen": fen}).json()
+    assert moves["solvable"] is False
+    assert moves["material"] == "KQvk"
+    assert moves["moves"], "an unsolvable position still lists its legal moves"
 
 
 def test_probe_names_the_mirrored_table_when_colors_were_flipped(client):

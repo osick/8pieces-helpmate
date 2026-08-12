@@ -195,17 +195,39 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         # dtm plies; black-to-move depths are even (h#n = 2n plies).
         return f"h#{dtm // 2}" if dtm % 2 == 0 else f"h#{dtm // 2}.5"
 
+    def _mirror(material: str) -> str:
+        return material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
+
+    def _resolve_either(material: str, flipped_mat: str):
+        """Where the answer will come from, and which table will give it.
+
+        Returns (dir, answering_material, response). The answering material is
+        the FEN's own material when that table exists, and the mirrored one
+        when only the mirror does -- which is the same rule the C++ layer's
+        `flipped` flag reports on a solvable probe, made available on the
+        paths where there is no flag to read (an unsolvable position returns
+        no result at all). Naming the FEN's material there advertised a table
+        that CANNOT exist: had it existed, this resolve would have bound it
+        and no flip would have happened.
+        """
+        d = chain.resolve(material)
+        if d is not None:
+            return d, material, None
+        d = chain.resolve(flipped_mat)
+        if d is not None:
+            return d, flipped_mat, None
+        d, resp = _resolve_or_response(material)
+        return d, material, resp
+
     @app.get("/v1/probe")
     def probe(fen: str, themes: bool = False):
         material = None
         try:
             material = _dir_for_fen(fen)
-            flipped_mat = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
-            d = chain.resolve(material) or chain.resolve(flipped_mat)
-            if d is None:
-                d, resp = _resolve_or_response(material)
-                if resp is not None:
-                    return resp
+            flipped_mat = _mirror(material)
+            d, answered, resp = _resolve_either(material, flipped_mat)
+            if resp is not None:
+                return resp
             tb = _tb(chain, d)
             res = tb.probe(fen)
         except helpmate.MissingTableError:
@@ -214,7 +236,7 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             return JSONResponse(status_code=400,
                                 content=error_json("invalid_fen", str(e)))
         if res is None:
-            return {"solvable": False, "material": material}
+            return {"solvable": False, "material": answered}
         dtm, count, flipped = res
         # The table that DID THE WORK, which is the mirrored material whenever
         # the C++ layer answered by flipping colours. Deriving this client-side
@@ -298,12 +320,10 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
         material = None
         try:
             material = _dir_for_fen(fen)
-            flipped = material.split("v")[1].upper() + "v" + material.split("v")[0].lower()
-            d = chain.resolve(material) or chain.resolve(flipped)
-            if d is None:
-                d, resp = _resolve_or_response(material)
-                if resp is not None:
-                    return resp
+            flipped = _mirror(material)
+            d, answered, resp = _resolve_either(material, flipped)
+            if resp is not None:
+                return resp
             tb = _tb(chain, d)
             res = tb.probe(fen)
             raw = tb.moves(fen)
@@ -317,7 +337,10 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             out.append({**m,
                         "notation": h_notation(m["dtm"]) if m["solvable"] else None})
         if res is None:
-            return {"fen": fen, "solvable": False, "material": material, "moves": out}
+            # Same rule as /v1/probe: name the table that answered, which on
+            # an unsolvable position is whichever of the two directions
+            # resolved -- there is no `flipped` flag to read here.
+            return {"fen": fen, "solvable": False, "material": answered, "moves": out}
         dtm, count, flip = res
         return {"fen": fen, "dtm": dtm, "count": count, "notation": h_notation(dtm),
                 "flipped": flip, "material": flipped if flip else material,

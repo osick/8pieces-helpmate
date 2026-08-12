@@ -20,8 +20,24 @@ DTM_UNSOLVABLE = 255
 DEEPEST_N = 10
 
 
+def as_int(value: Any, default: int | None = None) -> int | None:
+    """int(value), or `default` when the sidecar says something else.
+
+    Every number here comes out of a file on disk that a crashed or
+    interrupted generation run may have left in any state at all. A sidecar
+    carrying `"max_dtm": "deep"` (or a null, or a list) is one table's problem
+    and must degrade to "this table has no usable stats" -- int() letting a
+    ValueError out turned it into a 500 for the whole corpus-wide summary.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def has_helpmate(sidecar: dict[str, Any]) -> bool:
-    if int(sidecar.get("max_dtm", DTM_UNSOLVABLE)) >= DTM_UNSOLVABLE:
+    max_dtm = as_int(sidecar.get("max_dtm"))
+    if max_dtm is None or max_dtm >= DTM_UNSOLVABLE:
         return False
     hist = sidecar.get("dtm_histogram") or {}
     return any(hist.get(side) for side in ("btm", "wtm"))
@@ -40,28 +56,30 @@ def aggregate_stats(sidecars: Sequence[dict[str, Any]],
 
     for s in sidecars:
         generators[s.get("generator_version") or "unknown"] += 1
-        totals["total"] += int(s.get("plane_size") or 0) * 2
+        totals["total"] += (as_int(s.get("plane_size"), 0) or 0) * 2
         cells = s.get("cells") or {}
         for kind in ("invalid", "unsolvable"):
             side_counts = cells.get(kind) or {}
-            totals[kind] += int(side_counts.get("btm") or 0)
-            totals[kind] += int(side_counts.get("wtm") or 0)
+            for side in ("btm", "wtm"):
+                totals[kind] += as_int(side_counts.get(side), 0) or 0
 
         if not has_helpmate(s):
             no_helpmate.append(str(s.get("material") or "unknown"))
             continue
 
-        deepest.append({"material": s.get("material"), "max_dtm": int(s["max_dtm"])})
+        # has_helpmate() has already established that max_dtm is an int below
+        # the sentinel, so this cast cannot be the one that fails.
+        deepest.append({"material": s.get("material"), "max_dtm": as_int(s["max_dtm"])})
         hist = s.get("dtm_histogram") or {}
         for side in ("btm", "wtm"):
             for key, n in (hist.get(side) or {}).items():
-                dtm[side][key] += int(n)
+                dtm[side][key] += as_int(n, 0) or 0
             # The per-distance breakdown does not survive aggregation; the
             # client buckets over every distance anyway. Collapsing under one
             # synthetic key keeps the nested SHAPE the reader expects.
             for per_dtm in (s.get("uniqueness") or {}).get(side, {}).values():
                 for key, n in (per_dtm or {}).items():
-                    uniq[side][key] += int(n)
+                    uniq[side][key] += as_int(n, 0) or 0
 
     totals["solvable"] = totals["total"] - totals["invalid"] - totals["unsolvable"]
     deepest.sort(key=lambda d: (-d["max_dtm"], str(d["material"])))
