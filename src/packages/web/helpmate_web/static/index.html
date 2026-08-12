@@ -131,32 +131,40 @@
   </section>
 
   <section id="panel-mine" hidden>
-    <h2 class="eyebrow">Search a material</h2>
-    <p class="help">
-      Find positions by mate length and by the shape of their solution set.
-      <b>starts</b> is how many different first moves the optimal solutions
-      use, <b>ends</b> how many different mating moves they finish on — one
-      start and one end is a clean single-solution problem; four starts
-      converging on one end is a theme.
-    </p>
-    <form id="mine-form">
-      <label>Material <input name="material" required placeholder="KQvk" autocomplete="off"></label>
-      <label>dtm (plies) <input name="dtm" type="number" min="0" required></label>
-      <label>count <input name="count" type="number" min="1" placeholder="any"></label>
-      <label>starts <input name="starts" type="number" min="1" placeholder="any"></label>
-      <label>ends <input name="ends" type="number" min="1" placeholder="any"></label>
-      <label>themes
-        <select id="mine-themes" name="theme" multiple size="6"></select>
-        <small class="hint">optional — a position must show every theme you pick, though not necessarily in the same solution</small>
-      </label>
-      <label>max results <input name="max" type="number" min="1" value="50"></label>
-      <button type="submit">Search</button>
+    <form id="mine-form" class="rail">
+      <div class="mine-pin">
+        <h2 class="eyebrow">Search a material</h2>
+        <label>Material <input name="material" required placeholder="KQvk" autocomplete="off"></label>
+        <label>dtm (plies) <input name="dtm" type="number" min="0" required></label>
+        <label>count <input name="count" type="number" min="1" placeholder="any"></label>
+        <label>starts <input name="starts" type="number" min="1" placeholder="any"></label>
+        <label>ends <input name="ends" type="number" min="1" placeholder="any"></label>
+        <label>themes
+          <select id="mine-themes" name="theme" multiple size="6"></select>
+          <small class="hint">optional — a position must show every theme you pick, though not necessarily in the same solution</small>
+        </label>
+        <label>max results <input name="max" type="number" min="1" value="50"></label>
+        <div class="row">
+          <button type="submit">Search</button>
+          <button type="button" id="btn-stop" hidden>Stop</button>
+        </div>
+      </div>
     </form>
-    <p id="mine-status" class="verdict"></p>
-    <ul id="mine-results"></ul>
-    <div class="row">
-      <button type="button" id="btn-export-fens">Download FENs</button>
-      <button type="button" id="btn-export-csv">Download CSV</button>
+
+    <div class="readout">
+      <p class="help">
+        Find positions by mate length and by the shape of their solution set.
+        <b>starts</b> is how many different first moves the optimal solutions
+        use, <b>ends</b> how many different mating moves they finish on — one
+        start and one end is a clean single-solution problem; four starts
+        converging on one end is a theme.
+      </p>
+      <p id="mine-status" class="verdict"></p>
+      <ul id="mine-results"></ul>
+      <div class="row">
+        <button type="button" id="btn-export-fens">Download FENs</button>
+        <button type="button" id="btn-export-csv">Download CSV</button>
+      </div>
     </div>
   </section>
 </main>

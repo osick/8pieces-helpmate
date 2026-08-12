@@ -16,7 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-export async function getJson(path, params = {}) {
+export async function getJson(path, params = {}, { signal } = {}) {
   const url = new URL(path, window.location.origin);
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null || v === "") continue;
@@ -30,8 +30,12 @@ export async function getJson(path, params = {}) {
   }
   let res;
   try {
-    res = await fetch(url);
-  } catch {
+    res = await fetch(url, { signal });
+  } catch (err) {
+    // An abort is not a network failure -- the caller asked for it. Let it
+    // through unchanged so callers can distinguish "you pressed Stop" from
+    // "the server is unreachable".
+    if (err && err.name === "AbortError") throw err;
     // status 0 marks "no HTTP response was received at all" (server down,
     // DNS failure, CORS block) so callers can tell it apart from a real
     // HTTP error status and don't have to also handle a raw TypeError.
@@ -54,6 +58,6 @@ export const api = {
   probe: (fen, themes = false) => getJson("/v1/probe", { fen, themes: themes ? "true" : "" }),
   line: (fen, all = false) => getJson("/v1/line", { fen, all: all ? "true" : "" }),
   moves: (fen) => getJson("/v1/moves", { fen }),
-  mine: (q) => getJson("/v1/mine", q),
+  mine: (q, opts) => getJson("/v1/mine", q, opts),
   themes: () => getJson("/v1/themes"),
 };

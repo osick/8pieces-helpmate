@@ -12,6 +12,34 @@ let rows = [];
 // showStats() guard.
 let mineSeq = 0;
 
+// The server's own budget, so the countdown is not a number hardcoded here.
+// 30 matches main.py's --mine-timeout default and is only ever the fallback
+// for a health call that failed.
+let budgetSeconds = 30;
+let inFlight = null;     // the AbortController of the running search
+let ticker = null;       // the elapsed-time interval
+
+function startTicker(status) {
+  const began = Date.now();
+  const tick = () => {
+    const secs = Math.floor((Date.now() - began) / 1000);
+    status.textContent = `searching… ${secs}s of ${budgetSeconds}s`;
+  };
+  tick();
+  ticker = setInterval(tick, 1000);
+}
+
+function stopTicker() {
+  if (ticker !== null) { clearInterval(ticker); ticker = null; }
+}
+
+// Which controls are live. One function so the two buttons can never
+// disagree about whether a search is running.
+function setBusy(busy) {
+  document.querySelector("#mine-form button[type=submit]").hidden = busy;
+  document.getElementById("btn-stop").hidden = !busy;
+}
+
 function validate(q) {
   // Mirrors the server's rules so an obvious mistake never costs a round trip.
   // The server remains the authority; its 400 is displayed if we miss something.
@@ -27,8 +55,9 @@ function validate(q) {
 
 async function runQuery(q, status, results, seq, retries = 0) {
   let res;
-  try { res = await api.mine(q); }
+  try { res = await api.mine(q, { signal: inFlight ? inFlight.signal : undefined }); }
   catch (err) {
+    if (err && err.name === "AbortError") return;   // the user pressed Stop
     if (seq !== mineSeq) return;   // superseded by a newer search
     if (err instanceof ApiError) { status.textContent = err.hint ? `${err.message} — ${err.hint}` : err.message; return; }
     throw err;
@@ -47,6 +76,17 @@ async function runQuery(q, status, results, seq, retries = 0) {
     return;
   }
   const b = res.body;
+  // A timeout is not a result. The server answers it with an empty list and
+  // truncated: true, which the generic branch below would render as
+  // "0 position(s) (truncated -- raise max results for more)" -- advice that
+  // cannot help, about a scan that never finished.
+  if (b.note === "timeout") {
+    rows = [];
+    status.textContent =
+      `Timed out after ${budgetSeconds}s. No results yet — narrow the material, `
+      + "or drop the count/starts/ends filters.";
+    return;
+  }
   rows = b.fens.map((fen) => ({ fen, dtm: Number(q.dtm), count: q.count === "" ? "" : Number(q.count) }));
   status.textContent =
     `${b.fens.length} position(s)` +
@@ -95,6 +135,23 @@ export function initMine() {
     }
   }).catch(() => { /* leave the picker empty; the numeric filters still work */ });
 
+  api.health().then(({ body }) => {
+    if (typeof body.mine_timeout === "number" && body.mine_timeout > 0)
+      budgetSeconds = body.mine_timeout;
+  }).catch(() => { /* keep the default; the countdown is a nicety */ });
+
+  document.getElementById("btn-stop").addEventListener("click", () => {
+    if (inFlight) inFlight.abort();
+    inFlight = null;
+    stopTicker();
+    setBusy(false);
+    mineSeq++;   // retire any scheduled 202 retry
+    // Honest about what aborting does and does not do: the scan runs in the
+    // server's thread pool and abandoning the response does not free it.
+    status.textContent = "Stopped. The server finishes or drops this scan within "
+      + `${budgetSeconds}s.`;
+  });
+
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const q = Object.fromEntries(new FormData(form).entries());
@@ -104,7 +161,14 @@ export function initMine() {
     if (bad) { status.textContent = bad; return; }
     status.textContent = "searching…";
     const seq = ++mineSeq;
-    await runQuery(q, status, results, seq);
+    inFlight = new AbortController();
+    setBusy(true);
+    startTicker(status);
+    try {
+      await runQuery(q, status, results, seq);
+    } finally {
+      if (seq === mineSeq) { stopTicker(); setBusy(false); inFlight = null; }
+    }
   });
 
   const download = (text, name, type) => {

@@ -192,13 +192,9 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
    anywhere on this path: it would create a scroll container and silently
    cancel the rail's `position: sticky`.
 
-   #panel-explorer and #panel-materials are listed: both wrap their children
-   in .rail/.readout. #panel-mine keeps its unbordered, unpainted layout
-   until the task that wraps its own content in .rail/.readout (the Search
-   panel) adds itself here -- adding the id now, before its markup exists,
-   would draw a bordered card with zero internal padding around content that
-   has none of its own. */
-#panel-explorer, #panel-materials {
+   #panel-explorer, #panel-materials and #panel-mine all wrap their children
+   in .rail/.readout, so all three share this border/background. */
+#panel-explorer, #panel-materials, #panel-mine {
   border: 1px solid var(--rule); border-radius: var(--r);
   background: var(--readout);
 }
@@ -481,23 +477,28 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 
 /* ---------- search ---------- */
 
-#panel-mine { max-width: 900px; }
-#mine-form {
-  display: flex; flex-wrap: wrap; align-items: end; gap: var(--s2) var(--s3);
-  margin: var(--s3) 0 0; padding: .85rem var(--s3); background: var(--panel);
-  border: 1px solid var(--rule); border-radius: var(--r);
-}
+#panel-mine { display: flex; flex-direction: column; }
+#mine-form { display: flex; flex-direction: column; margin: 0; border: 0; }
+/* The surface (#mine-form/.rail, full column height) and the sticky element
+   (.mine-pin, only as tall as the form fields) are deliberately different
+   elements -- the same split #panel-explorer's .board-col/.board-pin and
+   #panel-materials' .list-col/.materials-pin use, and for the same reason
+   (see the Fix round 1 comment at .board-pin above): sticky positioned
+   directly on #mine-form/.rail would leave it sized to its own content while
+   the grid row's height followed the taller .readout -- a hard colour seam
+   below the form at corpus scale, in both themes, once a search returns
+   enough rows to out-grow the six-field form (the empty landing state never
+   shows it). .mine-pin carries the sticky behaviour at the short height;
+   #mine-form/.rail stretches to the row's full height (grid's default
+   align-items is stretch) and its background now covers the seam instead of
+   leaving it to show the readout's colour through. */
+.mine-pin { display: flex; flex-direction: column; gap: var(--s2); }
 #mine-form label { display: flex; flex-direction: column; gap: .2rem;
                    font-size: var(--f1); color: var(--ink-soft); }
-#mine-form input { width: 6.5rem; font-family: var(--mono); font-size: var(--f2); }
-#mine-form input[name="material"] { width: 9rem; }
-#mine-form button { align-self: end; }
-#panel-mine .row { margin-top: .75rem; }
-
-/* The theme picker is taller than the numeric inputs beside it, so let it
-   claim its own row rather than stretching the whole form's line height. */
-#mine-form select[multiple] { min-width: 14rem; }
+#mine-form input { width: 100%; font-family: var(--mono); font-size: var(--f2); }
+#mine-form select[multiple] { width: 100%; }
 #mine-form .hint { display: block; opacity: 0.7; font-size: 0.85em; }
+#panel-mine .row { margin-top: .75rem; }
 #position-themes { margin-top: 0.25rem; opacity: 0.85; }
 
 /* Themes whose `needs` isn't "solutions" still answer on positions whose
@@ -505,6 +506,16 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
    The title attribute carries the explanation; this just makes the option
    findable at a glance. */
 #mine-form select[multiple] option.theme-answers-saturated { font-style: italic; }
+
+@media (min-width: 860px) {
+  #panel-mine {
+    display: grid; grid-template-columns: minmax(220px, 300px) minmax(320px, 1fr);
+  }
+  /* Its containing block for the sticky offset is #mine-form/.rail, now
+     stretched to the full row height -- same reasoning as .board-pin's and
+     .materials-pin's media-query comments above. */
+  .mine-pin { position: sticky; top: var(--s3); }
+}
 
 #mine-results li { display: flex; align-items: baseline; gap: var(--s2); }
 #mine-results li .idx {

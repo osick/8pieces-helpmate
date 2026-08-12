@@ -703,3 +703,69 @@ def test_the_materials_rail_matches_the_readout_height(page, server):
     readout = page.eval_on_selector(".detail-col", "e => e.getBoundingClientRect()")
     assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
         f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
+
+
+def test_a_timed_out_search_says_so_instead_of_reporting_no_results(page, server):
+    # The server answers a timeout with {fens: [], truncated: true,
+    # note: "timeout"}. Rendering that as "0 position(s) (truncated -- raise
+    # max results for more)" is advice that cannot help, about a result that
+    # was never computed.
+    page.goto(f"{server}/#panel=mine")
+    page.route("**/v1/mine**", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"fens": [], "truncated": true, "note": "timeout", "skipped_saturated": 0}'))
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.toLowerCase().includes('timed out')")
+    status = page.inner_text("#mine-status")
+    assert "raise max results" not in status
+    assert "0 position(s)" not in status
+
+
+def test_the_search_button_becomes_stop_while_in_flight(page, server):
+    page.goto(f"{server}/#panel=mine")
+    page.route("**/v1/mine**", lambda route: None)   # never respond
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_selector("#btn-stop:not([hidden])")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.includes('of ')")
+    page.click("#btn-stop")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.toLowerCase().includes('stopped')")
+    assert page.is_hidden("#btn-stop")
+    assert page.is_visible("#mine-form button[type=submit]")
+
+
+def test_the_countdown_uses_the_servers_budget(page, server):
+    page.goto(f"{server}/#panel=mine")
+    page.route("**/v1/mine**", lambda route: None)
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "2")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_function(
+        "document.getElementById('mine-status').textContent.includes('of 30s')")
+
+
+def test_the_search_rail_matches_the_readout_height(page, server):
+    # Same defect class as the explorer's .board-pin and materials'
+    # .materials-pin fixes (see the Fix round 1 comment at .board-pin in
+    # app.css): #mine-form/.rail must stretch to the grid row's full height
+    # while .mine-pin carries the sticky behaviour at its own, shorter
+    # height -- or the strip below the form paints --readout instead of
+    # --rail once the results list outgrows the form fields. dtm=1 on the
+    # KQvk fixture returns 50 rows (measured 2026-08-12), reliably taller
+    # than the six-field form.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server}/#panel=mine")
+    page.fill("#mine-form input[name=material]", "KQvk")
+    page.fill("#mine-form input[name=dtm]", "1")
+    page.click("#mine-form button[type=submit]")
+    page.wait_for_selector("#mine-results li")
+    rail = page.eval_on_selector("#mine-form", "e => e.getBoundingClientRect()")
+    readout = page.eval_on_selector("#panel-mine .readout", "e => e.getBoundingClientRect()")
+    assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
+        f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
