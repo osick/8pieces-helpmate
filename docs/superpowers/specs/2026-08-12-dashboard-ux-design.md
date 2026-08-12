@@ -127,12 +127,19 @@ on touch, so it is the addition; arming a piece and clicking squares stays the
 accessible path, and every existing UI test that drives the editor by clicking
 keeps passing unchanged.
 
-**The edit session becomes explicit.** Today leaving edit mode means clicking
-the armed palette entry a second time, which takes three sentences of hint
-copy to explain — a smell. Dragging a piece in from the palette has no armed
-entry to click again, so the mode needs a real exit anyway. Edit mode gets one
-primary action, **Done — evaluate**, and the hint shrinks to a line. Entering
-edit mode is either arming a palette entry or dragging a piece onto the board.
+**The edit session gets a visible exit.** Today leaving edit mode means
+clicking the armed palette entry a second time, which takes three sentences of
+hint copy to explain — a smell. Dragging a piece in from the palette has no
+armed entry to click again, so the mode needs a real exit anyway. Edit mode
+gains an always-visible primary action, **Done — evaluate**, and the hint
+shrinks to a line.
+
+Clicking the armed entry a second time is **retained**, not replaced: it is a
+reasonable gesture, and it is the contract
+`test_the_palette_places_a_piece_and_evaluates_on_exit` pins. The button is an
+additional exit, and the one that works when the session began with a drag.
+Entering edit mode is either arming a palette entry or dragging a piece onto
+the board.
 
 **New pure module** `js/lib/board-edit.js`, node-testable with no DOM:
 
