@@ -481,3 +481,58 @@ def test_a_material_with_no_helpmate_says_so(page, server):
     assert "no helpmate exists" in sub
     assert "127.5" not in sub
     assert "h#" not in sub.split("·")[0]
+
+
+import pytest
+
+
+@pytest.mark.parametrize("width", [880, 960, 1024, 1280])
+def test_the_board_never_overlaps_the_readout(page, server, width):
+    # Regression, measured before the fix: #board was min(88vw, 460px) while
+    # its grid column was min(460px, 40%). At 960px that put a 460px board in
+    # a 368px column, 66px of it lying on top of the move list.
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    side = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
+    assert board["right"] <= side["left"] + 1, (
+        f"board overlaps the readout by {board['right'] - side['left']:.0f}px at {width}px")
+
+
+@pytest.mark.parametrize("width", [880, 1280])
+def test_the_board_is_centred_in_its_rail(page, server, width):
+    page.set_viewport_size({"width": width, "height": 1000})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    rail = page.eval_on_selector(".board-col", "e => e.getBoundingClientRect()")
+    left = board["left"] - rail["left"]
+    right = rail["right"] - board["right"]
+    assert abs(left - right) <= 1, f"board off-centre by {abs(left - right):.1f}px"
+
+
+def test_the_rail_and_the_readout_are_different_surfaces(page, server):
+    page.set_viewport_size({"width": 1280, "height": 1000})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    rail = page.eval_on_selector(".board-col", "e => getComputedStyle(e).backgroundColor")
+    readout = page.eval_on_selector(".side", "e => getComputedStyle(e).backgroundColor")
+    assert rail != readout, "rail and readout render on the same surface"
+    assert rail not in ("rgba(0, 0, 0, 0)", "transparent")
+    assert readout not in ("rgba(0, 0, 0, 0)", "transparent")
+
+
+def test_the_board_stays_put_while_the_readout_scrolls(page, server):
+    # The rail is sticky. `overflow: hidden` on any ancestor would create a
+    # scroll container and silently kill that -- an easy thing to add while
+    # clipping surfaces to a border radius, and invisible to every other test.
+    page.set_viewport_size({"width": 1280, "height": 700})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    before = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
+    page.evaluate("window.scrollBy(0, 400)")
+    page.wait_for_timeout(100)
+    after = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
+    assert after > before - 400 + 50, "the board scrolled away instead of sticking"
+    assert after >= -1, "the board is above the viewport"

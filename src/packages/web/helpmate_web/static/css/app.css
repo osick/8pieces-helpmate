@@ -74,6 +74,14 @@
   /* Instruments have small radii: lichess ships 7px, Primer 6px. */
   --r: 6px;
 
+  /* Grey is what you manipulate, white is what the tables say. Aliases, not
+     new values: --panel (#262421) sits ABOVE --ground (#161512) in dark mode,
+     so the rail recedes and the readout advances in BOTH themes rather than
+     inverting. Defining them here and nowhere else means the dark blocks
+     below need no counterpart. */
+  --rail: var(--ground);
+  --readout: var(--panel);
+
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
@@ -178,35 +186,54 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
   border-radius: var(--r); padding: 1.1rem; margin: .75rem 0 0;
 }
 
+/* ---------- rail and readout ---------- */
+
+/* One card per panel, split into a rail and a readout. No `overflow: hidden`
+   anywhere on this path: it would create a scroll container and silently
+   cancel the rail's `position: sticky`. */
+#panel-explorer, #panel-materials, #panel-mine {
+  border: 1px solid var(--rule); border-radius: var(--r);
+  background: var(--readout);
+}
+.rail { background: var(--rail); padding: var(--s3); border-radius: var(--r) var(--r) 0 0; }
+/* The panel wrapper already paints --readout underneath, but a computed
+   style of transparent on this element specifically is indistinguishable
+   from a missing surface -- so the readout carries the same token directly,
+   not just its ancestor. */
+.readout { background: var(--readout); padding: var(--s3); }
+
+@media (min-width: 860px) {
+  .rail { border-radius: var(--r) 0 0 var(--r); }
+  .readout { border-left: 1px solid var(--rule); }
+}
+
 /* ---------- explorer ---------- */
 
-/* Mobile is the default; two columns are the enhancement. 460px board +
-   32px gap + 300px minimum side + 40px of main padding = 832, so the two
-   columns need ~840px and the breakpoint sits just above at 860. */
-#panel-explorer { display: flex; flex-direction: column; gap: var(--s4); }
+/* Mobile is the default; two columns are the enhancement. The rail's maximum
+   is the board's maximum, so the board can size itself from its column
+   instead of from the viewport -- one rule, and the overlap that two rules
+   produced between 860px and ~1150px is impossible by construction. */
+#panel-explorer { display: flex; flex-direction: column; }
 .board-col { display: flex; flex-direction: column; gap: var(--s3); }
-#board { width: min(88vw, 460px); aspect-ratio: 1; }
+#board { width: 100%; max-width: 460px; margin-inline: auto; aspect-ratio: 1; }
 .side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
 
 @media (min-width: 860px) {
   #panel-explorer {
     display: grid;
-    grid-template-columns: min(460px, 40%) minmax(300px, 1fr);
-    gap: var(--s4);
+    grid-template-columns: minmax(300px, 460px) minmax(320px, 1fr);
     align-items: start;
   }
-  /* The board pane stays put and only the answer pane scrolls, so a long
-     move list never drags the board out of view. No sticky headers, no
-     scroll-sync JavaScript. */
+  /* The rail stays put and only the readout scrolls, so a long move list
+     never drags the board out of view. No sticky headers, no scroll-sync JS. */
   .board-col { position: sticky; top: var(--s3); }
 }
 
 .palette {
   display: flex; flex-direction: column; gap: var(--s2);
-  border: 1px solid var(--rule); border-radius: var(--r);
-  background: var(--panel); padding: var(--s2) var(--s3);
-  width: min(88vw, 460px);
+  border-top: 1px solid var(--rule); padding-top: var(--s3);
+  width: 100%; max-width: 460px; margin-inline: auto;
 }
 /* Six columns: White on the first row, Black on the second, in the order a
    chess player names them. A wrapping flex row would break 10/2. */
@@ -321,8 +348,10 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 .stats-head .sub { color: var(--ink-soft); font-size: var(--f2); }
 
 .tiles { display: flex; flex-wrap: wrap; gap: .5rem; margin: .9rem 0 0; }
+/* On the readout these sit on --panel, so a --panel fill would leave them
+   invisible except for their rule. Fill from --sunk and drop the border. */
 .tile {
-  border: 1px solid var(--rule); border-radius: var(--r); background: var(--panel);
+  border-radius: var(--r); background: var(--sunk);
   padding: .45rem .7rem; min-width: 8.5rem;
 }
 .tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink-soft); }
