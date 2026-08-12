@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { dtmBars, uniquenessBuckets, cellSummary, fmtCount } from "../../helpmate_web/static/js/lib/stats.js";
+import {
+  dtmBars, uniquenessBuckets, cellSummary, fmtCount,
+  DTM_UNSOLVABLE, hasHelpmate, mateLengthLabel,
+} from "../../helpmate_web/static/js/lib/stats.js";
 
 // Shape of a real /v1/materials/{name}/stats payload, trimmed.
 const STATS = {
@@ -76,4 +79,30 @@ test("cell summary accounts for both planes and derives solvable", () => {
 test("counts are grouped for reading", () => {
   assert.equal(fmtCount(1892352), "1,892,352");
   assert.equal(fmtCount(0), "0");
+});
+
+test("a material with no helpmate is named, not divided", () => {
+  // KBvk: king and bishop cannot mate. The generator stores the
+  // DTM_UNSOLVABLE sentinel as max_dtm and an empty histogram.
+  const kbvk = { material: "KBvk", max_dtm: 255, dtm_histogram: { btm: {}, wtm: {} } };
+  assert.equal(hasHelpmate(kbvk), false);
+  assert.equal(mateLengthLabel(kbvk), "no helpmate exists in this material");
+  assert.ok(!mateLengthLabel(kbvk).includes("127.5"));
+});
+
+test("a material with a helpmate reports it in h# notation", () => {
+  const kqvk = { material: "KQvk", max_dtm: 2, dtm_histogram: { btm: { "2": 9 }, wtm: {} } };
+  assert.equal(hasHelpmate(kqvk), true);
+  assert.equal(mateLengthLabel(kqvk), "longest mate h#1");
+});
+
+test("an odd max_dtm keeps the half step", () => {
+  const s = { max_dtm: 33, dtm_histogram: { btm: {}, wtm: { "33": 4 } } };
+  assert.equal(mateLengthLabel(s), "longest mate h#16.5");
+});
+
+test("the sentinel is recognised even if a histogram is present", () => {
+  // Belt and braces: max_dtm is the sentinel and must win regardless.
+  const s = { max_dtm: DTM_UNSOLVABLE, dtm_histogram: { btm: { "4": 1 }, wtm: {} } };
+  assert.equal(mateLengthLabel(s), "no helpmate exists in this material");
 });

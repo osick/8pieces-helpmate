@@ -87,3 +87,22 @@ export function cellSummary(stats) {
 export function fmtCount(n) {
   return Number(n).toLocaleString("en-US");
 }
+
+// A material where nothing is solvable (KBvk: king and bishop cannot mate)
+// stores the DTM_UNSOLVABLE sentinel as max_dtm, not a distance, and an empty
+// histogram. Dividing it by two yields "h#127.5" -- a measurement-shaped
+// string for a measurement that does not exist. 67 of the 295 tables in the
+// reference corpus are in this state, so it is the common case, not an edge.
+export const DTM_UNSOLVABLE = 255;
+
+export function hasHelpmate(stats) {
+  if (!stats) return false;
+  if (Number(stats.max_dtm) >= DTM_UNSOLVABLE) return false;
+  const hist = stats.dtm_histogram || {};
+  return ["btm", "wtm"].some((side) => Object.keys(hist[side] || {}).length > 0);
+}
+
+export function mateLengthLabel(stats) {
+  if (!hasHelpmate(stats)) return "no helpmate exists in this material";
+  return `longest mate h#${Number(stats.max_dtm) / 2}`;
+}

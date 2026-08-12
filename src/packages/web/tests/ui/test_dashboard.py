@@ -467,3 +467,17 @@ def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
     # rather than reading it in the same tick.
     page.wait_for_function(
         "want => document.getElementById('fen-input').value === want", arg=first)
+
+
+def test_a_material_with_no_helpmate_says_so(page, server):
+    # KBvk: king and bishop cannot mate. The sidecar stores max_dtm = 255,
+    # the DTM_UNSOLVABLE sentinel; dividing it by two rendered "h#127.5" for
+    # 67 of the 295 tables in the reference corpus.
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    page.click("#material-list li[data-material=Kvk]")
+    page.wait_for_selector("#material-stats .stats-head")
+    sub = page.inner_text("#material-stats .stats-head")
+    assert "no helpmate exists" in sub
+    assert "127.5" not in sub
+    assert "h#" not in sub.split("·")[0]
