@@ -106,3 +106,16 @@ test("the sentinel is recognised even if a histogram is present", () => {
   const s = { max_dtm: DTM_UNSOLVABLE, dtm_histogram: { btm: { "4": 1 }, wtm: {} } };
   assert.equal(mateLengthLabel(s), "no helpmate exists in this material");
 });
+
+test("an empty histogram is its own reason to say no helpmate, not just a symptom of the sentinel", () => {
+  // src/core/generator/generator.cpp always keeps max_dtm's unsolvable state
+  // and histogram emptiness in sync, so a real sidecar never has max_dtm
+  // below the sentinel with both histogram sides empty. But hasHelpmate
+  // checks the histogram independently of the sentinel as defence against
+  // malformed or truncated data, and that check needs its own fixture: every
+  // other test's max_dtm already decides the outcome at the sentinel guard
+  // (or pairs a below-sentinel max_dtm with a non-empty histogram), so none
+  // of them would fail if the `some(...)` line were deleted. This one would.
+  const s = { max_dtm: 4, dtm_histogram: { btm: {}, wtm: {} } };
+  assert.equal(hasHelpmate(s), false);
+});
