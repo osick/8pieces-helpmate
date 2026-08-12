@@ -119,3 +119,52 @@ test("moveClass carries the group and marks a sole continuation", () => {
   assert.equal(moveClass(THREE[0]), "slower");
   assert.equal(moveClass(THREE[2]), "dead");
 });
+
+const M = (san, dtm, count, opts = {}) => ({
+  san, dtm, count,
+  solvable: opts.solvable !== false,
+  optimal: opts.optimal === true,
+  notation: opts.notation ?? (dtm == null ? null : `h#${dtm / 2}`),
+  uci: opts.uci ?? san.toLowerCase(),
+  fen: opts.fen ?? `fen-${san}`,
+});
+
+test("the optimal group is never banded — its per-move count is the datum", () => {
+  const g = groupMoves([M("Kh8", 1, 1, { optimal: true }), M("Kh6", 1, 3, { optimal: true })]);
+  const optimal = g.find((x) => x.key === "optimal");
+  assert.equal(optimal.bands, null);
+  assert.deepEqual(optimal.moves.map((m) => m.san), ["Kh8", "Kh6"]);
+});
+
+test("slower moves band by distance, in distance order", () => {
+  const g = groupMoves([
+    M("Qg5", 4, 2), M("Qa7", 2, 9), M("Kf7", 2, 1), M("Ke5", 4, 1),
+  ]);
+  const slower = g.find((x) => x.key === "slower");
+  assert.deepEqual(slower.bands.map((b) => b.label), ["h#1", "h#2"]);
+  assert.deepEqual(slower.bands[0].moves.map((m) => m.san), ["Kf7", "Qa7"]);
+  assert.deepEqual(slower.bands[1].moves.map((m) => m.san), ["Ke5", "Qg5"]);
+});
+
+test("a slower group with one distance still renders exactly one band", () => {
+  const g = groupMoves([M("Qa7", 2, 1), M("Qg2", 2, 4)]);
+  const slower = g.find((x) => x.key === "slower");
+  assert.equal(slower.bands.length, 1);
+  assert.equal(slower.bands[0].label, "h#1");
+});
+
+test("no-mate moves form one unlabelled band — nothing differs between them", () => {
+  const g = groupMoves([M("Qg8", null, 0, { solvable: false }), M("Qg6", null, 0, { solvable: false })]);
+  const dead = g.find((x) => x.key === "dead");
+  assert.equal(dead.bands.length, 1);
+  assert.equal(dead.bands[0].label, null);
+  assert.deepEqual(dead.bands[0].moves.map((m) => m.san), ["Qg6", "Qg8"]);
+});
+
+test("every banded move appears exactly once across the bands", () => {
+  const moves = [M("Qg5", 4, 2), M("Qa7", 2, 9), M("Kf7", 2, 1), M("Ke5", 6, 1)];
+  const slower = groupMoves(moves).find((x) => x.key === "slower");
+  const flat = slower.bands.flatMap((b) => b.moves.map((m) => m.san)).sort();
+  assert.deepEqual(flat, ["Ke5", "Kf7", "Qa7", "Qg5"]);
+  assert.equal(flat.length, slower.moves.length);
+});

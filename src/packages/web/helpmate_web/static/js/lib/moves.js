@@ -28,12 +28,18 @@ const GROUPS = [
     // solution count can: it says how forcing the move is, which is also the
     // property a composer cares about. So the ordering doubles as the advice.
     order: (a, b) => (a.count - b.count) || bySan(a, b),
+    // Never banded: the per-move count is exactly what this group exists to
+    // show, so its rows keep their badges.
+    band: null,
   },
   {
     key: "slower",
     label: "Slower",
     holds: (m) => m.solvable === true && m.optimal !== true,
     order: (a, b) => (a.dtm - b.dtm) || (a.count - b.count) || bySan(a, b),
+    // Within one distance every move's badge would read the same, so the
+    // distance becomes the band label and the badge disappears.
+    band: (m) => m.notation,
   },
   {
     key: "dead",
@@ -43,17 +49,36 @@ const GROUPS = [
     // comparator: null - null is 0, which would silently degrade to input
     // order rather than failing loudly.
     order: bySan,
+    // Nothing distinguishes one dead move from another: one unlabelled band.
+    band: () => null,
   },
 ];
 
 // Non-empty groups, in fixed order. `filter` copies, so the caller's array is
 // never reordered -- the drag-to-play path in explorer.js reads the same
 // array and relies on it being untouched.
+//
+// `bands` is null for a group whose rows carry their own badge, and otherwise
+// the group's moves split by band label, IN THE GROUP'S OWN ORDER -- the
+// comparator already sorts by distance first, so walking the sorted list and
+// starting a new band whenever the label changes yields distance order
+// without a second sort.
 export function groupMoves(moves) {
   const out = [];
   for (const g of GROUPS) {
     const rows = (moves || []).filter(g.holds).sort(g.order);
-    if (rows.length) out.push({ key: g.key, label: g.label, moves: rows });
+    if (!rows.length) continue;
+    let bands = null;
+    if (g.band) {
+      bands = [];
+      for (const m of rows) {
+        const label = g.band(m);
+        const last = bands[bands.length - 1];
+        if (last && last.label === label) last.moves.push(m);
+        else bands.push({ label, moves: [m] });
+      }
+    }
+    out.push({ key: g.key, label: g.label, moves: rows, bands });
   }
   return out;
 }
