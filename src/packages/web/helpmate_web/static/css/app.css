@@ -172,6 +172,17 @@ button:hover:not(:disabled) { border-color: var(--ink-soft); }
 button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+/* Weight marks what you can act on. That is the affordance cue, which is why
+   the two board controls below can drop their borders without becoming
+   ambiguous -- and why nothing inert is ever 600. */
+nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
+.move-group > ul > li, .chips li { font-weight: 600; }
+
+#btn-flip, #btn-clear-board { border-color: transparent; background: none; }
+#btn-flip:hover:not(:disabled), #btn-clear-board:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
 .verdict { font-family: var(--mono); font-size: var(--f2); margin: var(--s3) 0 0; }
 .verdict.muted { color: var(--ink-soft); }
 
@@ -262,7 +273,7 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
 
 /* The band spans both columns: it is context for the whole panel, not an
    answer belonging to the readout. */
-.table-band { padding: var(--s3); border-top: 1px solid var(--rule); }
+.table-band { padding: var(--s2) var(--s3); border-top: 1px solid var(--rule); }
 @media (min-width: 860px) { .table-band { grid-column: 1 / -1; } }
 .table-band-head { display: flex; align-items: center; gap: var(--s2); }
 .table-band-head .eyebrow { margin-right: auto; }
@@ -393,6 +404,7 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 }
 .chips li:hover { border-color: var(--accent); }
 .chips li .san { min-width: 0; }
+.chips li.dead { font-weight: 400; }
 .chips li.dead .san { color: var(--ink-faint); text-decoration: line-through; }
 /* The no-mate group's band() returns a null label, so its .band-label span
    is emitted empty rather than omitted (see renderGroup in explorer.js) --

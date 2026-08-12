@@ -12,7 +12,7 @@ import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
 import { themeSummary } from "./lib/themes.js";
 import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
-import { renderStats } from "./stats-view.js";
+import { renderTableLine } from "./stats-view.js";
 import { showPanel } from "./panels.js";
 import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 
@@ -86,7 +86,7 @@ async function showTableStats(material) {
     }
   }
   if (bandMaterial !== material) return;                 // superseded while awaiting
-  renderStats(body, statsCache.get(material), { idPrefix: "tbl-", samples: false });
+  renderTableLine(body, statsCache.get(material));
 }
 
 // initMaterials() populates #material-list asynchronously and signals

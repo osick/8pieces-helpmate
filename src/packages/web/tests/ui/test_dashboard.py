@@ -834,13 +834,12 @@ def test_the_board_stays_put_while_the_readout_scrolls(page, server):
 
 def test_the_explorer_shows_the_table_this_position_came_from(page, server):
     page.goto(server)
-    page.wait_for_selector("#table-stats .stats-head")
-    assert "KQvk" in page.inner_text("#table-stats .stats-head")
-    # its own ids, so the Materials panel's charts stay uniquely selectable
-    assert page.eval_on_selector_all("#tbl-dtm-hist", "e => e.length") == 1
-    assert page.eval_on_selector_all("#dtm-hist", "e => e.length") == 0
-    # and no sample list -- the explorer already is a position
-    assert page.eval_on_selector_all("#tbl-material-samples", "e => e.length") == 0
+    page.wait_for_selector("#table-stats .table-line")
+    assert "KQvk" in page.inner_text("#table-stats .table-line")
+    # the band is a one-line summary, not a second copy of Materials' charts --
+    # those live one click away, via #btn-open-material
+    assert page.eval_on_selector_all("#table-stats .hist", "e => e.length") == 0
+    assert page.eval_on_selector_all("#table-stats .tiles", "e => e.length") == 0
 
 
 def test_the_table_band_refetches_only_when_the_material_actually_changes(page, server):
@@ -858,8 +857,8 @@ def test_the_table_band_refetches_only_when_the_material_actually_changes(page, 
     # 2026-08-12: material "KQvk" before, "Kvk" after.
     capture_fen = "K7/8/8/8/8/8/6k1/6Q1 b - - 0 1"
     page.goto(f"{server}/#fen={quote(capture_fen)}")
-    page.wait_for_selector("#table-stats .stats-head")
-    assert "KQvk" in page.inner_text("#table-stats .stats-head")
+    page.wait_for_selector("#table-stats .table-line")
+    assert "KQvk" in page.inner_text("#table-stats .table-line")
 
     # Match /v1/materials/<name>/stats only. A bare "/stats" would also match
     # the corpus aggregate, which initMaterials() requests on load -- an async
@@ -895,7 +894,7 @@ def test_the_table_band_refetches_only_when_the_material_actually_changes(page, 
 
 def test_the_table_band_opens_the_material(page, server):
     page.goto(server)
-    page.wait_for_selector("#table-stats .stats-head")
+    page.wait_for_selector("#table-stats .table-line")
     page.click("#btn-open-material")
     page.wait_for_selector("#panel-materials:not([hidden])")
     assert page.get_attribute(
@@ -1323,3 +1322,25 @@ def test_the_explorer_rail_has_no_rounded_corner_mid_panel(page, server):
     page.wait_for_function("document.getElementById('table-stats').hidden === true")
     top2, bottom2 = page.eval_on_selector("#panel-explorer .rail", radii)
     assert bottom2 == top2, f"the rail is the panel's bottom but is not rounded: {bottom2}"
+
+
+def test_the_explorer_table_band_is_one_line_with_no_histogram(page, server):
+    page.goto(server)
+    page.wait_for_selector("#table-stats-body")
+    assert "KQvk" in page.inner_text("#table-stats")
+    # the histograms live on Materials, one click away
+    assert page.eval_on_selector_all("#table-stats .hist", "e => e.length") == 0
+    assert page.eval_on_selector_all("#table-stats .tiles", "e => e.length") == 0
+    h = page.eval_on_selector("#table-stats", "e => e.getBoundingClientRect().height")
+    assert h < 120, f"the band is {h:.0f}px tall"
+
+
+def test_actionable_controls_are_weighted(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    for sel in ("#btn-flip", "#btn-clear-board", "#btn-back", "#btn-export-pgn"):
+        w = page.eval_on_selector(sel, "e => getComputedStyle(e).fontWeight")
+        assert int(w) >= 600, f"{sel} is weight {w}"
+    # inert text is not
+    w = page.eval_on_selector("#position-summary", "e => getComputedStyle(e).fontWeight")
+    assert int(w) < 600, f"the verdict is weight {w}"
