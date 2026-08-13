@@ -1439,7 +1439,12 @@ def test_the_explorer_rail_has_no_rounded_corner_mid_panel(page, server):
 
 def test_the_explorer_table_band_is_one_line_with_no_histogram(page, server):
     page.goto(server)
-    page.wait_for_selector("#table-stats-body")
+    # #table-stats-body is in the static tree and holds "Loading…" while the
+    # request is in flight, so waiting on it resolved before the band had any
+    # real content -- and the height assertion below then measured the
+    # placeholder. Wait for the rendered line itself, the same idiom
+    # test_the_explorer_shows_the_table_this_position_came_from uses.
+    page.wait_for_selector("#table-stats .table-line")
     assert "KQvk" in page.inner_text("#table-stats")
     # the histograms live on Materials, one click away
     assert page.eval_on_selector_all("#table-stats .hist", "e => e.length") == 0
@@ -1484,21 +1489,83 @@ PUZZLE_URL = "/#panel=puzzles"
 # puzzles.epd Task 4 shipped spans materials well outside it entirely (up to
 # 6-man combinations like KBvkqrn, verified by inspection: zero overlap with
 # the closure) -- every one of those 404s against this fixture, whichever ten
-# pickSession happened to draw. Serve a ten-line EPD built from GOLDEN
-# instead, the same position already proven solvable against this exact
-# fixture by test_dashboard_renders_the_initial_position above -- so what
-# these tests exercise is the puzzle screen's own grading logic, not whether
-# this speed-oriented fixture happens to have generated the right table. The
-# ten entries share one FEN (harmless: nothing here asserts on per-puzzle
-# variety) so pickSession's `sorted.length <= n` branch returns all ten
-# verbatim, with no randomness left to make a test flaky.
-_PUZZLE_EPD_FIELDS = GOLDEN.rsplit(" ", 2)[0]   # placement/stm/castling/ep, no clocks
+# pickSession happened to draw. So the set served here is mined out of THAT
+# closure instead, and what these tests exercise is the puzzle screen's own
+# grading logic rather than whether a speed-oriented fixture happens to have
+# generated the right table.
+#
+# Eleven entries across ten distinct (dtm, piece-count) rungs, which is what
+# makes the draw both non-trivial and deterministic:
+#
+#   * eleven is MORE than SESSION_SIZE, so pickSession does not return early
+#     at `sorted.length <= n`. The previous set was exactly ten identical
+#     puzzles, which took that early return every time -- the banding
+#     arithmetic below it was never reached from a browser at all.
+#   * ten rungs against ten slots means bandRanges cuts exactly one rung per
+#     band, so slot i is rung i for every i and the only randomness left is
+#     WHICH of the two dtm-13 positions fills the last slot.
+#
+# So puzzle 1 is always the dtm-4 position: a FOUR-ply line, hence two move
+# rows rather than one, and a solve that actually reaches
+# `plyIndex >= solutionSan.length`. Every (dtm, FEN) pair below was mined out
+# of a freshly generated KPvk closure and its line length re-checked against
+# it, 2026-08-13.
+_PUZZLE_SET = [
+    (4,  "8/8/8/8/8/k7/8/1K2Q3 b - -"),      # KQvk -- line: Ka4 Kc2 Ka3 Qa5#
+    (5,  "8/8/8/8/8/8/6Q1/K1k5 w - -"),      # KQvk
+    (6,  "8/8/8/8/Q7/8/8/K1k5 b - -"),       # KQvk
+    (7,  "8/8/8/8/8/8/2Q5/K6k w - -"),       # KQvk
+    (8,  "8/8/8/8/8/6k1/5Q2/K7 b - -"),      # KQvk
+    (9,  "8/8/7k/5Q2/8/8/1K6/8 w - -"),      # KQvk
+    (10, "8/8/7k/6Q1/8/8/1K6/8 b - -"),      # KQvk
+    (11, "8/7k/8/6Q1/8/8/8/K7 w - -"),       # KQvk
+    (12, "8/8/7k/6Q1/8/8/8/K7 b - -"),       # KQvk
+    (13, "6k1/8/8/8/8/8/4P3/2K5 w - -"),     # KPvk -- the doubled rung, so the
+    (13, "8/8/7k/8/8/K7/P7/8 w - -"),        # only random slot is the last one
+]
+
+# EPD carries no clocks; parseEpd appends the two the rest of the app expects.
+FIRST_PUZZLE_FEN = _PUZZLE_SET[0][1] + " 0 1"
 
 
-def _mock_puzzle_set(page, count=10):
-    body = "\n".join(f'{_PUZZLE_EPD_FIELDS} ; hm 2 ; id "p{i}"' for i in range(count)) + "\n"
+def _mock_puzzle_set(page, count=len(_PUZZLE_SET)):
+    body = "".join(f'{fen} ; hm {dtm} ; id "p{i}"\n'
+                   for i, (dtm, fen) in enumerate(_PUZZLE_SET[:count]))
     page.route("**/puzzles.epd", lambda route: route.fulfill(
         status=200, content_type="text/plain", body=body))
+
+
+# /v1/line answers in SAN only, so a ply's uci is recovered the same way the
+# screen recovers it: match that SAN against /v1/moves for the position
+# reached so far. Run in the page so it uses the page's own origin.
+_RESOLVE_LINE = """async (fen) => {
+  const get = async (path, f) =>
+    (await (await fetch(path + '?fen=' + encodeURIComponent(f))).json());
+  const line = (await get('/v1/line', fen)).lines[0];
+  const out = [];
+  let cur = fen;
+  for (const san of line) {
+    const m = (await get('/v1/moves', cur)).moves.find((x) => x.san === san);
+    out.push({ uci: m.uci, san });
+    cur = m.fen;
+  }
+  return out;
+}"""
+
+# A LEGAL move that is not the expected one. That is the only wrong move the
+# UI can produce: enableBoardInput rejects an illegal drag at
+# `candidates.length === 0`, well before judge() is reached, so driving an
+# illegal uci through the test hook graded a state the screen cannot reach.
+_LEGAL_BUT_UNEXPECTED = """async (fen) => {
+  const get = async (path, f) =>
+    (await (await fetch(path + '?fen=' + encodeURIComponent(f))).json());
+  const expected = (await get('/v1/line', fen)).lines[0][0];
+  return (await get('/v1/moves', fen)).moves.find((m) => m.san !== expected).uci;
+}"""
+
+
+def _revealed(page):
+    return page.eval_on_selector("#puzzle-line", "e => e.classList.contains('revealed')")
 
 
 def test_a_puzzle_screen_opens_with_a_prompt_and_a_board(page, server):
@@ -1510,34 +1577,153 @@ def test_a_puzzle_screen_opens_with_a_prompt_and_a_board(page, server):
     assert "1 of 10" in page.inner_text("#puzzle-progress")
 
 
-def test_a_correct_move_is_marked_and_advances_the_line(page, server):
+def test_playing_the_whole_line_marks_every_ply_and_reports_it_solved(page, server):
+    # The screen's entire point, and it had no coverage: the previous version
+    # of this test clicked "Show solution" and asserted a span was non-empty,
+    # which reveal() alone satisfies. judge()'s success branch and
+    # afterJudge()'s success half could both be deleted whole and it passed;
+    # finishPuzzle() and #puzzle-solved were never reached at all. So: play
+    # every ply of a real line through the same grading path a drag uses.
     _mock_puzzle_set(page)
     page.goto(server + PUZZLE_URL)
     page.wait_for_selector("#puzzle-line .ply")
-    page.click("#btn-puzzle-solution")           # reveal, then replay it
-    first = page.eval_on_selector("#puzzle-line .ply", "e => e.textContent.trim()")
-    assert first
+    plies = page.evaluate(_RESOLVE_LINE, FIRST_PUZZLE_FEN)
+
+    assert len(plies) == 4, plies
+    # four plies pair into two move rows -- a multi-row line, which a set of
+    # 2-ply puzzles never produced
+    assert page.eval_on_selector_all("#puzzle-line .move-row", "e => e.length") == 2
+    assert page.eval_on_selector_all("#puzzle-line .ply", "e => e.length") == 4
+    assert page.is_hidden("#puzzle-solved")
+
+    for i, ply in enumerate(plies):
+        page.evaluate("u => window.__puzzlePlay(u)", ply["uci"])
+        page.wait_for_selector(f"#puzzle-line .ply[data-ply='{i}'].correct")
+        assert page.eval_on_selector(
+            f"#puzzle-line .ply[data-ply='{i}']", "e => e.textContent.trim()") == ply["san"]
+
+    assert page.eval_on_selector_all("#puzzle-line .ply.correct", "e => e.length") == 4
+    assert page.eval_on_selector_all("#puzzle-line .ply.wrong", "e => e.length") == 0
+    # graded, not revealed -- reveal() would also have filled every cell
+    assert not _revealed(page), "the line was revealed, not solved"
+    assert page.is_hidden("#puzzle-correction")
+
+    page.wait_for_selector("#puzzle-solved:not([hidden])")
+    assert "Solved" in page.inner_text("#puzzle-solved")
+    assert plies[-1]["san"].endswith("#"), plies[-1]
 
 
-def test_a_wrong_move_is_marked_and_shows_the_right_one(page, server):
+def test_a_legal_but_unexpected_move_is_marked_wrong_and_does_not_advance(page, server):
     _mock_puzzle_set(page)
     page.goto(server + PUZZLE_URL)
-    page.wait_for_selector("#puzzle-line")
-    # drive a deliberately wrong first move via the test hook
-    page.evaluate("window.__puzzlePlay('a1a2')")
+    page.wait_for_selector("#puzzle-line .ply")
+    wrong = page.evaluate(_LEGAL_BUT_UNEXPECTED, FIRST_PUZZLE_FEN)
+    assert len(wrong) == 4, wrong
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
     page.wait_for_selector("#puzzle-line .ply.wrong")
     assert page.eval_on_selector_all("#puzzle-line .ply.wrong", "e => e.length") == 1
+    assert page.eval_on_selector("#puzzle-line .ply.wrong", "e => e.dataset.ply") == "0"
     assert page.is_visible("#puzzle-correction")
 
+    plies = page.evaluate(_RESOLVE_LINE, FIRST_PUZZLE_FEN)
+    assert page.inner_text("#puzzle-correction") == f"Correct move: {plies[0]['san']}"
+    # the ply the player still owes is ungraded, and the position is untouched:
+    # playing it now is accepted as ply 0
+    assert page.eval_on_selector_all("#puzzle-line .ply.correct", "e => e.length") == 0
+    page.evaluate("u => window.__puzzlePlay(u)", plies[0]["uci"])
+    page.wait_for_selector("#puzzle-line .ply[data-ply='0'].correct")
 
-def test_exceeding_the_error_budget_reveals_the_solution(page, server):
+
+def test_a_legal_but_unexpected_drag_snaps_the_piece_back(page, server):
+    # validateMoveInput returns judge()'s answer, so a wrong move must be
+    # REJECTED as a drag -- the piece returns to its square and the board
+    # still shows the position the player has to solve.
     _mock_puzzle_set(page)
     page.goto(server + PUZZLE_URL)
-    page.wait_for_selector("#puzzle-line")
-    page.evaluate("window.__puzzleSetBudget(1)")
-    page.evaluate("window.__puzzlePlay('a1a2')")
-    page.evaluate("window.__puzzlePlay('a1a3')")
+    page.wait_for_selector("#puzzle-line .ply")
+    wrong = page.evaluate(_LEGAL_BUT_UNEXPECTED, FIRST_PUZZLE_FEN)
+    frm, to = wrong[:2], wrong[2:4]
+
+    a = page.locator(f"#puzzle-board rect[data-square={frm}]").bounding_box()
+    b = page.locator(f"#puzzle-board rect[data-square={to}]").bounding_box()
+    page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2, steps=10)
+    page.mouse.up()
+
+    page.wait_for_selector("#puzzle-line .ply.wrong")
+    page.wait_for_timeout(400)      # let cm-chessboard finish animating the piece back
+    occupied = "#puzzle-board g[data-piece][data-square='%s']"
+    assert page.eval_on_selector_all(occupied % frm, "e => e.length") == 1, \
+        "the rejected drag left the origin square empty"
+    assert page.eval_on_selector_all(occupied % to, "e => e.length") == 0, \
+        "the rejected drag was played anyway"
+
+
+def test_the_error_budget_decides_when_the_line_is_revealed(page, server):
+    # A budget DIFFERENT from puzzle.js's own default of 1: setting it to 1
+    # was a no-op, so both a no-op __puzzleSetBudget and `errors > 0` passed.
+    # Both directions are pinned here -- errors inside the budget must NOT
+    # reveal, the first one past it must.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    wrong = page.evaluate(_LEGAL_BUT_UNEXPECTED, FIRST_PUZZLE_FEN)
+    page.evaluate("window.__puzzleSetBudget(2)")
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
+    page.wait_for_selector("#puzzle-line .ply.wrong")
+    assert not _revealed(page), "one error, inside a budget of 2, revealed the line"
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
+    assert not _revealed(page), "two errors, equal to the budget, revealed the line"
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
     page.wait_for_selector("#puzzle-line.revealed")
+    filled = page.eval_on_selector_all(
+        "#puzzle-line .ply", "els => els.map(e => e.textContent.trim())")
+    assert all(filled), filled
+
+
+def test_a_superseded_puzzles_load_error_does_not_overwrite_the_current_one(page, server):
+    # movesWithRetry's catch was the last exit with no staleness check.
+    # Puzzle 1 sits on a table that is still downloading; the user clicks
+    # "Next puzzle" and puzzle 2 loads fine; then puzzle 1's abandoned
+    # request finally rejects -- /v1/moves answers a failed download with a
+    # real 500 -- and the error overwrote puzzle 2's prompt, naming a
+    # material that is not on the board. Puzzle 1's request is held open in
+    # the page and released by hand, so this is deterministic.
+    _mock_puzzle_set(page)
+    page.add_init_script("""
+      window.__failStaleMoves = null;
+      const orig = window.fetch;
+      let held = false;
+      window.fetch = function (input, init) {
+        if (!held && String(input).includes("/v1/moves")) {
+          held = true;
+          return new Promise((resolve) => {
+            window.__failStaleMoves = () => resolve(new Response(
+              JSON.stringify({error: {code: "internal",
+                                      message: "download of 'KQvk' failed"}}),
+              {status: 500, headers: {"content-type": "application/json"}}));
+          });
+        }
+        return orig.call(window, input, init);
+      };
+    """)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_function("window.__failStaleMoves !== null")
+
+    page.click("#btn-puzzle-next")
+    page.wait_for_selector("#puzzle-line .ply")
+    assert "2 of 10" in page.inner_text("#puzzle-progress")
+    prompt = page.inner_text("#puzzle-prompt")
+
+    page.evaluate("window.__failStaleMoves()")     # puzzle 1's request fails now
+    page.wait_for_timeout(400)
+    assert page.inner_text("#puzzle-prompt") == prompt, \
+        "a superseded puzzle's load error overwrote the puzzle on screen"
 
 
 def _endpoint_hits(urls, path):

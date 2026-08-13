@@ -14,7 +14,12 @@ test("EPD parses to fen, ply distance and id, skipping comments", () => {
   assert.equal(ps.length, 3);
   assert.deepEqual(ps.map((p) => p.id), ["a", "b", "c"]);
   assert.deepEqual(ps.map((p) => p.dtm), [4, 2, 8]);
-  assert.ok(ps[0].fen.startsWith("8/7k/5K2"));
+  // The WHOLE fen, not a prefix. parseEpd's one transformation is appending
+  // the two clock fields EPD does not carry ("0 1"), and every /v1/ endpoint
+  // 400s a FEN without them -- a prefix check passed with that append
+  // deleted, i.e. with every puzzle in production broken.
+  assert.equal(ps[0].fen, "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1");
+  assert.equal(ps[1].fen, "7k/8/5K2/8/8/8/8/6Q1 w - - 0 1");
 });
 
 test("an unknown opcode is ignored, not fatal — future custom fields cost nothing", () => {
@@ -113,7 +118,14 @@ test("pickSession's isAvailable filters the pool before the band arithmetic", ()
   assert.equal(s.length, 10);
   assert.ok(s.every((p) => materialOf(p.fen) === "KQvk"), "an unavailable material slipped through");
   // Still spans the (now halved) range, not clustered near the easiest few.
-  assert.ok(s[9].dtm - s[0].dtm > 90, `span too narrow after filtering: ${s[0].dtm}..${s[9].dtm}`);
+  // The floor is the same kind of PROVEN one the test above uses, not a
+  // round number: the filtered pool is 50 puzzles at dtm 2, 6, 10, ..., 198,
+  // one per rung, so 10 bands of 5 rungs each put band 0 at dtm 2..18 and
+  // band 9 at dtm 182..198 -- a span that can never be narrower than
+  // 182 - 18 = 164. A threshold below that (90, as this test first shipped)
+  // is satisfied by badly broken banding, which is the exact defect the test
+  // above was fixed for and this one then repeated.
+  assert.ok(s[9].dtm - s[0].dtm >= 164, `span too narrow after filtering: ${s[0].dtm}..${s[9].dtm}`);
 });
 
 test("pickSession's default isAvailable (null) changes nothing -- existing call sites are untouched", () => {
