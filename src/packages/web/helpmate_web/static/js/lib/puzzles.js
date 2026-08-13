@@ -37,6 +37,27 @@ export function parseEpd(text) {
   return out;
 }
 
+// The material a FEN belongs to, by the SAME rule the server uses to name
+// its tables (helpmate_server/app.py's `_dir_for_fen`): white piece letters
+// sorted King/Queen/Rook/Bishop/Knight/Pawn, then "v", then black's letters
+// the same way, lowercased. Used to filter the puzzle set down to whatever
+// materials this installation actually has before pickSession ever sees it
+// -- a puzzle whose material nobody has generated is not a harder puzzle,
+// it is a 404.
+const PIECE_ORDER = "KQRBNP";
+
+export function materialOf(fen) {
+  const board = String(fen || "").split(/\s+/)[0] || "";
+  const side = (test) => [...board]
+    .filter((c) => test(c) && PIECE_ORDER.includes(c.toUpperCase()))
+    .map((c) => c.toUpperCase())
+    .sort((a, b) => PIECE_ORDER.indexOf(a) - PIECE_ORDER.indexOf(b))
+    .join("");
+  const white = side((c) => c >= "A" && c <= "Z");
+  const black = side((c) => c >= "a" && c <= "z");
+  return `${white}v${black.toLowerCase()}`;
+}
+
 export function pieceCount(fen) {
   const placement = String(fen || "").split(/\s+/)[0] || "";
   let n = 0;
@@ -59,8 +80,17 @@ function byDifficulty(a, b) {
 // clustering: the sorted set is cut into n equal bands and one is drawn at
 // random from each. This adapts to whatever the file holds, so adding custom
 // problems -- or a deeper corpus -- needs no tier table to be maintained.
-export function pickSession(all, n, rnd = Math.random) {
-  const sorted = [...(all || [])].sort(byDifficulty);
+//
+// `isAvailable`, when given, filters the pool BEFORE the band arithmetic --
+// so a session drawn from a thin, partially-generated install still spans
+// whatever range survives, rather than the bands being cut against the
+// full (mostly unplayable) set and then discovering most of them are empty.
+// Defaults to null (no filtering, every puzzle considered available), which
+// is why every existing call site -- and every test above -- is untouched:
+// a 3rd positional `rnd` argument still means exactly what it always did.
+export function pickSession(all, n, rnd = Math.random, isAvailable = null) {
+  const pool = isAvailable ? (all || []).filter(isAvailable) : (all || []);
+  const sorted = [...pool].sort(byDifficulty);
   if (sorted.length <= n) return sorted;
   const out = [];
   const band = sorted.length / n;

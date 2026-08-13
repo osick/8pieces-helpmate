@@ -23,7 +23,7 @@ import {
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { el } from "./stats-view.js";
 import { splitFen } from "./lib/fen.js";
-import { parseEpd, pickSession, gradeMove } from "./lib/puzzles.js";
+import { parseEpd, pickSession, gradeMove, materialOf } from "./lib/puzzles.js";
 
 const SESSION_SIZE = 10;
 
@@ -33,6 +33,16 @@ let board = null;
 // session -- a "start another" click draws a fresh SESSION_SIZE without a
 // second network round trip.
 let allPuzzles = null;
+
+// The materials this installation actually has tables for (a Set of strings
+// like "KQvk"), fetched once via /v1/materials and reused across sessions --
+// same caching shape as allPuzzles, and for the same reason: a puzzle whose
+// material nobody has generated is not a harder puzzle, it is a 404. null
+// means "not fetched yet"; an empty Set (fetch failed, or genuinely nothing
+// installed) is treated the same as "nothing available" below, which is the
+// safe direction to fail in -- showing a puzzle we can't confirm is playable
+// risks the exact dead-screen defect this filter exists to prevent.
+let availableMaterials = null;
 
 let session = [];        // this run's SESSION_SIZE puzzles, easiest first
 let idx = 0;              // index into session
@@ -114,8 +124,14 @@ async function loadPuzzle() {
 
   const correction = document.getElementById("puzzle-correction");
   correction.hidden = true;
+  document.getElementById("puzzle-solved").hidden = true;
   document.getElementById("puzzle-line").textContent = "";
-  document.getElementById("puzzle-progress").textContent = `Puzzle ${idx + 1} of ${session.length}`;
+  // Honest about a thin install: a session shorter than SESSION_SIZE (too
+  // few materials on hand for a full ladder) says so plainly here, rather
+  // than silently presenting fewer puzzles as if a full ten were on offer.
+  document.getElementById("puzzle-progress").textContent = session.length < SESSION_SIZE
+    ? `Puzzle ${idx + 1} of ${session.length} (only ${session.length} of this installation's tables match the puzzle set)`
+    : `Puzzle ${idx + 1} of ${session.length}`;
   setPromptLoading();
 
   const p = board.setPosition(puzzle.fen.split(" ")[0], true);
@@ -144,6 +160,18 @@ async function loadPuzzle() {
   buildLine(solutionSan);
 }
 
+function sayNoPuzzlesMatch() {
+  // Not "no puzzles" -- name what to do. Sorted so the message is stable
+  // across sessions and easy to scan, not a re-shuffled wall each time.
+  const materials = [...new Set(allPuzzles.map((p) => materialOf(p.fen)))].sort();
+  const example = materials[0] || "KQvk";
+  document.getElementById("puzzle-progress").textContent = "";
+  document.getElementById("puzzle-prompt").textContent =
+    `none of this installation's tables match the shipped puzzle set. It uses: ${materials.join(", ")}. `
+    + `Generate one -- e.g. \`helpmate gen ${example} --tables <dir>\` -- then reload this screen.`;
+  document.getElementById("puzzle-line").textContent = "";
+}
+
 async function startSession() {
   sessionDone = false;
   document.getElementById("btn-puzzle-next").textContent = "Next puzzle";
@@ -162,7 +190,22 @@ async function startSession() {
     document.getElementById("puzzle-line").textContent = "";
     return;
   }
-  session = pickSession(allPuzzles, SESSION_SIZE);
+
+  if (availableMaterials === null) {
+    try {
+      const res = await api.materials();
+      availableMaterials = new Set((res.body.materials || []).map((m) => m.material));
+    } catch {
+      availableMaterials = new Set();   // couldn't ask: the safe default is "nothing confirmed available"
+    }
+  }
+
+  const isAvailable = (p) => availableMaterials.has(materialOf(p.fen));
+  session = pickSession(allPuzzles, SESSION_SIZE, Math.random, isAvailable);
+  if (!session.length) {
+    sayNoPuzzlesMatch();
+    return;
+  }
   idx = 0;
   await loadPuzzle();
 }
@@ -172,14 +215,21 @@ function showSessionDone() {
   document.getElementById("puzzle-prompt").textContent = "Nice work — start another session?";
   document.getElementById("puzzle-line").textContent = "";
   document.getElementById("puzzle-correction").hidden = true;
+  document.getElementById("puzzle-solved").hidden = true;
   document.getElementById("btn-puzzle-next").textContent = "New session";
   document.getElementById("btn-puzzle-solution").disabled = true;
 }
 
+// Its own element, not a reuse of #puzzle-correction: that element carries
+// "here is the move you missed", a distinct meaning from "you finished this
+// puzzle" -- a live region that changes what it means mid-solve is exactly
+// the "nothing quietly does double duty" rule, and confusing to anyone
+// hitting it via assistive tech.
 async function finishPuzzle() {
-  const correction = document.getElementById("puzzle-correction");
-  correction.hidden = false;
-  correction.textContent = "Solved.";
+  document.getElementById("puzzle-correction").hidden = true;
+  const solved = document.getElementById("puzzle-solved");
+  solved.hidden = false;
+  solved.textContent = "Solved.";
 }
 
 // Plays out the remaining plies on the board and in the line, without
