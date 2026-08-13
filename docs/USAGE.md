@@ -1317,9 +1317,11 @@ Since v0.11.0, every screen is a grey **rail** — the board, the palette, the
 material list, the search form: what you manipulate — beside a white
 **readout** — the move list, the table stats, the results: what the tables
 say. Both surfaces are aliases over the existing palette; no new colours were
-introduced to build the split.
+introduced to build the split. Since v0.13.0 that is **one palette, full
+stop** — there is no colour-theme control on this page any more; see
+[Palette](#palette) below.
 
-Three screens:
+Five screens:
 
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
   one from the complete legal-move list, which is grouped into **Optimal**
@@ -1372,15 +1374,56 @@ Three screens:
   queued there; the server still finishes or drops the scan on its own
   `--mine-timeout` clock. Pressing Stop says this in the status line rather
   than implying the server stopped too.
+- **Puzzles** (since v0.13.0) — a session of ten one-solution positions
+  drawn from a committed EPD file, one per difficulty rung (mate length
+  first, piece count second, ascending), easiest first. It reuses the
+  explorer's own board construction, not a second editor: the same
+  borderless square style, the same rail/readout layout — but no palette, no
+  relocation, no FEN box, and only the one move expected at the current ply
+  is ever graded. Solving means playing the *whole* line, both colours: a
+  helpmate is cooperative, so proving the solution means supplying Black's
+  moves too, not just answering "what does White play". Each ply the player
+  supplies gets a check or a cross; a wrong move reveals the correct SAN for
+  that ply without ending the puzzle, and once the running error count
+  passes the puzzle's error budget the rest of the line is revealed
+  automatically. The session is filtered, before it is drawn, to materials
+  this installation's [`GET /v1/materials`](#get-v1materials) actually lists
+  — a puzzle whose material nobody has generated is not a harder puzzle, it
+  is a 404 — and when none of the shipped set's materials match, the screen
+  says so by name and prints the `helpmate gen` command that would fix it,
+  rather than presenting an empty or broken session. See [Puzzle set
+  (EPD)](#puzzle-set-epd) below for the file format and how to regenerate
+  it.
+- **Themes** (since v0.13.0) — every motif this build's tablebase detects,
+  in five groups (the mate picture, how a unit travels, pawns and promotion,
+  where the mate happens, the structure of the solution) plus a trailing
+  "other" group for anything the registry adds later, each group introduced
+  by a sentence before its members. Rendered straight from
+  [`GET /v1/themes`](#get-v1themes) — never a hard-coded list — so this
+  screen cannot drift from the binary it is talking to: a new motif shows up
+  here with no edit to the dashboard. Every entry shows the motif's name,
+  its definition (the API's own `doc` string), and a one-line explanation of
+  what its `needs` value means for a position whose stored solution count
+  has saturated at 255 (see [`needs`: what a theme actually
+  reads](#needs-what-a-theme-actually-reads) above) — `solutions` detectors
+  are silently skipped on such a position, `plane`/`position` ones still
+  answer.
 
-**Theme.** The header's `Theme:` button cycles through three states — system,
-light, dark — rather than a plain on/off switch. System means "follow the
-OS": the page reads `prefers-color-scheme` and needs no explicit choice.
-Picking light or dark overrides that for this browser; the choice is
-remembered (`localStorage`) and survives a reload. It is also applied
-*before* first paint, via a small inline script in `<head>` that runs ahead
-of the page's own module — so a dark-mode user never sees a flash of the
-light page on load.
+**Palette.** One palette, full stop. There is no colour-theme control on
+this page, and nothing to keep in sync with the OS's own
+`prefers-color-scheme` — earlier releases carried a three-state
+system/light/dark toggle, remembered per browser and applied before first
+paint via a pre-paint script in `<head>`; v0.13.0 removed the toggle, the
+stored preference, that script, its drift test, and both dark token blocks
+in `app.css` (a net −200 lines). The bare `:root` in `app.css` is the whole
+system now.
+
+**Footer.** Every screen shares one footer: a live line naming the corpus
+the server is reading from left, and on the right a row of about-this-site
+links (`Source`, `Dataset`, `Licence`) that are marked as placeholders
+(`data-placeholder`, an underlined-dotted style) rather than silently
+pointing at `#` — they are wired up to real destinations once this project
+is public, not before.
 
 **Editing a position.** Since v0.12.0 the board has **no editing modes** —
 no armed piece, no `Erase`, no `Arrange`, no `Done — evaluate` button to
@@ -1427,6 +1470,57 @@ Third-party code is vendored, not fetched: **cm-chessboard** 8.7.5 (MIT) lives
 under `src/packages/web/helpmate_web/static/vendor/cm-chessboard/` with its
 LICENSE and upstream version recorded in
 `src/packages/web/helpmate_web/static/vendor/README.md`.
+
+### Puzzle set (EPD)
+
+The Puzzles screen is served against a plain static file,
+`src/packages/web/helpmate_web/static/puzzles.epd` (fetched by the client as
+`/puzzles.epd` — no dedicated API endpoint), in
+[EPD](https://www.chessprogramming.org/Extended_Position_Description),
+chess's standard container for a collection of positions. It is committed to
+the repo and meant to be **hand-editable**: a custom problem can be added by
+typing one line.
+
+```
+8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "KQvk.0001"
+```
+
+Each line is the four FEN fields — placement, side to move, castling
+rights, en passant target; EPD has no halfmove/fullmove clocks, so the
+client's own parser appends `0 1` to turn a line back into a FEN the rest of
+the dashboard understands — followed by `;`-separated opcodes. Exactly two
+are read:
+
+- **`hm`** — the helpmate distance **in plies**, the same unit `dtm` uses
+  everywhere else in this project (so `hm 4` is h#2). Stored rather than
+  probed, so ordering the whole set by difficulty costs nothing at load
+  time.
+- **`id`** — a free-form label, not currently shown on screen but kept for
+  provenance and hand-editing.
+
+Any other opcode is parsed and ignored (so a future field costs nothing to
+add), and a line starting with `#` is a comment. A line with no positive
+`hm` is skipped. Piece count is *not* stored — it's derived from the FEN
+each time, since it's cheap and storing it would risk drifting from the FEN
+it describes.
+
+The committed 930-position file was mined from a real corpus with
+[`tools/mine_puzzles.py`](../tools/mine_puzzles.py): a ladder of ten
+`(piece count, mate length)` rungs, each queried against helpmate's mining
+API for positions with a unique solution (`count=1`), ranked by how many
+such positions each candidate material actually holds (read straight from
+that material's `stats.json` uniqueness histogram, no probing needed).
+Read-only against `--tables` and deterministic given `--seed`, so
+regenerating the file produces a reviewable diff rather than a reshuffle:
+
+```bash
+taskset -c 0-3 python3 tools/mine_puzzles.py --tables ~/tb \
+    --out src/packages/web/helpmate_web/static/puzzles.epd --seed 1
+```
+
+It refuses to write `--out` anywhere under `~/tb` — the same live-corpus
+guard `tools/bench_compression.py` applies to `--tables`, here applied to
+the write target instead.
 
 ## API server
 
@@ -1493,7 +1587,7 @@ uncaught exceptions) has the same shape:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/health
-{"status":"ok","version":"0.12.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
+{"status":"ok","version":"0.13.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
 ```
 
 `mine_timeout` (since v0.11.0) echoes the server's `--mine-timeout` setting
