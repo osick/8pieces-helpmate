@@ -56,10 +56,12 @@ def test_materials_panel_lists_tables_and_opens_a_sample(page, server):
     page.wait_for_selector("#material-samples li")
 
 
-def test_only_the_active_panel_is_visible(page, server):
+def test_only_the_active_panel_is_visible(page, server_mining):
     # Regression: `#panel-explorer { display: flex }` is an id selector and
     # outranks the user-agent [hidden] rule, so every panel rendered at once.
-    page.goto(server)
+    # server_mining: this exercises the mine panel's own visibility toggle,
+    # which needs #panel-mine present -- gone on a non-mining server.
+    page.goto(server_mining)
     page.wait_for_selector("#move-list li")
     assert page.is_visible("#panel-explorer")
     assert not page.is_visible("#panel-materials")
@@ -365,8 +367,8 @@ def test_the_server_chip_reports_what_is_loaded(page, server):
     assert "unreachable" not in chip
 
 
-def test_mine_search_and_client_side_validation(page, server):
-    page.goto(f"{server}/#panel=mine")
+def test_mine_search_and_client_side_validation(page, server_mining):
+    page.goto(f"{server_mining}/#panel=mine")
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
     page.fill("#mine-form input[name=count]", "4")
@@ -384,26 +386,26 @@ def test_mine_search_and_client_side_validation(page, server):
         "document.getElementById('mine-status').textContent.includes('cannot exceed')")
 
 
-def test_theme_picker_is_populated_from_the_server(page, server):
-    page.goto(f"{server}/#panel=mine")
+def test_theme_picker_is_populated_from_the_server(page, server_mining):
+    page.goto(f"{server_mining}/#panel=mine")
     page.wait_for_selector("#mine-themes option")
     values = page.eval_on_selector_all(
         "#mine-themes option", "els => els.map(e => e.value)")
     assert "model" in values and "closed-walk" in values
 
 
-def test_theme_picker_marks_themes_that_answer_on_saturated_positions(page, server):
+def test_theme_picker_marks_themes_that_answer_on_saturated_positions(page, server_mining):
     # Task 10: any theme whose `needs` isn't "solutions" still answers on
     # positions whose stored solution count has saturated (capped at 255) --
     # the picker must mark those, driven by the server's own `needs` field,
     # not by a hard-coded theme name.
     import urllib.request
-    with urllib.request.urlopen(f"{server}/v1/themes") as r:
+    with urllib.request.urlopen(f"{server_mining}/v1/themes") as r:
         registry = json.load(r)["themes"]
     non_solutions = {t["name"] for t in registry if t["needs"] != "solutions"}
     assert non_solutions, "fixture build must register at least one non-Solutions theme"
 
-    page.goto(f"{server}/#panel=mine")
+    page.goto(f"{server_mining}/#panel=mine")
     page.wait_for_selector("#mine-themes option")
     options = page.eval_on_selector_all(
         "#mine-themes option",
@@ -416,13 +418,13 @@ def test_theme_picker_marks_themes_that_answer_on_saturated_positions(page, serv
         assert "saturated" not in by_value[name].lower()
 
 
-def test_selecting_two_themes_sends_both_not_just_the_last(page, server):
+def test_selecting_two_themes_sends_both_not_just_the_last(page, server_mining):
     # Regression: Object.fromEntries(new FormData(form).entries()) keeps only
     # the LAST value of a repeated field. A naive read of the multi-select
     # would silently narrow a two-theme search down to one -- the exact class
     # of bug this project has hit before, so assert on the actual request the
     # browser sends rather than trusting the picker looks right on screen.
-    page.goto(f"{server}/#panel=mine")
+    page.goto(f"{server_mining}/#panel=mine")
     page.wait_for_selector("#mine-themes option")
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
@@ -790,8 +792,8 @@ def test_the_drag_ghost_has_no_background_and_is_smaller_than_the_tray(page, ser
     assert ghost["w"] < box["width"], f"ghost {ghost['w']} >= tray {box['width']}"
 
 
-def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
-    page.goto(f"{server}/#panel=mine")
+def test_search_results_are_numbered_and_open_in_the_explorer(page, server_mining):
+    page.goto(f"{server_mining}/#panel=mine")
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
     page.click("#mine-form button[type=submit]")
@@ -1106,12 +1108,12 @@ def test_the_materials_rail_matches_the_readout_height(page, server):
         f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
 
 
-def test_a_timed_out_search_says_so_instead_of_reporting_no_results(page, server):
+def test_a_timed_out_search_says_so_instead_of_reporting_no_results(page, server_mining):
     # The server answers a timeout with {fens: [], truncated: true,
     # note: "timeout"}. Rendering that as "0 position(s) (truncated -- raise
     # max results for more)" is advice that cannot help, about a result that
     # was never computed.
-    page.goto(f"{server}/#panel=mine")
+    page.goto(f"{server_mining}/#panel=mine")
     page.route("**/v1/mine**", lambda route: route.fulfill(
         status=200, content_type="application/json",
         body='{"fens": [], "truncated": true, "note": "timeout", "skipped_saturated": 0}'))
@@ -1125,8 +1127,8 @@ def test_a_timed_out_search_says_so_instead_of_reporting_no_results(page, server
     assert "0 position(s)" not in status
 
 
-def test_the_search_button_becomes_stop_while_in_flight(page, server):
-    page.goto(f"{server}/#panel=mine")
+def test_the_search_button_becomes_stop_while_in_flight(page, server_mining):
+    page.goto(f"{server_mining}/#panel=mine")
     page.route("**/v1/mine**", lambda route: None)   # never respond
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
@@ -1141,7 +1143,7 @@ def test_the_search_button_becomes_stop_while_in_flight(page, server):
     assert page.is_visible("#mine-form button[type=submit]")
 
 
-def test_the_countdown_uses_the_servers_budget(page, server):
+def test_the_countdown_uses_the_servers_budget(page, server_mining):
     # The fixture server's default mine_timeout (30) is the same number as
     # mine.js's hardcoded fallback, so asserting "of 30s" against the real
     # /v1/health response would pass identically whether the health call
@@ -1150,8 +1152,8 @@ def test_the_countdown_uses_the_servers_budget(page, server):
     page.route("**/v1/health**", lambda route: route.fulfill(
         status=200, content_type="application/json",
         body='{"status": "ok", "version": "0.0.0", "mine_timeout": 7, '
-             '"tables_local": 1, "tables_remote": 0}'))
-    page.goto(f"{server}/#panel=mine")
+             '"tables_local": 1, "tables_remote": 0, "mining_enabled": true}'))
+    page.goto(f"{server_mining}/#panel=mine")
     page.route("**/v1/mine**", lambda route: None)
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
@@ -1160,7 +1162,7 @@ def test_the_countdown_uses_the_servers_budget(page, server):
         "document.getElementById('mine-status').textContent.includes('of 7s')")
 
 
-def test_pressing_enter_mid_search_does_not_orphan_the_ticker(page, server):
+def test_pressing_enter_mid_search_does_not_orphan_the_ticker(page, server_mining):
     # Fix round 1 (code review): setBusy(true) only sets `hidden` on the
     # submit button, which does not stop Enter-key implicit form submission
     # -- so a second /v1/mine can fire while the first is still in flight,
@@ -1175,7 +1177,7 @@ def test_pressing_enter_mid_search_does_not_orphan_the_ticker(page, server):
     # sequence: click Search, submit again via Enter (not a second click),
     # press Stop, then wait past a full tick and confirm the Stopped message
     # held.
-    page.goto(f"{server}/#panel=mine")
+    page.goto(f"{server_mining}/#panel=mine")
     page.route("**/v1/mine**", lambda route: None)   # never respond
     material = page.locator("#mine-form input[name=material]")
     material.fill("KQvk")
@@ -1197,7 +1199,7 @@ def test_pressing_enter_mid_search_does_not_orphan_the_ticker(page, server):
     assert "searching" not in status.lower(), status
 
 
-def test_stop_and_the_busy_state_survive_a_downloading_retry(page, server):
+def test_stop_and_the_busy_state_survive_a_downloading_retry(page, server_mining):
     # Fix round 1 (code review): the 202 branch used to schedule its retry
     # with a bare setTimeout and return immediately, so the submit handler's
     # `finally` unwound as soon as the FIRST 202 arrived -- Stop hidden,
@@ -1217,7 +1219,7 @@ def test_stop_and_the_busy_state_survive_a_downloading_retry(page, server):
             route.fulfill(status=200, content_type="application/json",
                            body='{"fens": [], "truncated": false, "skipped_saturated": 0}')
 
-    page.goto(f"{server}/#panel=mine")
+    page.goto(f"{server_mining}/#panel=mine")
     page.route("**/v1/mine**", handle_mine)
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "2")
@@ -1233,7 +1235,7 @@ def test_stop_and_the_busy_state_survive_a_downloading_retry(page, server):
     assert page.is_visible("#mine-form button[type=submit]")
 
 
-def test_the_search_rail_matches_the_readout_height(page, server):
+def test_the_search_rail_matches_the_readout_height(page, server_mining):
     # Same defect class as the explorer's .board-pin and materials'
     # .materials-pin fixes (see the Fix round 1 comment at .board-pin in
     # app.css): #mine-form/.rail must stretch to the grid row's full height
@@ -1243,7 +1245,7 @@ def test_the_search_rail_matches_the_readout_height(page, server):
     # KQvk fixture returns 50 rows (measured 2026-08-12), reliably taller
     # than the six-field form.
     page.set_viewport_size({"width": 1280, "height": 900})
-    page.goto(f"{server}/#panel=mine")
+    page.goto(f"{server_mining}/#panel=mine")
     page.fill("#mine-form input[name=material]", "KQvk")
     page.fill("#mine-form input[name=dtm]", "1")
     page.click("#mine-form button[type=submit]")
@@ -1252,6 +1254,36 @@ def test_the_search_rail_matches_the_readout_height(page, server):
     readout = page.eval_on_selector("#panel-mine .readout", "e => e.getBoundingClientRect()")
     assert abs(rail["bottom"] - readout["bottom"]) <= 2, (
         f"rail bottom {rail['bottom']:.1f} != readout bottom {readout['bottom']:.1f}")
+
+
+def test_search_is_absent_not_hidden_when_mining_is_disabled(page, server):
+    """Absence, not display:none. A hidden form still submits on Enter --
+    that exact bug shipped once and left a ticker running forever."""
+    page.goto(server)
+    page.wait_for_function("() => window.__chipReady === true")
+    assert page.locator("nav[aria-label='Screens'] button").count() == 4
+    assert page.locator("nav button[data-panel='mine']").count() == 0
+    assert page.locator("#panel-mine").count() == 0
+    assert page.locator("#mine-form").count() == 0
+
+
+def test_a_stale_search_deep_link_lands_on_the_explorer(page, server):
+    """#panel=mine is a URL people may have bookmarked. With the panel gone it
+    must not blank the page -- showPanel would otherwise set .hidden on a null
+    and take the whole nav down with it."""
+    errors = []
+    page.on("pageerror", lambda e: errors.append(str(e)))
+    page.goto(f"{server}/#panel=mine")
+    page.wait_for_function("() => window.__chipReady === true")
+    assert page.locator("#panel-explorer").is_visible()
+    assert errors == []
+
+
+def test_search_is_present_when_the_server_enables_it(page, server_mining):
+    page.goto(server_mining)
+    page.wait_for_function("() => window.__chipReady === true")
+    assert page.locator("nav[aria-label='Screens'] button").count() == 5
+    assert page.locator("#panel-mine").count() == 1
 
 
 def test_dragging_a_piece_from_the_palette_places_it(page, server):
@@ -1790,7 +1822,7 @@ def _endpoint_hits(urls, path):
     return [u for u in urls if urlparse(u).path == path]
 
 
-def test_a_hidden_screen_costs_nothing_at_page_load(page, server):
+def test_a_hidden_screen_costs_nothing_at_page_load(page, server_mining):
     # First paint used to run every screen's init unconditionally: the puzzle
     # screen fetched puzzles.epd, the material catalog AND a whole puzzle's
     # /v1/moves -- which, on an install with a remote table chain, answers 202
@@ -1798,10 +1830,16 @@ def test_a_hidden_screen_costs_nothing_at_page_load(page, server):
     # opened. /v1/materials and /v1/themes were each fetched twice for the
     # same reason. Every screen's first paint is now deferred to its panel's
     # first activation.
+    #
+    # server_mining: the single /v1/themes hit this test expects comes from
+    # initMine()'s eager population of the theme picker, which only runs
+    # when the server has search enabled -- on a non-mining server nothing
+    # fetches themes at boot at all, and the "exactly 1" assertion below
+    # would see 0 instead.
     _mock_puzzle_set(page)
     urls = []
     page.on("request", lambda r: urls.append(r.url))
-    page.goto(f"{server}/#panel=materials")
+    page.goto(f"{server_mining}/#panel=materials")
     page.wait_for_function("window.__materialsReady === true")
     page.wait_for_timeout(300)
 
