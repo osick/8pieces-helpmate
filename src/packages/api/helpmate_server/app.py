@@ -51,9 +51,15 @@ def _resolve_web_root(explicit: str | None) -> Optional[Path]:
 
 def create_app(chain: ChainSource, mine_cap: int = 1000,
                mine_timeout: float = 30.0, web_root: str | None = None,
-               serve_web: bool = True, enable_mine: bool = False) -> FastAPI:
+               serve_web: bool = True, enable_mine: bool = False,
+               cors_origins: list[str] | None = None) -> FastAPI:
     app = FastAPI(title="helpmate API", version=__version__)
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
+    # Not installed at all when no origin is configured. The dashboard is
+    # served from this same origin, so it needs no CORS header; anything that
+    # does need one is a cross-origin caller an operator has decided to allow.
+    if cors_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=list(cors_origins),
+                           allow_methods=["GET"])
 
     @app.exception_handler(Exception)
     async def internal_error(request, exc):

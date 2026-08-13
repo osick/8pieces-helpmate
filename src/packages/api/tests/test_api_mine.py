@@ -91,8 +91,8 @@ def test_mine_without_shape_filters_is_unfiltered(client_mining):
 def test_server_main_builds(monkeypatch, kqvk_dir):
     import helpmate_server.main as m
     captured = {}
-    monkeypatch.setattr(m, "_run", lambda app, host, port: captured.update(
-        host=host, port=port, routes={r.path for r in app.routes}))
+    monkeypatch.setattr(m, "_run", lambda app, host, port, limit_concurrency=None:
+        captured.update(host=host, port=port, routes={r.path for r in app.routes}))
     m.main(["--tables", str(kqvk_dir), "--port", "9999"])
     assert captured["port"] == 9999 and "/v1/probe" in captured["routes"]
 

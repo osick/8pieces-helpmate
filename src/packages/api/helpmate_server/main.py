@@ -4,9 +4,11 @@ import os
 from .storage import LocalDir, ChainSource, RemoteSource, HFHub
 from .app import create_app
 
-def _run(app, host: str, port: int) -> None:
+def _run(app, host: str, port: int, limit_concurrency: int | None = None) -> None:
     import uvicorn
-    uvicorn.run(app, host=host, port=port)
+    # None means uvicorn's own default (unbounded). A deployment that wants a
+    # ceiling passes one; nothing is silently capped for a local user.
+    uvicorn.run(app, host=host, port=port, limit_concurrency=limit_concurrency)
 
 def _app_for_tests():
     # Factory for `uvicorn --factory helpmate_server.main:_app_for_tests`,
@@ -35,6 +37,13 @@ def main(argv: list[str] | None = None) -> None:
                    help="enable /v1/mine (position search). Off by default: a "
                         "scan is not interruptible and is not bounded under "
                         "concurrent load")
+    p.add_argument("--cors-origin", action="append", default=[],
+                   metavar="ORIGIN",
+                   help="allow cross-origin GETs from ORIGIN (repeatable). "
+                        "Omit for same-origin only")
+    p.add_argument("--limit-concurrency", type=int, default=None, metavar="N",
+                   help="refuse connections beyond N in flight (default: "
+                        "unlimited). Set this when exposing the server")
     a = p.parse_args(argv)
     remote = None
     if a.hf_repo:
@@ -45,7 +54,8 @@ def main(argv: list[str] | None = None) -> None:
     try:
         app = create_app(chain, a.mine_cap, a.mine_timeout,
                          web_root=a.web_root, serve_web=not a.no_web,
-                         enable_mine=a.enable_mine)
+                         enable_mine=a.enable_mine,
+                         cors_origins=a.cors_origin)
     except ValueError as e:
         p.error(str(e))
-    _run(app, a.host, a.port)
+    _run(app, a.host, a.port, a.limit_concurrency)
