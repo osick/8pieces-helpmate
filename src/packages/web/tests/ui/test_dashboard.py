@@ -56,19 +56,35 @@ def test_materials_panel_lists_tables_and_opens_a_sample(page, server):
     page.wait_for_selector("#material-samples li")
 
 
-def test_only_the_active_panel_is_visible(page, server_mining):
+def test_only_the_active_panel_is_visible(page, server):
     # Regression: `#panel-explorer { display: flex }` is an id selector and
     # outranks the user-agent [hidden] rule, so every panel rendered at once.
-    # server_mining: this exercises the mine panel's own visibility toggle,
-    # which needs #panel-mine present -- gone on a non-mining server.
-    page.goto(server_mining)
+    # This is a general CSS/DOM invariant, nothing mining-specific -- kept on
+    # the shipped default (search off) so the nav is still exercised via a
+    # real click on that config, not only via #panel=... hash deep links.
+    page.goto(server)
     page.wait_for_selector("#move-list li")
     assert page.is_visible("#panel-explorer")
     assert not page.is_visible("#panel-materials")
-    assert not page.is_visible("#panel-mine")
+    # #panel-mine does not exist at all on a search-off server. is_visible()
+    # returns False for a selector that matches nothing, so it would pass
+    # here trivially whether the element were absent or merely hidden --
+    # assert absence explicitly instead of leaning on that coincidence.
+    assert page.locator("#panel-mine").count() == 0
 
     page.click("nav button[data-panel=materials]")
     assert not page.is_visible("#panel-explorer")
+    assert page.is_visible("#panel-materials")
+
+
+def test_switching_into_the_mine_panel_hides_the_others(page, server_mining):
+    # The mine leg of the panel-visibility regression above: needs a server
+    # that actually has #panel-mine in the document, split out rather than
+    # folded into test_only_the_active_panel_is_visible so that test can stay
+    # on the shipped default.
+    page.goto(server_mining)
+    page.wait_for_selector("#move-list li")
+    page.click("nav button[data-panel=materials]")
     assert page.is_visible("#panel-materials")
 
     page.click("nav button[data-panel=mine]")
@@ -1286,6 +1302,23 @@ def test_search_is_present_when_the_server_enables_it(page, server_mining):
     assert page.locator("#panel-mine").count() == 1
 
 
+def test_search_stays_absent_and_the_chip_still_resolves_when_health_is_unreachable(page, server):
+    # Fail closed is the other half of index.html's
+    # `if (!health || health.mining_enabled !== true)`. Every other test hits
+    # a real, answering server, so only the `mining_enabled !== true` half
+    # ever ran -- `!health` (and initServerChip(null)'s "server unreachable"
+    # branch) was never exercised anywhere. Abort /v1/health outright so the
+    # boot's own request throws: the panel must still come out, and the boot
+    # must still finish (not hang) and report the chip as unreachable rather
+    # than silently leaving `mining_enabled` truthy from a stale default.
+    page.route("**/v1/health**", lambda route: route.abort())
+    page.goto(server)
+    page.wait_for_function("() => window.__chipReady === true")
+    assert page.locator("nav[aria-label='Screens'] button").count() == 4
+    assert page.locator("#panel-mine").count() == 0
+    assert "unreachable" in page.inner_text("#server-chip")
+
+
 def test_dragging_a_piece_from_the_palette_places_it(page, server):
     # Dropping onto h7 overwrites the landing position's black king rather
     # than adding a piece: the fixture only ever generates KPvk, whose
@@ -1822,7 +1855,7 @@ def _endpoint_hits(urls, path):
     return [u for u in urls if urlparse(u).path == path]
 
 
-def test_a_hidden_screen_costs_nothing_at_page_load(page, server_mining):
+def test_a_hidden_screen_costs_nothing_at_page_load(page, server):
     # First paint used to run every screen's init unconditionally: the puzzle
     # screen fetched puzzles.epd, the material catalog AND a whole puzzle's
     # /v1/moves -- which, on an install with a remote table chain, answers 202
@@ -1831,22 +1864,24 @@ def test_a_hidden_screen_costs_nothing_at_page_load(page, server_mining):
     # same reason. Every screen's first paint is now deferred to its panel's
     # first activation.
     #
-    # server_mining: the single /v1/themes hit this test expects comes from
-    # initMine()'s eager population of the theme picker, which only runs
-    # when the server has search enabled -- on a non-mining server nothing
-    # fetches themes at boot at all, and the "exactly 1" assertion below
-    # would see 0 instead.
+    # Kept on the shipped default (search off), not server_mining: this is
+    # exactly the config this task changed boot order for -- the boot now
+    # awaits /v1/health before deciding anything, and initMine() does not
+    # run at all -- so /v1/themes must be 0 here, not 1. (initMine()'s eager
+    # theme-picker populate was the one legitimate /v1/themes hit; with
+    # mining off, nothing at boot touches it.)
     _mock_puzzle_set(page)
     urls = []
     page.on("request", lambda r: urls.append(r.url))
-    page.goto(f"{server_mining}/#panel=materials")
+    page.goto(f"{server}/#panel=materials")
     page.wait_for_function("window.__materialsReady === true")
     page.wait_for_timeout(300)
 
     assert _endpoint_hits(urls, "/v1/moves") == [], "a hidden screen probed a position"
     assert _endpoint_hits(urls, "/puzzles.epd") == [], "a hidden screen fetched the puzzle set"
     assert len(_endpoint_hits(urls, "/v1/materials")) == 1, "the catalog was fetched twice"
-    assert len(_endpoint_hits(urls, "/v1/themes")) == 1, "the theme registry was fetched twice"
+    assert len(_endpoint_hits(urls, "/v1/themes")) == 0, \
+        "search is off -- nothing at boot should touch the theme registry"
 
     # ...and opening the panel does pay for it, so the assertions above are
     # about laziness, not about the screen having quietly stopped working.
