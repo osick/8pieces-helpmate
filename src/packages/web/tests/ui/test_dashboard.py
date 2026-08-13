@@ -1614,7 +1614,7 @@ def _revealed(page):
 def test_a_puzzle_screen_opens_with_a_prompt_and_a_board(page, server):
     _mock_puzzle_set(page)
     page.goto(server + PUZZLE_URL)
-    page.wait_for_selector("#puzzle-board .cm-chessboard")
+    page.wait_for_selector("#puzzle-line .ply")
     prompt = page.inner_text("#puzzle-prompt")
     assert "h#" in prompt
     assert "1 of 10" in page.inner_text("#puzzle-progress")
@@ -1627,7 +1627,10 @@ def test_playing_the_whole_line_marks_every_ply_and_reports_it_solved(page, serv
     # afterJudge()'s success half could both be deleted whole and it passed;
     # finishPuzzle() and #puzzle-solved were never reached at all. So: play
     # every ply of a real line through the same grading path a drag uses.
-    _mock_puzzle_set(page)
+    # A single-puzzle session so that finishing it also ends the session --
+    # closing state (solved++) gets asserted below via the summary, which
+    # `finishPuzzle()` alone does not touch.
+    _mock_puzzle_set(page, count=1)
     page.goto(server + PUZZLE_URL)
     page.wait_for_selector("#puzzle-line .ply")
     plies = page.evaluate(_RESOLVE_LINE, FIRST_PUZZLE_FEN)
@@ -1654,6 +1657,14 @@ def test_playing_the_whole_line_marks_every_ply_and_reports_it_solved(page, serv
     page.wait_for_selector("#puzzle-solved:not([hidden])")
     assert "Solved" in page.inner_text("#puzzle-solved")
     assert plies[-1]["san"].endswith("#"), plies[-1]
+
+    # finishPuzzle()'s solved++ has to actually land somewhere observable:
+    # ending the (single-puzzle) session must report one solved, not zero.
+    page.click("#btn-puzzle-next")
+    page.wait_for_function(
+        "() => document.getElementById('puzzle-progress').textContent.includes('complete')")
+    assert "1 of 1 solved" in page.inner_text("#puzzle-progress")
+    assert "Nice work" in page.inner_text("#puzzle-prompt")
 
 
 def test_a_legal_but_unexpected_move_is_marked_wrong_and_does_not_advance(page, server):

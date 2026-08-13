@@ -49,6 +49,15 @@ dashboard shell underneath them.
   before awaiting the fetch that refilled it, so everything below leapt up
   ~286px for ~22ms. It now builds the replacement and swaps it in
   atomically.
+- **A new `400 unprobeable_position` error, split out of `404
+  unknown_material`.** `/v1/probe`, `/v1/moves`, and `/v1/line` used to
+  report every position the tablebase index couldn't address as "no table
+  for X" — including a position that is simply illegal (the two kings
+  adjacent, reachable in one drag on the explorer's board), which told the
+  user to generate a table the Materials screen was already listing as
+  local. That case is now `400 unprobeable_position`, distinct from `404
+  unknown_material`'s "there is no table for this material at all"; see
+  [USAGE.md](docs/USAGE.md#get-v1probe) for the full contract.
 
 ### Removed
 - **The colour-theme control.** The three-state (system/light/dark) toggle,

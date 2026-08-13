@@ -1723,6 +1723,19 @@ $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=garbage"
 {"error":{"code":"invalid_fen","message":"substring not found","hint":null}}
 ```
 
+A position that is illegal in a way the table's index cannot address — the
+two kings adjacent, or the side not to move left in check — is a different
+400: `unprobeable_position`, not `unknown_material`. The table named in the
+error *is* present; the position just isn't one it stores. This is distinct
+from `404 unknown_material`, which means there is no table at all for that
+material — `unprobeable_position` fires even when the Materials screen lists
+the table as local, so it must never suggest generating it:
+
+```
+$ curl -sG http://127.0.0.1:8699/v1/probe --data-urlencode "fen=8/8/8/8/8/8/1k6/K1Q5 b - - 0 1"
+{"error":{"code":"unprobeable_position","message":"this position cannot be looked up in the 'KQvk' table","hint":"the table is present -- the position is not one it stores. An illegal position is the usual cause: check that the two kings are not adjacent and that the side NOT to move is not left in check."}}
+```
+
 Like the CLI, `probe` transparently falls back to the color-flipped material
 when only that slice is generated, and reports it via `"flipped": true`.
 `material` (since v0.11.0) names the table that actually answered — the
@@ -1785,7 +1798,9 @@ $ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8
   the dashboard calls `/v1/moves` fresh for the position it lands on after
   following a move, and re-reads `material` from that response, rather than
   reusing the value from the position it moved away from.
-- Errors follow `probe`: 400 `invalid_fen`, 404 `unknown_material` with the
+- Errors follow `probe`: 400 `invalid_fen`, 400 `unprobeable_position` for a
+  position the table's index can't address (kings adjacent, etc. — see
+  [`/v1/probe`](#get-v1probe) above), 404 `unknown_material` with the
   `helpmate gen …` hint, and the 202-fetching contract for remote-only
   material. The color-flip fallback applies too, reported as `"flipped": true`.
 
