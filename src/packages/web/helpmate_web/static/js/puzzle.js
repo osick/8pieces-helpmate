@@ -22,6 +22,7 @@ import {
 } from "../vendor/cm-chessboard/extensions/promotion-dialog/PromotionDialog.js";
 import { api, ApiError, DOWNLOAD_RETRY_CAP, DOWNLOAD_RETRY_MS } from "./api.js";
 import { el } from "./stats-view.js";
+import { whenPanelShown } from "./panels.js";
 import { splitFen } from "./lib/fen.js";
 import { parseEpd, pickSession, gradeMove, materialOf } from "./lib/puzzles.js";
 
@@ -47,6 +48,7 @@ let availableMaterials = null;
 let session = [];        // this run's SESSION_SIZE puzzles, easiest first
 let idx = 0;              // index into session
 let sessionDone = false;
+let solved = 0;           // puzzles of THIS session played out to mate, for the closing line
 
 let boardFen = null;      // this screen's own current position -- unrelated to explorer's `current`
 let solutionSan = [];     // the SAN plies of the one solution api.line(fen) returned
@@ -93,7 +95,17 @@ function buildLine(sanList) {
 async function movesWithRetry(fen, seq, retries = 0) {
   let res;
   try { res = await api.moves(fen); }
-  catch (err) { return { err }; }
+  catch (err) {
+    // Staleness is checked on the FAILURE path too, not just the success
+    // one. A puzzle on a remote table enters the 202 poll; the user clicks
+    // "Next puzzle" and the following puzzle loads; then the abandoned
+    // retry finally rejects (a failed download is a real 500 from
+    // /v1/moves). Without this guard that rejection reached showLoadError()
+    // and overwrote the prompt of the puzzle now on screen, naming a
+    // material that is not on the board.
+    if (seq !== loadSeq) return { stale: true };
+    return { err };
+  }
   if (seq !== loadSeq) return { stale: true };
   if (res.status !== 202) return { res };
   if (retries >= DOWNLOAD_RETRY_CAP) {
@@ -160,11 +172,25 @@ async function loadPuzzle() {
   buildLine(solutionSan);
 }
 
+// How many men a material name stands for -- "KQBvk" is 4. The "v" is a
+// separator, not a piece, so it does not count.
+function menIn(material) {
+  return material.length - 1;
+}
+
 function sayNoPuzzlesMatch() {
   // Not "no puzzles" -- name what to do. Sorted so the message is stable
   // across sessions and easy to scan, not a re-shuffled wall each time.
   const materials = [...new Set(allPuzzles.map((p) => materialOf(p.fen)))].sort();
-  const example = materials[0] || "KQvk";
+  // Recommend the CHEAPEST table in the set, not the alphabetically first:
+  // sorted()[0] is KBBvkbb, a 6-man table that is hours of compute and tens
+  // of gigabytes, offered to someone who has generated nothing at all. The
+  // set also contains 4-man closures (KQBvk, KQPvk, KRvkp, ...) that finish
+  // in seconds, and one of those is what a first table should be. Ties are
+  // broken alphabetically so the advice is stable, not a different name each
+  // reload.
+  const example = [...materials]
+    .sort((a, b) => menIn(a) - menIn(b) || a.localeCompare(b))[0] || "KQvk";
   document.getElementById("puzzle-progress").textContent = "";
   document.getElementById("puzzle-prompt").textContent =
     `none of this installation's tables match the shipped puzzle set. It uses: ${materials.join(", ")}. `
@@ -174,6 +200,7 @@ function sayNoPuzzlesMatch() {
 
 async function startSession() {
   sessionDone = false;
+  solved = 0;
   document.getElementById("btn-puzzle-next").textContent = "Next puzzle";
   document.getElementById("btn-puzzle-solution").disabled = false;
 
@@ -210,9 +237,23 @@ async function startSession() {
   await loadPuzzle();
 }
 
+// The closing line reports what actually happened. "Nice work — 10 of 10"
+// used to be printed unconditionally: after a session where every ply was
+// wrong, and -- because an EMPTY session also reaches this via the Next
+// button -- as "Nice work — 0 of 0" on an installation that had no playable
+// puzzle to offer in the first place. Congratulating someone for solving
+// nothing is the fastest way to make every other number on the screen
+// untrustworthy, so each outcome gets its own sentence.
+function sessionVerdict(n) {
+  if (solved === n) return "Nice work — every one solved. Start another session?";
+  if (solved === 0) return "None solved this time. Start another session?";
+  return `${solved} of ${n} solved. Start another session?`;
+}
+
 function showSessionDone() {
-  document.getElementById("puzzle-progress").textContent = `Session complete — ${session.length} of ${session.length}`;
-  document.getElementById("puzzle-prompt").textContent = "Nice work — start another session?";
+  document.getElementById("puzzle-progress").textContent =
+    `Session complete — ${solved} of ${session.length} solved`;
+  document.getElementById("puzzle-prompt").textContent = sessionVerdict(session.length);
   document.getElementById("puzzle-line").textContent = "";
   document.getElementById("puzzle-correction").hidden = true;
   document.getElementById("puzzle-solved").hidden = true;
@@ -226,10 +267,14 @@ function showSessionDone() {
 // the "nothing quietly does double duty" rule, and confusing to anyone
 // hitting it via assistive tech.
 async function finishPuzzle() {
+  solved++;
   document.getElementById("puzzle-correction").hidden = true;
-  const solved = document.getElementById("puzzle-solved");
-  solved.hidden = false;
-  solved.textContent = "Solved.";
+  const box = document.getElementById("puzzle-solved");
+  // Unhide BEFORE writing the text: #puzzle-solved is a role="status" live
+  // region, and a change made while the element is still hidden is not
+  // announced.
+  box.hidden = false;
+  box.textContent = "Solved.";
 }
 
 // Plays out the remaining plies on the board and in the line, without
@@ -390,7 +435,12 @@ export async function initPuzzles() {
 
   document.getElementById("btn-puzzle-solution").addEventListener("click", () => { reveal(); });
   document.getElementById("btn-puzzle-next").addEventListener("click", async () => {
-    if (sessionDone) { await startSession(); return; }
+    // An empty session (nothing on this installation matched the puzzle set,
+    // or the set itself failed to load) has no "next" and no result to
+    // report -- retry it instead of falling through to the completion
+    // screen, which would replace the message explaining WHY there is
+    // nothing with a summary of a session that never ran.
+    if (sessionDone || !session.length) { await startSession(); return; }
     idx++;
     if (idx >= session.length) {
       sessionDone = true;
@@ -403,5 +453,12 @@ export async function initPuzzles() {
   window.__puzzlePlay = (uci) => grade(uci);
   window.__puzzleSetBudget = (n) => { budget = Number(n); };
 
-  await startSession();
+  // Deferred to the puzzles panel's first activation. startSession() fetches
+  // the puzzle set, the material catalog and then a whole puzzle's /v1/moves
+  // + /v1/line -- and on an install with a remote table chain that last call
+  // answers 202 and STARTS A DOWNLOAD, which movesWithRetry then polls for up
+  // to a minute. Doing that at page load meant every visit to the dashboard
+  // pulled a table down for a screen nobody had opened. See panels.js's
+  // whenPanelShown.
+  whenPanelShown("puzzles", () => { startSession(); });
 }

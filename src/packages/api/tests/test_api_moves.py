@@ -1,3 +1,5 @@
+import pytest
+
 GOLDEN = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
 
 def test_moves_golden(client):
@@ -90,3 +92,32 @@ def test_a_king_capture_is_reported_not_raised(client):
     assert len(capture) == 1
     assert capture[0]["solvable"] is False
     assert capture[0]["dtm"] is None and capture[0]["optimal"] is False
+
+# The two kings adjacent: a position the KQvk table cannot address, reached in
+# one drag on the explorer's board (the landing position's black king is on h7
+# and the white king on f6 -- two squares apart). The C++ index rejects it with
+# "position not encodable", not "no table for", and answering both with
+# `unknown_material` told the user to generate KQvk while the Materials screen
+# listed KQvk as local. Every endpoint that probes must give the honest answer.
+ILLEGAL_ADJACENT_KINGS = "8/8/8/8/8/8/1k6/K1Q5 b - - 0 1"
+
+
+@pytest.mark.parametrize("endpoint", ["probe", "moves", "line"])
+def test_an_unprobeable_position_is_not_reported_as_a_missing_table(client, endpoint):
+    r = client.get(f"/v1/{endpoint}", params={"fen": ILLEGAL_ADJACENT_KINGS})
+    assert r.status_code == 400, r.text
+    err = r.json()["error"]
+    assert err["code"] == "unprobeable_position"
+    # It must NOT tell the user to generate a table they already have.
+    assert "helpmate gen" not in (err["hint"] or "")
+    assert "KQvk" in err["message"]
+    assert "kings" in err["hint"]
+
+
+def test_a_genuinely_absent_table_is_still_unknown_material(client):
+    # The other meaning of the same exception, unchanged: nothing here has a
+    # KQRvkn table, and "generate it" is real advice.
+    r = client.get("/v1/moves", params={"fen": "1n2k3/8/8/8/8/8/8/QR2K3 b - - 0 1"})
+    assert r.status_code == 404
+    assert r.json()["error"]["code"] == "unknown_material"
+    assert "helpmate gen KQRvkn" in r.json()["error"]["hint"]

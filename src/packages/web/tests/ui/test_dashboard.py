@@ -1,3 +1,4 @@
+import re
 from urllib.parse import quote, urlparse, parse_qs
 
 import pytest
@@ -1494,8 +1495,8 @@ PUZZLE_URL = "/#panel=puzzles"
 _PUZZLE_EPD_FIELDS = GOLDEN.rsplit(" ", 2)[0]   # placement/stm/castling/ep, no clocks
 
 
-def _mock_puzzle_set(page):
-    body = "\n".join(f'{_PUZZLE_EPD_FIELDS} ; hm 2 ; id "p{i}"' for i in range(10)) + "\n"
+def _mock_puzzle_set(page, count=10):
+    body = "\n".join(f'{_PUZZLE_EPD_FIELDS} ; hm 2 ; id "p{i}"' for i in range(count)) + "\n"
     page.route("**/puzzles.epd", lambda route: route.fulfill(
         status=200, content_type="text/plain", body=body))
 
@@ -1537,3 +1538,126 @@ def test_exceeding_the_error_budget_reveals_the_solution(page, server):
     page.evaluate("window.__puzzlePlay('a1a2')")
     page.evaluate("window.__puzzlePlay('a1a3')")
     page.wait_for_selector("#puzzle-line.revealed")
+
+
+def _endpoint_hits(urls, path):
+    """Requests to exactly `path`, ignoring anything nested under it.
+
+    "/v1/materials" is a prefix of "/v1/materials/KQvk/stats", so a substring
+    count would report the catalog as fetched every time a material's stats
+    are opened.
+    """
+    return [u for u in urls if urlparse(u).path == path]
+
+
+def test_a_hidden_screen_costs_nothing_at_page_load(page, server):
+    # First paint used to run every screen's init unconditionally: the puzzle
+    # screen fetched puzzles.epd, the material catalog AND a whole puzzle's
+    # /v1/moves -- which, on an install with a remote table chain, answers 202
+    # and STARTS A DOWNLOAD, polled for up to a minute, for a panel nobody has
+    # opened. /v1/materials and /v1/themes were each fetched twice for the
+    # same reason. Every screen's first paint is now deferred to its panel's
+    # first activation.
+    _mock_puzzle_set(page)
+    urls = []
+    page.on("request", lambda r: urls.append(r.url))
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    page.wait_for_timeout(300)
+
+    assert _endpoint_hits(urls, "/v1/moves") == [], "a hidden screen probed a position"
+    assert _endpoint_hits(urls, "/puzzles.epd") == [], "a hidden screen fetched the puzzle set"
+    assert len(_endpoint_hits(urls, "/v1/materials")) == 1, "the catalog was fetched twice"
+    assert len(_endpoint_hits(urls, "/v1/themes")) == 1, "the theme registry was fetched twice"
+
+    # ...and opening the panel does pay for it, so the assertions above are
+    # about laziness, not about the screen having quietly stopped working.
+    page.click("nav button[data-panel=puzzles]")
+    page.wait_for_selector("#puzzle-line .ply")
+    assert _endpoint_hits(urls, "/puzzles.epd")
+    assert _endpoint_hits(urls, "/v1/moves")
+
+
+def test_a_deep_link_to_another_screen_shows_no_explorer_error(page, empty_server):
+    # An install with no tables at all -- the first-run state of every public
+    # release. The explorer probed its landing position at page load whatever
+    # panel was active, and #error-banner lives OUTSIDE <main>, so a
+    # "#panel=themes" link painted a red "no table for material 'KQvk'" over a
+    # screen the user never opened.
+    page.goto(f"{empty_server}/#panel=themes")
+    page.wait_for_selector("#themes-doc .theme-entry")
+    assert page.is_hidden("#error-banner"), page.inner_text("#error-banner")
+
+    # The banner is still right where it belongs: on the explorer, which on
+    # this corpus genuinely cannot answer. Without this the assertion above
+    # would also pass if the banner had simply stopped working.
+    page.click("nav button[data-panel=explorer]")
+    page.wait_for_selector("#error-banner:not([hidden])")
+
+
+def test_a_placeholder_footer_link_cannot_navigate(page, server):
+    # `href="#"` is not inert: it CLEARS location.hash, which fires
+    # hashchange, and panels.js reads an empty hash as "explorer" -- so
+    # clicking "Source" mid-puzzle threw the position away and bounced the
+    # user to the explorer.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    before = page.url
+    page.click("footer a[data-placeholder]")
+    page.wait_for_timeout(200)
+    assert page.url == before, "a placeholder link navigated"
+    assert page.is_visible("#panel-puzzles")
+    assert not page.is_visible("#panel-explorer")
+
+
+def test_a_session_nobody_solved_is_not_congratulated(page, server):
+    # "Nice work -- 10 of 10" was printed whatever happened, including to
+    # someone who got every ply wrong. Two puzzles, neither solved.
+    _mock_puzzle_set(page, count=2)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    page.click("#btn-puzzle-next")
+    page.wait_for_selector("#puzzle-line .ply")
+    page.click("#btn-puzzle-next")
+    page.wait_for_function(
+        "() => document.getElementById('puzzle-progress').textContent.includes('complete')")
+    prompt = page.inner_text("#puzzle-prompt")
+    progress = page.inner_text("#puzzle-progress")
+    assert "Nice work" not in prompt, prompt
+    assert "None solved" in prompt, prompt
+    assert "0 of 2 solved" in progress, progress
+
+
+def test_an_installation_with_no_matching_tables_says_so_and_keeps_saying_it(page, empty_server):
+    # No tables at all, and the REAL puzzles.epd (no route mock): every puzzle
+    # in the set is unplayable, so the screen must name what to generate --
+    # and pressing "Next puzzle" must not replace that with a summary of a
+    # session that never ran ("Nice work -- 0 of 0").
+    page.goto(empty_server + PUZZLE_URL)
+    page.wait_for_function(
+        "() => document.getElementById('puzzle-prompt').textContent.includes('helpmate gen')")
+    page.click("#btn-puzzle-next")
+    page.wait_for_timeout(400)
+    prompt = page.inner_text("#puzzle-prompt")
+    assert "Nice work" not in prompt, prompt
+    assert "0 of 0" not in page.inner_text("#puzzle-progress")
+    assert "helpmate gen" in prompt, prompt
+
+    # And the table it names is one of the set's CHEAP closures, not the
+    # alphabetically first name in a sorted list -- which is KBBvkbb, a 6-man
+    # table, recommended to someone who has generated nothing at all.
+    named = re.search(r"helpmate gen (\S+)", prompt).group(1)
+    men = len(named) - 1          # the "v" separates the sides, it is not a piece
+    assert men == 4, f"recommended {named}, a {men}-man table"
+
+
+def test_the_puzzle_feedback_is_announced_to_assistive_tech(page, server):
+    # Correct/wrong/solved is the screen's only feedback, and none of it was
+    # announced: nothing in the static tree carried aria-live or role.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    for sel in ("#puzzle-correction", "#puzzle-solved"):
+        role = page.get_attribute(sel, "role")
+        assert role == "status", f"{sel} has role {role!r}"

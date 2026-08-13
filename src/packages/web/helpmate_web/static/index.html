@@ -103,8 +103,16 @@
       <p id="puzzle-progress" class="eyebrow"></p>
       <p id="puzzle-prompt" class="verdict"></p>
       <ol id="puzzle-line"></ol>
-      <p id="puzzle-correction" hidden class="hint"></p>
-      <p id="puzzle-solved" hidden class="hint"></p>
+      <!-- Both announce a result the moment it happens, so both are live
+           regions. role="status" carries an implicit aria-live="polite":
+           the correction and the "Solved." line are the only feedback the
+           puzzle screen gives, and without this a screen-reader user got no
+           announcement of right, wrong or solved at all. Each keeps its own
+           element rather than sharing one: a region that changes what it
+           MEANS mid-solve is exactly what "nothing quietly does double duty"
+           rules out. -->
+      <p id="puzzle-correction" hidden class="hint" role="status"></p>
+      <p id="puzzle-solved" hidden class="hint" role="status"></p>
       <div class="row">
         <button type="button" id="btn-puzzle-solution">Show solution</button>
         <button type="button" id="btn-puzzle-next">Next puzzle</button>
@@ -170,10 +178,16 @@
 
 <footer>
   <p class="footer-corpus" id="footer-corpus"></p>
+  <!-- No href until these have somewhere real to point. `href="#"` is not
+       inert: it CLEARS location.hash, which fires hashchange, and panels.js
+       reads an empty hash as "explorer" -- so clicking a placeholder
+       mid-puzzle threw the position away and bounced the user to a screen
+       they were not on. An <a> without href is not focusable or activatable,
+       which is what "not a link yet" should actually mean. -->
   <nav aria-label="About">
-    <a href="#" data-placeholder>Source</a>
-    <a href="#" data-placeholder>Dataset</a>
-    <a href="#" data-placeholder>Licence</a>
+    <a data-placeholder>Source</a>
+    <a data-placeholder>Dataset</a>
+    <a data-placeholder>Licence</a>
   </nav>
   <p class="footer-note">Helpmate tablebases · distances in plies, h#n = 2n</p>
 </footer>

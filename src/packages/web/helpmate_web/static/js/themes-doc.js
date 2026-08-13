@@ -8,6 +8,7 @@
 // carries {name, doc, needs}.
 import { api, ApiError } from "./api.js";
 import { el } from "./stats-view.js";
+import { whenPanelShown } from "./panels.js";
 
 // Fixed groups, each introduced by a sentence before its members. Read off
 // every theme's own `doc` string in the live registry (src/core/themes/
@@ -136,7 +137,16 @@ function renderThemes(container, themes) {
   renderGroup(OTHER_TITLE, OTHER_INTRO, leftover);
 }
 
-export async function initThemesDoc() {
+// Deferred to the themes panel's first activation, like the explorer's and
+// the puzzle screen's own first paint: /v1/themes is already fetched at page
+// load by mine.js, to fill the search screen's theme picker, and fetching it
+// a second time for a panel nobody has opened doubled that request for
+// nothing. See panels.js's whenPanelShown.
+export function initThemesDoc() {
+  whenPanelShown("themes", () => { loadThemesDoc(); });
+}
+
+async function loadThemesDoc() {
   const box = document.getElementById("themes-doc");
   box.textContent = "";
   box.appendChild(el("p", "help", "Loading motifs…"));

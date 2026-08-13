@@ -13,7 +13,7 @@ import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, k
 import { themeSummary } from "./lib/themes.js";
 import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
 import { renderTableLine } from "./stats-view.js";
-import { showPanel } from "./panels.js";
+import { showPanel, whenPanelShown } from "./panels.js";
 import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
@@ -27,6 +27,11 @@ let board = null;
 let current = START;
 let lastMoves = [];      // the move list from the last /v1/moves call, for drag input
 const history = [];
+
+// Whether the explorer's first render() has happened. Its initial probe is
+// deferred to the panel's first activation (see initExplorer's tail), so
+// until then there is no position on screen to keep in sync with the hash.
+let started = false;
 
 // Monotonic token guarding render(): every call captures its own seq at
 // entry, and bails out after each await if a newer render() has since
@@ -655,10 +660,27 @@ export function initExplorer() {
     if (li) li.click();
   });
   window.addEventListener("hashchange", () => {
+    // Before the first probe there is no position to keep in sync, and
+    // rendering one here would be the very network call the lazy start
+    // below exists to defer. whenPanelShown fires from showPanel(), which
+    // panels.js registers as a hashchange listener BEFORE this one, so a
+    // hash that both activates the explorer and carries a fen (a Search
+    // result click, say) has already started it by the time this runs --
+    // with that same fen, so the `fen !== current` guard then finds nothing
+    // to do.
+    if (!started) return;
     const { fen } = decodeState(location.hash);
     if (fen && fen !== current) render(fen, { push: false });
   });
 
-  const { fen } = decodeState(location.hash);
-  window.__explorerReady = render(fen || START, { push: !fen });
+  // Deferred to the explorer panel's first activation. Probing the landing
+  // position at page load meant an install with no tables painted a red
+  // "no table for material 'KQvk'" over whatever screen a #panel= deep link
+  // had opened -- #error-banner sits outside <main>, so it is visible from
+  // every panel. See panels.js's whenPanelShown for the full rationale.
+  whenPanelShown("explorer", () => {
+    started = true;
+    const { fen } = decodeState(location.hash);
+    window.__explorerReady = render(fen || START, { push: !fen });
+  });
 }
