@@ -3,7 +3,7 @@ import { decodeState, encodeState } from "./lib/state.js";
 export function showPanel(name) {
   for (const btn of document.querySelectorAll("nav button"))
     btn.classList.toggle("active", btn.dataset.panel === name);
-  for (const id of ["explorer", "materials", "mine"])
+  for (const id of ["explorer", "puzzles", "materials", "mine", "themes"])
     document.getElementById(`panel-${id}`).hidden = id !== name;
 }
 

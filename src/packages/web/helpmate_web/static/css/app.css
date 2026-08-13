@@ -22,11 +22,6 @@
    fill, and never the move list: that ordinal carries no hue at all (see
    "move list" below).
 
-   syzygy-tables.info's dark mode IS this palette -- #161512, #262421,
-   #bababa, #404040, #3692e7 all match lichess exactly -- so adopting it makes
-   us consistent with the nearest neighbour tool rather than merely inspired
-   by it. Its light mode is stock Bootstrap 3 and is not copied.
-
    --flag is a genuine, saturated red (#b3261e is hue ~3deg at 71% saturation
    -- the most saturated value in this file, not an "achromatic-adjacent"
    one), used for exactly one thing: the error banner and the "server
@@ -45,9 +40,7 @@
      3.87:1 on --ground and 4.61:1 on --panel: comfortably legible, and still
      visibly fainter than --ink-soft, because the bottom rung of the move-list
      ordinal is also marked by strikethrough and a lighter weight -- colour
-     was never carrying it alone. Dark mode's #787878 measures 4.14:1 on
-     --ground and 3.51:1 on --panel -- both above the 3:1 floor already --
-     and is left untouched. */
+     was never carrying it alone. */
   --ink-faint: #757575;
   --rule: #d9d9d9;
   --rule-strong: #b4b4b4;
@@ -75,10 +68,8 @@
   --r: 6px;
 
   /* Grey is what you manipulate, white is what the tables say. Aliases, not
-     new values: --panel (#262421) sits ABOVE --ground (#161512) in dark mode,
-     so the rail recedes and the readout advances in BOTH themes rather than
-     inverting. Defining them here and nowhere else means the dark blocks
-     below need no counterpart. */
+     new values: --panel sits above --ground, so the rail recedes and the
+     readout advances. */
   --rail: var(--ground);
   --readout: var(--panel);
 
@@ -86,31 +77,9 @@
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 }
 
-/* The viewer has THREE states, not two: an explicit choice stamps
-   data-theme, and the default "system" setting stamps nothing. So the bare
-   :root above is the complete light palette; the media query below redefines
-   only the tokens and is guarded so an explicit light choice still beats a
-   dark OS; and the [data-theme="dark"] block redefines them again so the
-   toggle wins in the other direction. Defined twice, not the three times it
-   was. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    --ground: #161512; --panel: #262421; --sunk: #33312e;
-    --ink: #bababa; --ink-soft: #949494; --ink-faint: #787878;
-    --rule: #404040; --rule-strong: #5c5c5c;
-    --accent: #3692e7;
-    --on-ink: #161512;
-    --flag: #e8837b; --flag-soft: #3a1f1d; --info-soft: #1f2d3a;
-  }
-}
-:root[data-theme="dark"] {
-  --ground: #161512; --panel: #262421; --sunk: #33312e;
-  --ink: #bababa; --ink-soft: #949494; --ink-faint: #787878;
-  --rule: #404040; --rule-strong: #5c5c5c;
-  --accent: #3692e7;
-  --on-ink: #161512;
-  --flag: #e8837b; --flag-soft: #3a1f1d; --info-soft: #1f2d3a;
-}
+/* One palette, one state: the bare :root above is the whole system. There is
+   no prefers-color-scheme cascade and no [data-theme] override to keep in
+   sync with it. */
 
 * { box-sizing: border-box; }
 /* An id selector (#panel-explorer below) outranks the user-agent [hidden]
@@ -131,9 +100,9 @@ header {
   border-bottom: 1px solid var(--rule);
 }
 .brand { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; }
-.brand h1 { font-size: var(--f4); font-weight: 650; letter-spacing: -.01em; margin: 0; }
-.tagline { margin: 0; color: var(--ink-soft); font-size: var(--f2); }
-nav { display: flex; gap: .25rem; }
+.brand h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; margin: 0; }
+.tagline { margin: 0; color: var(--ink-soft); font-size: var(--f1); }
+nav { display: flex; gap: .25rem; flex-wrap: wrap; }
 nav button {
   border: 0; background: none; color: var(--ink-soft); font: inherit;
   padding: .3rem .7rem; cursor: pointer; border-radius: var(--r);
@@ -141,14 +110,25 @@ nav button {
 nav button:hover { background: var(--sunk); color: var(--ink); }
 nav button.active { background: var(--sunk); color: var(--ink); font-weight: 600; }
 .header-end { margin-left: auto; display: flex; align-items: center; gap: var(--s2); }
-#theme-toggle { font-size: var(--f0); color: var(--ink-soft); }
-#theme-toggle:hover { color: var(--ink); }
 .chip {
   font-family: var(--mono); font-size: var(--f0);
   color: var(--ink-soft); border: 1px solid var(--rule);
   border-radius: 999px; padding: .15rem .65rem; white-space: nowrap;
 }
 .chip.down { color: var(--flag); border-color: var(--flag); }
+
+/* ---------- footer ---------- */
+
+footer {
+  margin-top: var(--s4); padding: var(--s3) 1.25rem;
+  border-top: 1px solid var(--rule); background: var(--panel);
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s3);
+  font-size: var(--f1); color: var(--ink-soft);
+}
+footer nav { display: flex; gap: var(--s3); margin-left: auto; }
+footer a { color: inherit; font-weight: 600; }
+footer a:hover { color: var(--accent); }
+footer a[data-placeholder] { text-decoration: underline dotted; }
 
 /* ---------- shared ---------- */
 
@@ -323,10 +303,14 @@ nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
 
 /* The piece under the pointer during a palette drag. Fixed to the viewport
    and inert, so elementFromPoint sees the square underneath rather than the
-   ghost itself. */
+   ghost itself. It clones the tray button, so without an override here it
+   would carry that button's fill and border -- an opaque card following the
+   pointer. The piece in flight, not a control that has come loose: no
+   ground, no border, and smaller than the tray button it came from. */
 .drag-ghost {
-  position: fixed; z-index: 10; width: 2.6rem; height: 2.6rem;
-  pointer-events: none; opacity: .85;
+  position: fixed; z-index: 10; width: 1.9rem; height: 1.9rem;
+  pointer-events: none; opacity: .9;
+  background: none; border: 0; padding: 0; box-shadow: none;
 }
 
 label.inline { display: inline-flex; align-items: center; gap: var(--s1); color: var(--ink-soft); font-size: var(--f2); }
@@ -483,13 +467,12 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 #material-list li[aria-selected="true"] { border-color: var(--rule-strong); background: var(--sunk); font-weight: 600; }
 #material-list .name { font-weight: 650; }
 #material-list .meta { color: var(--ink-soft); }
-/* .meta's --ink-soft passes against its usual --panel background (5.103:1
-   dark, 5.329:1 light) but the selected row's background is --sunk, and
-   --ink-soft measures 4.275:1 there in dark mode -- below the 4.5:1 AA floor
-   (light is fine at 4.848:1). Same failure class as .tile .k below, and
-   fixed the same way: bump to full --ink only where the sunk fill applies,
-   rather than softening the row's whole selected state. --ink on --sunk
-   measures 6.681:1 dark, 12.881:1 light. */
+/* .meta's --ink-soft passes against its usual --panel background (5.329:1)
+   and against the selected row's --sunk background (4.848:1) -- both clear
+   the 4.5:1 AA floor, but with less headroom on --sunk. Same treatment as
+   .tile .k below: bump to full --ink where the sunk fill applies (12.881:1),
+   rather than leave the selected state's only distinguishing colour this
+   close to the floor. */
 #material-list li[aria-selected="true"] .meta { color: var(--ink); }
 
 .stats-head { display: flex; align-items: baseline; gap: .75rem; flex-wrap: wrap; }
@@ -503,15 +486,14 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
   border-radius: var(--r); background: var(--sunk);
   padding: .45rem .7rem; min-width: 8.5rem;
 }
-/* --ink-soft measures 4.275:1 against --sunk in dark mode -- below the 4.5:1
-   AA floor (light is fine at 4.848:1) -- so this is full --ink, not
-   --ink-soft, even though .k reads as the muted eyebrow label above .v's
-   value. That relationship is carried four times over without colour's
-   help: .k is --f0 (12px) vs .v's --f3 (1rem), uppercase vs sentence case,
-   letter-spaced vs not, and sans vs .v's mono -- so colour was a fifth,
-   redundant cue, and it was the one that failed. --ink on --sunk measures
-   6.681:1 dark, 12.881:1 light. Do not "restore" the softer grey here: it
-   silently reintroduces the AA failure with no legibility gained. */
+/* --ink-soft measures 4.848:1 against --sunk -- above the 4.5:1 AA floor,
+   but with little headroom, so this is full --ink, not --ink-soft, even
+   though .k reads as the muted eyebrow label above .v's value. That
+   relationship is carried four times over without colour's help: .k is
+   --f0 (12px) vs .v's --f3 (1rem), uppercase vs sentence case, letter-spaced
+   vs not, and sans vs .v's mono -- so colour was a fifth, redundant cue.
+   --ink on --sunk measures 12.881:1. Do not "restore" the softer grey here
+   without re-checking contrast. */
 .tile .k { display: block; font-size: var(--f0); letter-spacing: .08em; text-transform: uppercase; color: var(--ink); }
 .tile .v { font-family: var(--mono); font-size: var(--f3); font-variant-numeric: tabular-nums; }
 

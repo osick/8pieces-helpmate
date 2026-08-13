@@ -702,57 +702,48 @@ def test_reference_material_appears_only_on_the_landing_position(page, server):
     assert not page.is_visible("#explorer-help")
 
 
-def test_theme_toggle_cycles_all_three_states_and_persists(page, server):
+def test_there_is_no_colour_theme_control_and_no_theme_attribute(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    assert page.get_attribute("#theme-toggle", "data-mode") == "system"
-    assert page.evaluate(
-        "document.documentElement.hasAttribute('data-theme')") is False
-    assert page.inner_text("#theme-toggle") == "Theme: system"
-
-    page.click("#theme-toggle")
-    assert page.get_attribute("html", "data-theme") == "light"
-    page.click("#theme-toggle")
-    assert page.get_attribute("html", "data-theme") == "dark"
-    assert page.inner_text("#theme-toggle") == "Theme: dark"
-
-    # The choice survives a reload -- and is applied before first paint, so
-    # a dark-mode user never gets a white flash.
-    page.reload()
-    page.wait_for_selector("#move-list li")
-    assert page.get_attribute("html", "data-theme") == "dark"
-
-    page.click("#theme-toggle")   # back round to system
-    assert page.evaluate(
-        "document.documentElement.hasAttribute('data-theme')") is False
+    assert page.eval_on_selector_all("#theme-toggle", "e => e.length") == 0
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')") is None
 
 
-def test_an_explicit_light_choice_beats_a_dark_operating_system(browser, server):
-    # The three-state point: prefers-color-scheme is the DEFAULT, not the
-    # authority. If the media query were unguarded, a dark OS would win and
-    # the light setting would do nothing.
-    ctx = browser.new_context(color_scheme="dark")
-    pg = ctx.new_page()
-    pg.goto(server)
-    pg.wait_for_selector("#move-list li")
-    dark_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
-    pg.click("#theme-toggle")   # -> light
-    assert pg.get_attribute("html", "data-theme") == "light"
-    light_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
-    assert light_bg != dark_bg, "explicit light did not override the dark OS"
-    ctx.close()
-
-
-def test_the_theme_toggle_is_not_treated_as_a_panel_button(page, server):
-    # panels.js binds EVERY `nav button` as a panel switch and reads
-    # btn.dataset.panel. A stray button inside <nav> would call
-    # showPanel(undefined) on click and hide all three panels at once -- a
-    # failure that looks like a blank page and has no other test guarding it.
+def test_the_title_is_the_most_prominent_text_in_the_header(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    assert page.eval_on_selector("#theme-toggle", "e => e.closest('nav') === null")
-    page.click("#theme-toggle")
-    assert page.is_visible("#panel-explorer")
+    title = page.eval_on_selector("header h1", "e => parseFloat(getComputedStyle(e).fontSize)")
+    tagline = page.eval_on_selector(".tagline", "e => parseFloat(getComputedStyle(e).fontSize)")
+    nav = page.eval_on_selector("nav button", "e => parseFloat(getComputedStyle(e).fontSize)")
+    assert title >= tagline * 1.6, f"title {title}px vs tagline {tagline}px"
+    assert title > nav, f"title {title}px vs nav {nav}px"
+
+
+def test_the_footer_renders_with_marked_placeholders(page, server):
+    page.goto(server)
+    page.wait_for_selector("footer")
+    assert page.is_visible("footer")
+    # Placeholder links are marked so none ships as a live-looking dead link.
+    holders = page.eval_on_selector_all("footer a[data-placeholder]", "e => e.length")
+    assert holders >= 3, f"only {holders} marked placeholders"
+
+
+def test_the_drag_ghost_has_no_background_and_is_smaller_than_the_tray(page, server):
+    page.goto(server)
+    page.wait_for_selector("#tray-white button")
+    box = page.locator("#tray-white button[data-piece=wq]").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 120, box["y"] - 60, steps=6)
+    ghost = page.eval_on_selector(".drag-ghost", """e => {
+      const s = getComputedStyle(e);
+      return {bg: s.backgroundColor, border: s.borderTopWidth,
+              w: e.getBoundingClientRect().width};
+    }""")
+    page.mouse.up()
+    assert ghost["bg"] in ("rgba(0, 0, 0, 0)", "transparent"), ghost["bg"]
+    assert ghost["border"] == "0px", ghost["border"]
+    assert ghost["w"] < box["width"], f"ghost {ghost['w']} >= tray {box['width']}"
 
 
 def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
