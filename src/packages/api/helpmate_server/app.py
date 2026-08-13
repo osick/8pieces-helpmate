@@ -159,11 +159,17 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     @app.get("/v1/health")
     def health():
         cat = chain.catalog()
-        return {"status": "ok", "version": __version__,
-                "mine_timeout": mine_timeout,
-                "mining_enabled": enable_mine,
-                "tables_local": sum(1 for s in cat if s.location in ("local", "cached")),
-                "tables_remote": sum(1 for s in cat if s.location == "remote")}
+        # This response now decides whether the dashboard's Search screen
+        # exists at all (index.html reads mining_enabled at boot). Behind a
+        # cache (this deployment sits behind Cloudflare), a stale cached
+        # "mining_enabled": true would keep Search painted after an operator
+        # turned search off, so this route must never be cached.
+        return JSONResponse(headers={"Cache-Control": "no-store"}, content={
+            "status": "ok", "version": __version__,
+            "mine_timeout": mine_timeout,
+            "mining_enabled": enable_mine,
+            "tables_local": sum(1 for s in cat if s.location in ("local", "cached")),
+            "tables_remote": sum(1 for s in cat if s.location == "remote")})
 
     @app.get("/v1/materials")
     def materials():

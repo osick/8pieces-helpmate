@@ -1319,6 +1319,30 @@ def test_search_stays_absent_and_the_chip_still_resolves_when_health_is_unreacha
     assert "unreachable" in page.inner_text("#server-chip")
 
 
+def test_boot_does_not_hang_when_health_is_slow(page, server):
+    # I1: before this branch's boot-time health check gained a timeout, a
+    # route that never answers left the top-level `await api.health()` gating
+    # every init*() call forever -- an inert shell (no move list, no board,
+    # chip never ready). Route /v1/health to hang (never fulfil/abort/
+    # continue) rather than fail fast, and confirm the boot still completes:
+    # the fail-closed behaviour from the test above, but reached via a
+    # timeout instead of a network error. The wait below (10s) is comfortably
+    # longer than the 5s deadline api.health() now passes as
+    # AbortSignal.timeout(...) (index.html), so a regression back to an
+    # unbounded await would time out this wait_for_function, not merely take
+    # a little longer.
+    page.route("**/v1/health**", lambda route: None)
+    page.goto(server)
+    page.wait_for_function("() => window.__chipReady === true", timeout=10000)
+    assert page.locator("nav[aria-label='Screens'] button").count() == 4
+    assert page.locator("#panel-mine").count() == 0
+    assert "unreachable" in page.inner_text("#server-chip")
+    # The rest of the boot must have run too, not just the chip/panel-removal
+    # decision that shares the same health response.
+    page.wait_for_selector("#move-list li")
+    assert page.locator("#board svg").count() > 0
+
+
 def test_dragging_a_piece_from_the_palette_places_it(page, server):
     # Dropping onto h7 overwrites the landing position's black king rather
     # than adding a piece: the fixture only ever generates KPvk, whose

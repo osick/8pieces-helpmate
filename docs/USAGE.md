@@ -1321,7 +1321,8 @@ introduced to build the split. Since v0.13.0 that is **one palette, full
 stop** — there is no colour-theme control on this page any more; see
 [Palette](#palette) below.
 
-Five screens:
+Four screens by default; a fifth, Search, only when the server was started
+with `--enable-mine` (see [`--enable-mine`](#api-server) below).
 
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
   one from the complete legal-move list, which is grouped into **Optimal**
@@ -1356,8 +1357,11 @@ Five screens:
   mate lengths split by side to move, a histogram of how many optimal
   solutions positions have, and the deepest sample positions — each clickable
   into the explorer.
-- **Search** — a form over [`/v1/mine`](#get-v1mine), including the `starts` /
-  `ends` shape filters and (since v0.8.0) a theme multi-select populated from
+- **Search** (only present when the server was started with `--enable-mine`;
+  otherwise the screen and its nav button are absent from the document
+  entirely, not merely hidden) — a form over [`/v1/mine`](#get-v1mine),
+  including the `starts` / `ends` shape filters and (since v0.8.0) a theme
+  multi-select populated from
   [`/v1/themes`](#get-v1themes), so the picker's vocabulary always matches the
   server's own build rather than a hard-coded list. Results are clickable
   FENs, exportable as a FEN list or CSV. Results are numbered so a row is
@@ -1577,9 +1581,11 @@ helpmate-server --tables ~/myhelpmate/tables --hf-repo USER/DS \
   allow-list — so same-origin use, including the dashboard served by this
   same process, is unaffected either way.
 - `--limit-concurrency N`: forwarded straight to uvicorn's own
-  `limit_concurrency`; refuses connections beyond `N` in flight. Default
-  `None` — uvicorn's own unbounded default — so a local run is never
-  silently capped.
+  `limit_concurrency`. Beyond `N` connections in flight, uvicorn does not
+  refuse the connection — it answers `503` and closes it; that bare
+  Starlette response carries no error envelope, and now shares its status
+  code with `mining_disabled`. Default `None` — uvicorn's own unbounded
+  default — so a local run is never silently capped.
 
 All examples below were captured from a real, locally running server
 (`helpmate-server --tables <scratch>` with `<scratch>` generated via

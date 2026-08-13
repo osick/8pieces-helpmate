@@ -96,6 +96,42 @@ def test_server_main_builds(monkeypatch, kqvk_dir):
     m.main(["--tables", str(kqvk_dir), "--port", "9999"])
     assert captured["port"] == 9999 and "/v1/probe" in captured["routes"]
 
+def test_server_main_wires_enable_mine_and_limit_concurrency(monkeypatch, kqvk_dir):
+    # test_server_main_builds only checks the port and the route set, and
+    # every _run monkeypatch in this file (including the one above) declares
+    # limit_concurrency=None as a *default* -- so deleting main()'s
+    # `a.limit_concurrency` pass-through would still satisfy every existing
+    # test. Pin both seams down for real: build the app through main() twice
+    # (default, then --enable-mine) and assert the two runs genuinely answer
+    # differently, and capture limit_concurrency with NO default so dropping
+    # the pass-through raises TypeError here instead of silently passing.
+    import helpmate_server.main as m
+    from fastapi.testclient import TestClient
+    captured = {}
+
+    def fake_run(app, host, port, limit_concurrency):
+        captured["app"] = app
+        captured["limit_concurrency"] = limit_concurrency
+
+    monkeypatch.setattr(m, "_run", fake_run)
+
+    m.main(["--tables", str(kqvk_dir), "--port", "9999"])
+    assert captured["limit_concurrency"] is None
+    default_client = TestClient(captured["app"])
+    assert default_client.get("/v1/health").json()["mining_enabled"] is False
+    r = default_client.get("/v1/mine", params={"material": "KQvk", "dtm": 2})
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "mining_disabled"
+
+    m.main(["--tables", str(kqvk_dir), "--port", "9999", "--enable-mine",
+            "--limit-concurrency", "64"])
+    assert captured["limit_concurrency"] == 64
+    enabled_client = TestClient(captured["app"])
+    assert enabled_client.get("/v1/health").json()["mining_enabled"] is True
+    r = enabled_client.get("/v1/mine", params={"material": "KQvk", "dtm": 2})
+    assert r.status_code == 200
+    assert "fens" in r.json()
+
 def test_mine_is_disabled_by_default(client):
     r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 4})
     assert r.status_code == 503

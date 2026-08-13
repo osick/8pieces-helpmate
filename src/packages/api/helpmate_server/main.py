@@ -42,8 +42,10 @@ def main(argv: list[str] | None = None) -> None:
                    help="allow cross-origin GETs from ORIGIN (repeatable). "
                         "Omit for same-origin only")
     p.add_argument("--limit-concurrency", type=int, default=None, metavar="N",
-                   help="refuse connections beyond N in flight (default: "
-                        "unlimited). Set this when exposing the server")
+                   help="beyond N connections in flight, uvicorn answers 503 "
+                        "and closes rather than refusing the connection "
+                        "(default: unlimited). Set this when exposing the "
+                        "server")
     a = p.parse_args(argv)
     remote = None
     if a.hf_repo:
