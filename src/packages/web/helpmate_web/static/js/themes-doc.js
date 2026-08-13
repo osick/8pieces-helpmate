@@ -120,6 +120,16 @@ function renderThemes(container, themes) {
     section.appendChild(el("h2", null, title));
     section.appendChild(el("p", "theme-group-intro", intro));
     for (const name of names) {
+      // Re-checked INSIDE the loop, not only in the filter above. `names` is
+      // a snapshot, and a name later in it can be placed by a name earlier
+      // in it -- which is precisely what happens in the "other" group, whose
+      // member list is the API's own leftovers and therefore contains bases
+      // AND their colour variants. `pin` nests pin:white and pin:black under
+      // itself and marks them placed; without this check the snapshot then
+      // rendered both again as top-level entries. Harmless for GROUPS, whose
+      // member lists are hand-written and hold no variants; broken for the
+      // one case the fallback exists for.
+      if (placed.has(name)) continue;
       const variants = variantsOf(name);
       section.appendChild(renderEntry(byName.get(name), variants));
       placed.add(name);

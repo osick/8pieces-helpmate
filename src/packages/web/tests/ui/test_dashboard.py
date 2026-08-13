@@ -1,3 +1,4 @@
+import json
 import re
 from urllib.parse import quote, urlparse, parse_qs
 
@@ -396,7 +397,6 @@ def test_theme_picker_marks_themes_that_answer_on_saturated_positions(page, serv
     # positions whose stored solution count has saturated (capped at 255) --
     # the picker must mark those, driven by the server's own `needs` field,
     # not by a hard-coded theme name.
-    import json
     import urllib.request
     with urllib.request.urlopen(f"{server}/v1/themes") as r:
         registry = json.load(r)["themes"]
@@ -1480,6 +1480,49 @@ def test_the_themes_screen_explains_every_motif_the_build_detects(page, server):
     # answer on a saturated position
     needs = page.eval_on_selector_all("#themes-doc .theme-needs", "e => e.length")
     assert needs == len(api)
+
+
+def test_an_unknown_motif_with_colour_variants_lands_in_other_exactly_once(page, server):
+    # The "other" group is this screen's whole reason for existing: a motif
+    # the build detects that no hand-written group here names must still
+    # appear, with no edit to themes-doc.js. It broke in exactly the shape
+    # the registry already ships -- a base motif WITH colour variants.
+    # renderGroup snapshotted its member list before the loop and never
+    # re-checked it against `placed`, so `pin` correctly nested pin:white and
+    # pin:black inside itself and then the snapshot rendered both AGAIN as
+    # top-level entries. Task 6a's proof injected a single variant-less motif
+    # and could not see it. This one injects the real shape.
+    injected = [
+        {"name": "pin", "doc": "a made-up motif, for this test only.", "needs": "position"},
+        {"name": "pin:white", "doc": "the white-side variant.", "needs": "position"},
+        {"name": "pin:black", "doc": "the black-side variant.", "needs": "position"},
+    ]
+
+    def with_injection(route):
+        body = json.loads(route.fetch().text())
+        body["themes"] = body["themes"] + injected
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/v1/themes", with_injection)
+    page.goto(f"{server}/#panel=themes")
+    page.wait_for_selector("#themes-doc .theme-entry[data-theme=pin]")
+
+    names = page.eval_on_selector_all("#themes-doc .theme-entry h3",
+                                      "els => els.map(e => e.textContent.trim())")
+    for name in ("pin", "pin:white", "pin:black"):
+        assert names.count(name) == 1, f"{name} rendered {names.count(name)} times: {names}"
+
+    # ...and the variants are nested under their base, not siblings of it.
+    nested = page.eval_on_selector_all(
+        "#themes-doc .theme-entry[data-theme=pin] .theme-variants .theme-entry",
+        "els => els.map(e => e.dataset.theme)")
+    assert sorted(nested) == ["pin:black", "pin:white"], nested
+
+    # The whole injected set still appears exactly once each overall, so this
+    # cannot pass by dropping an entry instead of de-duplicating it.
+    api = page.evaluate("""async () => (await (await fetch('/v1/themes')).json())
+                             .themes.map(t => t.name)""")
+    assert sorted(names) == sorted(api), f"{len(names)} documented vs {len(api)} detected"
 
 
 PUZZLE_URL = "/#panel=puzzles"
