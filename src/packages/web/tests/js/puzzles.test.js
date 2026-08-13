@@ -1,0 +1,77 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { parseEpd, pieceCount, difficultyOf, pickSession, gradeMove }
+  from "../../helpmate_web/static/js/lib/puzzles.js";
+
+const EPD = `# a comment line is ignored
+8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "a"
+7k/8/5K2/8/8/8/8/6Q1 w - - ; hm 2 ; id "b"
+8/7k/5K2/8/6B1/8/8/6Q1 b - - ; hm 8 ; id "c"
+`;
+
+test("EPD parses to fen, ply distance and id, skipping comments", () => {
+  const ps = parseEpd(EPD);
+  assert.equal(ps.length, 3);
+  assert.deepEqual(ps.map((p) => p.id), ["a", "b", "c"]);
+  assert.deepEqual(ps.map((p) => p.dtm), [4, 2, 8]);
+  assert.ok(ps[0].fen.startsWith("8/7k/5K2"));
+});
+
+test("an unknown opcode is ignored, not fatal — future custom fields cost nothing", () => {
+  const ps = parseEpd('8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "x" ; c0 "by A.N. Other"\n');
+  assert.equal(ps.length, 1);
+  assert.equal(ps[0].dtm, 4);
+});
+
+test("a malformed line is skipped rather than taking the file down", () => {
+  const ps = parseEpd('garbage\n8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "ok"\n');
+  assert.deepEqual(ps.map((p) => p.id), ["ok"]);
+});
+
+test("piece count counts men, not FEN characters", () => {
+  assert.equal(pieceCount("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"), 3);
+  assert.equal(pieceCount("8/7k/5K2/8/6B1/8/8/6Q1 b - - 0 1"), 4);
+});
+
+test("difficulty is mate length first, piece count second", () => {
+  const a = { fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 4 };   // h#2, 3 men
+  const b = { fen: "8/7k/5K2/8/6B1/8/8/6Q1 b - - 0 1", dtm: 4 }; // h#2, 4 men
+  const c = { fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 8 };   // h#4, 3 men
+  assert.deepEqual(difficultyOf(a) < difficultyOf(b) ? "a" : "b", "a");
+  const sorted = [c, b, a].sort((x, y) => (x.dtm - y.dtm) || (pieceCount(x.fen) - pieceCount(y.fen)));
+  assert.deepEqual(sorted, [a, b, c]);
+});
+
+test("a session is n puzzles, easiest first, without repetition", () => {
+  const all = Array.from({ length: 100 }, (_, i) => ({
+    fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 2 + 2 * i, id: String(i),
+  }));
+  let seed = 1;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const s = pickSession(all, 10, rnd);
+  assert.equal(s.length, 10);
+  assert.equal(new Set(s.map((p) => p.id)).size, 10, "a puzzle repeated");
+  const dtms = s.map((p) => p.dtm);
+  assert.deepEqual(dtms, [...dtms].sort((a, b) => a - b), "not ordered easiest first");
+});
+
+test("a session spans the range rather than clustering at one difficulty", () => {
+  const all = Array.from({ length: 100 }, (_, i) => ({
+    fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 2 + 2 * i, id: String(i),
+  }));
+  let seed = 7;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const s = pickSession(all, 10, rnd);
+  assert.ok(s[9].dtm - s[0].dtm > 100, `span too narrow: ${s[0].dtm}..${s[9].dtm}`);
+});
+
+test("a session never exceeds what the set holds", () => {
+  const all = [{ fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 4, id: "only" }];
+  assert.equal(pickSession(all, 10, Math.random).length, 1);
+});
+
+test("grading compares the move actually played", () => {
+  assert.equal(gradeMove("h7h8", "h7h8"), true);
+  assert.equal(gradeMove("h7h8", "h7h6"), false);
+  assert.equal(gradeMove("e7e8q", "e7e8n"), false, "underpromotion is a different move");
+});
