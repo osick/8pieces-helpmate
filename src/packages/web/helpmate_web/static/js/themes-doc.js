@@ -9,25 +9,47 @@
 import { api, ApiError } from "./api.js";
 import { el } from "./stats-view.js";
 
-// Fixed groups, each introduced by a sentence before its members. A name the
-// API returns that is not listed in any group here falls into the trailing
-// "other" group instead of being dropped -- see renderThemes() below, which
-// never special-cases an unrecognised name, only ones it recognises. That is
-// what lets a future motif appear on this screen with no edit to this file.
+// Fixed groups, each introduced by a sentence before its members. Read off
+// every theme's own `doc` string in the live registry (src/core/themes/
+// registry.cpp) rather than assumed from memory -- the first version of
+// this table named 11 of the build's 22 registered motifs and left the
+// other 11 to fall into "other" wholesale. All 22 group cleanly into the
+// five below; nothing should land in "other" on a build that still matches
+// this registry.
+//
+// A name the API returns that is not listed in any group here still falls
+// into the trailing "other" group instead of being dropped -- see
+// renderThemes() below, which never special-cases an unrecognised name,
+// only ones it recognises. That is what lets a future motif appear on this
+// screen with no edit to this file, and it is exactly the behaviour that
+// caught this table's own first-draft gap.
 const GROUPS = [
   {
     title: "The mate picture",
     intro: "What the mating position itself looks like, judged by the "
          + "black king's field.",
-    members: ["pure", "model", "ideal", "mirror"],
+    members: ["pure", "model", "ideal", "mirror", "self-block"],
   },
   {
-    title: "The move sequence",
-    intro: "What happens along the way to the mate, not just at it.",
-    members: ["switchback", "closed-walk", "excelsior", "promotion", "underpromotion"],
+    title: "How a unit travels",
+    intro: "What path an individual piece traces through the solution, "
+         + "not just where it starts and ends.",
+    members: ["switchback", "closed-walk", "pendulum", "excelsior"],
   },
   {
-    title: "The position's structure",
+    title: "Pawns and promotion",
+    intro: "What a pawn does on its way to becoming something else, and "
+         + "what becomes of whatever it captures or replaces along the way.",
+    members: ["promotion", "underpromotion", "phoenix", "schnoebelen", "en-passant"],
+  },
+  {
+    title: "Where the mate happens",
+    intro: "What happened earlier at the exact square the king is finally "
+         + "mated on.",
+    members: ["kniest", "zajic"],
+  },
+  {
+    title: "The structure of the solution",
     intro: "What shape the position or its solution set has, independent "
          + "of the mate picture or the moves that reach it.",
     members: ["set-play", "single-piece"],
