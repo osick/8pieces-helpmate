@@ -190,6 +190,49 @@ def test_a_failed_evaluation_clears_the_move_lookup(page, server):
     assert final != broken, "the drag was silently swallowed"
 
 
+def test_a_pending_download_clears_the_move_lookup_too(page, server):
+    # Fix round 1 (code review): the 202 branch was the SAME hazard as H1
+    # above, but worse -- it needs no coincidental uci match and is reachable
+    # on a routine "downloading..." banner, not only after the retry cap.
+    # board.setPosition() and syncControls() at the top of render() have
+    # already moved the board and the FEN field to the clicked/dragged
+    # position by the time the 202 arrives, so a previous position's move
+    # list left on screen let a stale drag navigate to a child of a position
+    # no longer displayed -- and worse, to a FEN that didn't even reflect
+    # what was actually on the board (see the queen below).
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    start = page.input_value("#fen-input")
+
+    # From here on, every /v1/moves call reports "still downloading" --
+    # exactly what a fresh install, or navigating into newly-mined material,
+    # produces routinely.
+    page.route("**/v1/moves**", lambda route: route.fulfill(
+        status=202, content_type="application/json",
+        body='{"status": "fetching", "material": "KQvk"}'))
+
+    # Relocate the queen, not a king: kings stay non-adjacent, so this
+    # (unlike H1's own kingProblem trigger) actually reaches api.moves() and
+    # gets the mocked 202. The black king is untouched and stays on h7.
+    _drag_square_to_square(page, "g1", "g6")
+    page.wait_for_selector("#error-banner:not([hidden])")
+    assert page.eval_on_selector_all("#move-list li", "e => e.length") == 0
+    pending = page.input_value("#fen-input")
+    assert pending != start, "the queen relocation was silently swallowed"
+
+    # h7h8 was legal in the STARTING position only, before the queen ever
+    # moved. If lastMoves were still the starting position's, this would
+    # match it and navigate to the starting position's OWN h7h8 child --
+    # silently undoing the queen relocation above along the way.
+    _drag_square_to_square(page, "h7", "h8")
+    page.wait_for_timeout(400)
+    final = page.input_value("#fen-input")
+    assert final != pending, "the drag was silently swallowed"
+    assert "5K2" not in final, \
+        "the board reverted to the stale child fen -- the queen relocation " \
+        "was undone and the stale move list was replayed"
+
+
 PROMOTION_START = "7k/4P3/5K2/8/8/8/8/8 w - - 0 1"
 
 

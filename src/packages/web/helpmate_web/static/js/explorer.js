@@ -308,6 +308,18 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   if (seq !== renderSeq) return;     // superseded by a newer render()
 
   if (res.status === 202) {
+    // Neither exit below has a replacement to swap in for this position --
+    // board.setPosition() and syncControls() above have already moved the
+    // board and the FEN field here, so leaving the PREVIOUS position's
+    // lastMoves/move list/lines/themes on screen would let a click on a
+    // now-stale row navigate to a child of a position no longer displayed,
+    // exactly the H1 failure fixed above -- reachable here on nothing more
+    // than a routine "downloading…" banner, not a coincidental uci match.
+    lastMoves = [];
+    moveList.textContent = "";
+    linesEl.textContent = "";
+    linesEl.dataset.lines = "[]";
+    themesEl.textContent = "";
     if (retries >= DOWNLOAD_RETRY_CAP) {
       showError({
         message: "Still downloading",
@@ -351,7 +363,18 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     api.probe(fen, true).then(({ body }) => {
       if (seq !== renderSeq) return;         // superseded by a newer render()
       themesEl.textContent = body.themes_note || themeSummary(body.themes);
-    }).catch(() => { /* annotation is a nicety; never break the board on it */ });
+    }).catch(() => {
+      if (seq !== renderSeq) return;         // superseded by a newer render()
+      // Found while enumerating render()'s exits for the 202 fix above: a
+      // failed probe used to leave whatever the PREVIOUS position's themes
+      // were on screen, under this position's own (correct) summary --
+      // never a navigation bug like H1, since lastMoves/moveList are
+      // already this position's, but still exactly the staleness "replace,
+      // never clear-then-fill" exists to rule out. No replacement is
+      // coming for this position's themes; annotation is a nicety, but a
+      // wrong one is worse than an absent one.
+      themesEl.textContent = "";
+    });
   } else {
     // No probe call is coming for an unsolvable position: nothing will ever
     // overwrite a previous position's themes note otherwise.
@@ -382,6 +405,13 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     } catch (err) {
       if (seq !== renderSeq) return; // superseded by a newer render()
       if (!(err instanceof ApiError)) throw err;
+      // Same finding as the /v1/probe catch above, for /v1/line: a
+      // partial-table-set 404 here (real -- app.py's /v1/line can 404 a
+      // solvable position whose optimal line runs through material this
+      // install hasn't generated) used to leave a previous position's
+      // lines on screen with no replacement ever coming.
+      linesEl.textContent = "";
+      linesEl.dataset.lines = "[]";
     }
   } else {
     // Same as themesEl above: no /v1/line call is coming.
