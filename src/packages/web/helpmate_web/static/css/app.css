@@ -185,7 +185,7 @@ nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
 
    #panel-explorer, #panel-materials and #panel-mine all wrap their children
    in .rail/.readout, so all three share this border/background. */
-#panel-explorer, #panel-materials, #panel-mine {
+#panel-explorer, #panel-materials, #panel-mine, #panel-themes {
   border: 1px solid var(--rule); border-radius: var(--r);
   background: var(--readout);
 }
@@ -576,3 +576,39 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
   min-width: 2.5ch; text-align: right; flex: none;
 }
 #mine-results li .fen { overflow-wrap: anywhere; }
+
+/* ---------- themes (motif documentation) ---------- */
+
+/* No rail: this panel is one column of prose, so it skips the rail/readout
+   split #panel-explorer/#panel-materials/#panel-mine use -- reusing the
+   shared `.readout` class here would also pick up its `border-left` at the
+   860px breakpoint (meant as the seam between a rail and a readout), with
+   no rail on this panel to sit opposite it. #themes-doc paints the same two
+   declarations directly instead. */
+#themes-doc { background: var(--readout); padding: var(--s3); }
+
+.theme-group { margin-top: var(--s4); }
+.theme-group:first-of-type { margin-top: 0; }
+.theme-group h2 { font-size: var(--f4); font-weight: 650; }
+.theme-group-intro { margin: var(--s1) 0 0; color: var(--ink-soft); font-size: var(--f2); max-width: 62ch; }
+
+.theme-entry { margin-top: var(--s3); }
+/* A rule between entries, not above the first one under the group's intro
+   sentence -- general-sibling so it only fires once a preceding entry
+   exists, regardless of how many colour variants sit inside that entry. */
+.theme-entry ~ .theme-entry { padding-top: var(--s3); border-top: 1px solid var(--rule); }
+.theme-entry h3 { margin: 0; font-family: var(--mono); font-size: var(--f3); font-weight: 650; }
+.theme-def { margin: var(--s1) 0 0; max-width: 62ch; }
+.theme-needs { margin: var(--s1) 0 0; font-size: var(--f1); color: var(--ink-soft); }
+
+/* Colour-labelled variants (excelsior:white, single-piece:black) sit inside
+   their base motif's entry rather than as their own top-level entries --
+   a lighter rail on the left marks them as belonging to the entry above,
+   not a fresh top-level rule the way `.theme-entry ~ .theme-entry` reads. */
+.theme-variants {
+  margin-top: var(--s2); padding-left: var(--s3); border-left: 2px solid var(--rule);
+  display: flex; flex-direction: column; gap: var(--s2);
+}
+.theme-variants .theme-entry { margin-top: 0; }
+.theme-variants .theme-entry ~ .theme-entry { padding-top: var(--s2); border-top: 1px solid var(--rule); }
+.theme-variants .theme-entry h3 { font-size: var(--f2); }

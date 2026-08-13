@@ -1456,3 +1456,21 @@ def test_actionable_controls_are_weighted(page, server):
     # inert text is not
     w = page.eval_on_selector("#position-summary", "e => getComputedStyle(e).fontWeight")
     assert int(w) < 600, f"the verdict is weight {w}"
+
+
+def test_the_themes_screen_explains_every_motif_the_build_detects(page, server):
+    page.goto(f"{server}/#panel=themes")
+    page.wait_for_selector("#themes-doc .theme-entry")
+    names = page.eval_on_selector_all("#themes-doc .theme-entry h3",
+                                      "els => els.map(e => e.textContent.trim())")
+    api = page.evaluate("""async () => (await (await fetch('/v1/themes')).json())
+                             .themes.map(t => t.name)""")
+    # Set equality, not a literal list: a motif the build detects but this
+    # screen has no named group for must still render (in "other"), so
+    # asserting against the live API is the only version of this check that
+    # can catch a motif silently dropped.
+    assert sorted(names) == sorted(api), f"{len(names)} documented vs {len(api)} detected"
+    # every entry says what it reads, because that decides whether it can
+    # answer on a saturated position
+    needs = page.eval_on_selector_all("#themes-doc .theme-needs", "e => e.length")
+    assert needs == len(api)

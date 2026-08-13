@@ -146,7 +146,9 @@
     </div>
   </section>
 
-  <section id="panel-themes" hidden></section>
+  <section id="panel-themes" hidden>
+    <div id="themes-doc"></div>
+  </section>
 </main>
 
 <footer>
@@ -165,7 +167,8 @@
   import { initMaterials } from "/js/materials.js";
   import { initMine } from "/js/mine.js";
   import { initServerChip } from "/js/chip.js";
-  initPanels(); initExplorer(); initMaterials(); initMine(); initServerChip();
+  import { initThemesDoc } from "/js/themes-doc.js";
+  initPanels(); initExplorer(); initMaterials(); initMine(); initServerChip(); initThemesDoc();
 </script>
 </body>
 </html>
