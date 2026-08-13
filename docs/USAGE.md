@@ -1566,6 +1566,20 @@ helpmate-server --tables ~/myhelpmate/tables --hf-repo USER/DS \
 - `--host` / `--port`: default `127.0.0.1:8642`.
 - `--mine-cap` (default `1000`) / `--mine-timeout` (default `30.0` seconds):
   see [`/v1/mine`](#get-v1mine) below.
+- `--enable-mine`: turn on `/v1/mine` (position search). **Off by default** —
+  a disabled server answers `503 mining_disabled` (see
+  [`/v1/mine`](#get-v1mine) below for why: a scan cannot be interrupted by
+  `SIGTERM`, its timeout is not deterministic under concurrent load, and
+  nothing bounds how many run at once). The CLI `helpmate mine` command is
+  unaffected — this flag only gates the HTTP endpoint.
+- `--cors-origin ORIGIN` (repeatable): allow cross-origin GETs from `ORIGIN`.
+  Omitting it entirely installs **no CORS middleware at all** — not an empty
+  allow-list — so same-origin use, including the dashboard served by this
+  same process, is unaffected either way.
+- `--limit-concurrency N`: forwarded straight to uvicorn's own
+  `limit_concurrency`; refuses connections beyond `N` in flight. Default
+  `None` — uvicorn's own unbounded default — so a local run is never
+  silently capped.
 
 All examples below were captured from a real, locally running server
 (`helpmate-server --tables <scratch>` with `<scratch>` generated via
@@ -1587,12 +1601,17 @@ uncaught exceptions) has the same shape:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/health
-{"status":"ok","version":"0.13.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
+{"status":"ok","version":"0.14.0","mine_timeout":30.0,"mining_enabled":false,"tables_local":2,"tables_remote":0}
 ```
 
 `mine_timeout` (since v0.11.0) echoes the server's `--mine-timeout` setting
 in seconds, so a client — the dashboard's search screen, in particular — can
 show a countdown against the real budget instead of a guessed one.
+
+`mining_enabled` (since v0.14.0) echoes whether `--enable-mine` was passed.
+The dashboard reads it once at boot and, when it is not `true` — including
+when the server can't be reached at all — removes the Search screen and its
+nav button from the document entirely rather than merely hiding them.
 
 ### `GET /v1/materials`
 
@@ -1805,6 +1824,22 @@ $ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8
   material. The color-flip fallback applies too, reported as `"flipped": true`.
 
 ### `GET /v1/mine`
+
+**Off by default.** A scan cannot be interrupted by `SIGTERM`, its timeout is
+not deterministic under concurrent load, and nothing bounds how many run at
+once — so it is not safe to expose until that work is done. Start the server
+with `--enable-mine` to turn it on; without it, every request — regardless of
+its query parameters — answers `503 mining_disabled`:
+
+```
+$ curl -sG http://127.0.0.1:8642/v1/mine --data-urlencode "material=KQvk" --data-urlencode "dtm=2"
+{"error":{"code":"mining_disabled","message":"position search is disabled on this server","hint":"start helpmate-server with --enable-mine to turn it on"}}
+```
+
+This gates only the HTTP endpoint; the CLI `helpmate mine` command is
+unaffected. The dashboard reads `mining_enabled` from
+[`/v1/health`](#get-v1health) once at boot and omits the Search screen
+entirely — not merely hides it — when it is not `true`.
 
 Parameters: `material`, `dtm` (required), `count` (optional, exact match),
 `starts` / `ends` (optional, exact match on the number of distinct first
