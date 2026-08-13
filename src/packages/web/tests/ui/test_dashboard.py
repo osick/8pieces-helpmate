@@ -615,6 +615,26 @@ def test_a_chip_plays_its_move(page, server):
     page.wait_for_function("b => document.getElementById('fen-input').value !== b", arg=before)
 
 
+def test_playing_a_move_never_collapses_the_move_list(page, server):
+    # render() used to empty the move list synchronously before awaiting the
+    # fetch that refills it, so everything below the list jumped up ~286px
+    # for the ~22ms the fetch was in flight. Measured live on this fixture
+    # (2026-08-13). Poll the list's rendered height across a couple of
+    # animation frames after the click and require it never touches zero.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    trace = page.evaluate("""() => new Promise(res => {
+      const H = () => Math.round(document.getElementById('move-list').getBoundingClientRect().height);
+      const seen = [];
+      const t0 = performance.now();
+      const tick = () => { seen.push(H());
+        if (performance.now() - t0 < 1200) requestAnimationFrame(tick); else res(seen); };
+      document.querySelector('#move-list section[data-group=optimal] li').click();
+      tick();
+    })""")
+    assert min(trace) > 0, f"the move list collapsed to zero during the move: {trace[:8]}"
+
+
 def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # Syzygy's structural win, without its 310px cap: a long move list must
     # never drag the board off screen. No sticky headers, no scroll sync --

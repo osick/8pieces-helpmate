@@ -261,8 +261,6 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   const moveList = document.getElementById("move-list");
   const linesEl = document.getElementById("lines");
   const themesEl = document.getElementById("position-themes");
-  moveList.textContent = ""; linesEl.textContent = ""; themesEl.textContent = "";
-  linesEl.dataset.lines = "[]";
 
   // A position with a missing or duplicated king is one the editor produces
   // on the way to a real position; say so plainly instead of spending a round
@@ -273,6 +271,13 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     summary.classList.add("muted");
     clearBanner();
     lastMoves = [];
+    // No replacement is coming for this position: clear explicitly rather
+    // than leaving a previous position's moves, lines or themes on screen
+    // under it.
+    moveList.textContent = "";
+    linesEl.textContent = "";
+    linesEl.dataset.lines = "[]";
+    themesEl.textContent = "";
     showTableStats(null);
     return;
   }
@@ -289,6 +294,13 @@ async function render(fen, { push = true, retries = 0 } = {}) {
       // position that is no longer on screen: doing so navigates to that
       // move's child, silently discarding whatever the user just built.
       lastMoves = [];
+      // Same as kingProblem above: no replacement is coming, and leaving a
+      // previous position's moves on screen under a red banner would be
+      // worse than an empty list.
+      moveList.textContent = "";
+      linesEl.textContent = "";
+      linesEl.dataset.lines = "[]";
+      themesEl.textContent = "";
       return;
     }
     throw err;
@@ -340,24 +352,41 @@ async function render(fen, { push = true, retries = 0 } = {}) {
       if (seq !== renderSeq) return;         // superseded by a newer render()
       themesEl.textContent = body.themes_note || themeSummary(body.themes);
     }).catch(() => { /* annotation is a nicety; never break the board on it */ });
+  } else {
+    // No probe call is coming for an unsolvable position: nothing will ever
+    // overwrite a previous position's themes note otherwise.
+    themesEl.textContent = "";
   }
 
-  renderMoveList(moveList, b.moves);
+  // Replace, never clear-then-fill. Emptying these before the await made
+  // everything below the list jump up ~286px for the duration of the fetch.
+  // The old code also cleared the move list, lines and themes but NOT the
+  // summary, which is why two tests were able to pass while reading the
+  // previous position's verdict.
+  const next = document.createElement("div");
+  renderMoveList(next, b.moves);
+  moveList.replaceChildren(...next.childNodes);
 
   if (b.solvable !== false) {
     try {
       const ls = await api.line(fen, true);
       if (seq !== renderSeq) return; // superseded by a newer render()
+      const nextLines = document.createElement("div");
       for (const line of ls.body.lines) {
         const li = document.createElement("li");
         li.textContent = line.join(" ");
-        linesEl.appendChild(li);
+        nextLines.appendChild(li);
       }
+      linesEl.replaceChildren(...nextLines.childNodes);
       linesEl.dataset.lines = JSON.stringify(ls.body.lines);
     } catch (err) {
       if (seq !== renderSeq) return; // superseded by a newer render()
       if (!(err instanceof ApiError)) throw err;
     }
+  } else {
+    // Same as themesEl above: no /v1/line call is coming.
+    linesEl.textContent = "";
+    linesEl.dataset.lines = "[]";
   }
 }
 
