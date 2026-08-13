@@ -83,30 +83,102 @@ export function byDifficulty(a, b) {
   return (ad - bd) || (ap - bp);
 }
 
+// Consecutive runs of equal difficulty in an already-sorted (by byDifficulty)
+// array -- i.e. one group per distinct (dtm, pieces) rung, in ascending
+// order. Grouping BY RUNG rather than by raw array index is the whole point
+// of the banding fix below: two puzzles that are the same difficulty must
+// never be allowed to land in two different bands of a would-be index-based
+// split, because index-based bands don't know or care where a rung's
+// boundary actually falls.
+function groupByRung(sortedPool) {
+  const groups = [];
+  for (const p of sortedPool) {
+    const last = groups[groups.length - 1];
+    if (last && byDifficulty(last[0], p) === 0) last.push(p);
+    else groups.push([p]);
+  }
+  return groups;
+}
+
+// Splits `total` items into `parts` contiguous index ranges [lo, hi), as
+// even as floor/ceil allows, each at least 1 wide (so no band is ever
+// empty when total >= parts). Same arithmetic pickSession always used, just
+// factored out so it can partition either puzzles-by-index (the old,
+// collision-prone use) or, now, rungs-by-index / slots-by-rung.
+function bandRanges(total, parts) {
+  const ranges = [];
+  const width = total / parts;
+  for (let i = 0; i < parts; i++) {
+    const lo = Math.floor(i * width);
+    const hi = Math.max(lo + 1, Math.floor((i + 1) * width));
+    ranges.push([lo, hi]);
+  }
+  return ranges;
+}
+
 // n puzzles, easiest first, no repeats, spanning the whole range rather than
-// clustering: the sorted set is cut into n equal bands and one is drawn at
-// random from each. This adapts to whatever the file holds, so adding custom
-// problems -- or a deeper corpus -- needs no tier table to be maintained.
+// clustering. Bands are cut across DISTINCT DIFFICULTY RUNGS, not raw sorted
+// index: cutting by index (the original approach) can slice a single rung
+// across two adjacent bands whenever rung sizes are uneven -- which real
+// mined corpora always are, since rung size is real availability, not a
+// target -- so two neighbouring session slots could and did land on the
+// exact same (dtm, pieces) in the vast majority of sessions. Banding by rung
+// makes that impossible whenever there are at least n rungs: each band
+// covers a disjoint range of rungs, so adjacent slots are drawn from
+// disjoint sets of difficulties by construction, not by luck.
 //
-// `isAvailable`, when given, filters the pool BEFORE the band arithmetic --
-// so a session drawn from a thin, partially-generated install still spans
-// whatever range survives, rather than the bands being cut against the
-// full (mostly unplayable) set and then discovering most of them are empty.
-// Defaults to null (no filtering, every puzzle considered available), which
-// is why every existing call site -- and every test above -- is untouched:
-// a 3rd positional `rnd` argument still means exactly what it always did.
+// When there are FEWER than n distinct rungs -- an availability filter can
+// easily cause this, e.g. an install with only two or three materials --
+// n puzzles can't come from n different difficulties. The slots are then
+// spread across the rungs that exist as evenly as floor/ceil allows (a rung
+// smaller than its fair share is topped up from whatever's left, in
+// difficulty order, so the session is still exactly n long rather than
+// short); adjacent collisions are then unavoidable and left as what they
+// are, not padded away.
+//
+// `isAvailable`, when given, filters the pool BEFORE any of the above -- so
+// a session drawn from a thin, partially-generated install still spans
+// whatever range survives, rather than being cut against the full (mostly
+// unplayable) set and discovering most of it is empty. Defaults to null (no
+// filtering, every puzzle considered available), which is why every
+// existing call site -- and every test above -- is untouched: a 3rd
+// positional `rnd` argument still means exactly what it always did.
 export function pickSession(all, n, rnd = Math.random, isAvailable = null) {
   const pool = isAvailable ? (all || []).filter(isAvailable) : (all || []);
   const sorted = [...pool].sort(byDifficulty);
   if (sorted.length <= n) return sorted;
-  const out = [];
-  const band = sorted.length / n;
-  for (let i = 0; i < n; i++) {
-    const lo = Math.floor(i * band);
-    const hi = Math.max(lo + 1, Math.floor((i + 1) * band));
-    out.push(sorted[lo + Math.floor(rnd() * (hi - lo))]);
+
+  const rungs = groupByRung(sorted);
+
+  if (rungs.length >= n) {
+    // Enough distinct difficulties for one each: partition the RUNGS (never
+    // splitting one across two bands) into n bands and draw one puzzle at
+    // random from each band's rung(s).
+    return bandRanges(rungs.length, n).map(([lo, hi]) => {
+      const candidates = rungs.slice(lo, hi).flat();
+      return candidates[Math.floor(rnd() * candidates.length)];
+    });
   }
-  return out;
+
+  // Fewer rungs than slots: give each rung a fair, floor/ceil-even share of
+  // the n slots (in difficulty order, so rung 0 gets the earliest slots),
+  // draw that many distinct puzzles from it, and top up any shortfall
+  // (a rung smaller than its share) from whatever remains, in difficulty
+  // order, so the result is still n long and still sorted.
+  const remaining = rungs.map((r) => [...r]);
+  const picked = [];
+  for (const [r, [lo, hi]] of bandRanges(n, rungs.length).entries()) {
+    const want = hi - lo;
+    const take = Math.min(want, remaining[r].length);
+    for (let k = 0; k < take; k++) {
+      picked.push(remaining[r].splice(Math.floor(rnd() * remaining[r].length), 1)[0]);
+    }
+  }
+  const leftover = remaining.flat();
+  while (picked.length < n && leftover.length) {
+    picked.push(leftover.splice(Math.floor(rnd() * leftover.length), 1)[0]);
+  }
+  return picked.sort(byDifficulty);
 }
 
 export function gradeMove(expectedUci, playedUci) {

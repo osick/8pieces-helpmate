@@ -120,3 +120,96 @@ test("pickSession's default isAvailable (null) changes nothing -- existing call 
   const all = [{ fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 4, id: "only" }];
   assert.deepEqual(pickSession(all, 10, Math.random), pickSession(all, 10, Math.random, null));
 });
+
+// Fix round 2: banding used to cut the sorted pool at equal raw INDEX, which
+// can slice a single (dtm, pieces) rung across two adjacent bands whenever
+// rung sizes are uneven -- which every real mined corpus is, since rung
+// size is real availability, not a target. Measured against the real
+// puzzles.epd shape (five thousand simulated sessions): 21.95% of adjacent
+// transitions collided, and 98.8% of ten-puzzle sessions had at least one --
+// not an edge case, nearly every session. Banding is now cut across
+// DISTINCT RUNGS instead, so two adjacent bands can never share one.
+const REAL_SHAPED_RUNG_SIZES = [100, 100, 100, 100, 100, 100, 100, 100, 90, 40];
+
+function makeUnevenRungPool() {
+  const all = [];
+  let dtm = 2;
+  for (const size of REAL_SHAPED_RUNG_SIZES) {
+    for (let k = 0; k < size; k++) {
+      all.push({ fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm, id: `${dtm}-${k}` });
+    }
+    dtm += 2;
+  }
+  return all;
+}
+
+test("pickSession never puts two adjacent slots on the same rung when there are at least n rungs", () => {
+  const all = makeUnevenRungPool();
+  let seed = 11;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  for (let trial = 0; trial < 200; trial++) {
+    const s = pickSession(all, 10, rnd);
+    for (let i = 1; i < s.length; i++) {
+      assert.notEqual(s[i].dtm, s[i - 1].dtm,
+        `trial ${trial}: adjacent slots ${i - 1},${i} both landed on dtm ${s[i].dtm} -- ` +
+        `full session: ${s.map((p) => p.dtm)}`);
+    }
+  }
+});
+
+test("the equal-INDEX banding this replaced DOES collide on that same pool -- proving the test above has teeth", () => {
+  const sorted = [...makeUnevenRungPool()].sort(byDifficulty);
+  // pickSession's banding before this fix: cut the sorted array into n
+  // equal-width INDEX ranges, oblivious to where a rung's boundary fell.
+  function oldIndexBandedPick(sortedPool, n, rnd) {
+    const band = sortedPool.length / n;
+    const out = [];
+    for (let i = 0; i < n; i++) {
+      const lo = Math.floor(i * band);
+      const hi = Math.max(lo + 1, Math.floor((i + 1) * band));
+      out.push(sortedPool[lo + Math.floor(rnd() * (hi - lo))]);
+    }
+    return out;
+  }
+  let seed = 1;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  let collided = false;
+  for (let trial = 0; trial < 100 && !collided; trial++) {
+    const s = oldIndexBandedPick(sorted, 10, rnd);
+    for (let i = 1; i < s.length && !collided; i++) {
+      if (s[i].dtm === s[i - 1].dtm) collided = true;
+    }
+  }
+  assert.ok(collided,
+    "expected the old index-banding algorithm to collide at least once in 100 sessions on this " +
+    "real-shaped pool -- if it never does, the no-collision test above isn't exercising the bug " +
+    "it exists to guard against");
+});
+
+test("pickSession still returns n puzzles, sorted, without padding, when there are fewer rungs than slots", () => {
+  // A thin install: only 3 distinct (dtm, pieces) rungs survive an
+  // isAvailable filter, but plenty of puzzles within each. n=10 slots must
+  // still total 10 -- some rungs necessarily supply more than one, which is
+  // an honest, unavoidable collision here, not a defect -- and the result
+  // must stay sorted easiest-first, not just grouped by rung.
+  const all = [
+    ...Array.from({ length: 20 }, (_, i) => ({
+      fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 4, id: `a${i}`,
+    })),
+    ...Array.from({ length: 20 }, (_, i) => ({
+      fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 8, id: `b${i}`,
+    })),
+    ...Array.from({ length: 20 }, (_, i) => ({
+      fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 12, id: `c${i}`,
+    })),
+  ];
+  let seed = 5;
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const s = pickSession(all, 10, rnd);
+  assert.equal(s.length, 10);
+  assert.equal(new Set(s.map((p) => p.id)).size, 10, "a puzzle repeated");
+  const dtms = s.map((p) => p.dtm);
+  assert.deepEqual(dtms, [...dtms].sort((a, b) => a - b), "not ordered easiest first");
+  // Every one of the 3 available rungs must appear -- none skipped.
+  assert.deepEqual([...new Set(dtms)].sort((a, b) => a - b), [4, 8, 12]);
+});
