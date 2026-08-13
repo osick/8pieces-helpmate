@@ -165,9 +165,12 @@ async function loadThemesDoc() {
   try {
     ({ body } = await api.themes());
   } catch (err) {
-    // index.html runs every init*() unguarded in one sequence -- a throw
-    // here would take every other screen down with it, so a failed fetch
-    // degrades to a message instead.
+    // A failed fetch degrades to a message on this screen. NOT because a
+    // throw would take the other screens down: index.html's init*() calls
+    // are async functions, so one rejecting cannot stop a sibling. The
+    // reason is narrower and this screen's own -- an unhandled rejection
+    // would leave "Loading motifs…" on screen permanently, with nothing
+    // saying why, and __themesDocReady never set.
     box.textContent = "";
     box.appendChild(el("p", "empty",
       err instanceof ApiError

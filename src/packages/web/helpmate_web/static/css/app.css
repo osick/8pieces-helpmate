@@ -436,8 +436,8 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
   }
 }
 
-/* The line: one row per MOVE NUMBER, not per ply -- eight rows even at the
-   hardest tier's sixteen plies (h#8), not a wall of sixteen bare lines. Each
+/* The line: one row per MOVE NUMBER, not per ply -- nine rows even at the
+   hardest tier's eighteen plies (h#9), not a wall of eighteen bare lines. Each
    row holds up to two .ply cells (Black's half, White's half); a puzzle
    whose line is a single ply (a very short h#0.5) still gets a row with one
    empty second cell rather than a ragged grid. */

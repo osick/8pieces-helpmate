@@ -74,8 +74,8 @@ function buildLine(sanList) {
   ol.textContent = "";
   ol.classList.remove("revealed");
   plyEls = [];
-  // Paired into one row per move number -- eight rows even at the hardest
-  // tier's sixteen plies, not a wall of sixteen bare lines.
+  // Paired into one row per move number -- nine rows even at the hardest
+  // tier's eighteen plies, not a wall of eighteen bare lines.
   for (let i = 0; i < sanList.length; i += 2) {
     const row = el("li", "move-row");
     row.appendChild(el("span", "move-no", `${i / 2 + 1}.`));
@@ -208,7 +208,12 @@ async function startSession() {
     try {
       allPuzzles = parseEpd(await api.puzzles());
     } catch {
-      allPuzzles = [];   // network failure: degrade below, never throw into index.html's init sequence
+      // Network failure: degrade to the message below. Not because a throw
+      // here would take another screen down -- init*() are async, so a
+      // rejection cannot stop a sibling -- but because an unhandled
+      // rejection leaves this screen sitting on "Loading…" forever with
+      // nothing on it saying why.
+      allPuzzles = [];
     }
   }
   if (!allPuzzles.length) {
@@ -295,7 +300,7 @@ async function reveal() {
   // Walk the rest of the line move by move -- api.line gives SAN only, so
   // each ply's FEN is recovered the same way grading recovers its UCI:
   // matching that ply's SAN against /v1/moves for the position reached so
-  // far. Bounded by the line's own length (16 plies at the hardest tier).
+  // far. Bounded by the line's own length (18 plies at the hardest tier).
   try {
     let fen = boardFen;
     for (let i = plyIndex; i < solutionSan.length; i++) {
