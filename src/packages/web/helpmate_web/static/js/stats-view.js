@@ -118,6 +118,18 @@ export function renderStats(box, s, { idPrefix = "", samples = true } = {}) {
   box.appendChild(c);
 }
 
+// The explorer's band: which table answered, how deep it goes, how much of it
+// is solvable. Everything else about the material is one click away on
+// Materials, and repeating it under every position was ~900px per screen.
+export function renderTableLine(box, s) {
+  box.textContent = "";
+  const cells = cellSummary(s);
+  const line = el("p", "table-line");
+  const name = el("b", null, s.material);
+  line.append(name, ` · ${mateLengthLabel(s)} · ${fmtCount(cells.solvable)} solvable`);
+  box.appendChild(line);
+}
+
 // The corpus summary. It shares the tile and histogram vocabulary with a
 // single material's view but not its shape: there is no plane_size, no
 // sample position, and two facts a per-material view never has to state --

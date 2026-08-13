@@ -1317,27 +1317,34 @@ Since v0.11.0, every screen is a grey **rail** — the board, the palette, the
 material list, the search form: what you manipulate — beside a white
 **readout** — the move list, the table stats, the results: what the tables
 say. Both surfaces are aliases over the existing palette; no new colours were
-introduced to build the split.
+introduced to build the split. Since v0.13.0 that is **one palette, full
+stop** — there is no colour-theme control on this page any more; see
+[Palette](#palette) below.
 
-Three screens:
+Five screens:
 
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
   one from the complete legal-move list, which is grouped into **Optimal**
   (keeps the shortest mate), **Slower** and **No mate**, with the optimal
   moves ordered by how forcing they are — the child position's optimal-line
   count, ascending, since mate length is constant across that group by
-  construction. A saturated count renders as `255+`, never `255`. Below it, the
-  optimal lines in SAN, exportable as PGN, and (since v0.8.0) the current
-  position's themes — fetched via `probe --themes` (opt-in on the client too),
-  showing `themes_note` in place of the list for a color-flipped position
-  rather than a blank field. The position is encoded in the URL
-  (`/#fen=<urlencoded>`), so every position is a shareable link and the
-  browser's back button walks the history. Since v0.11.0, a band below the
-  board and the move list shows the statistics of the table that answered the
-  current position (the `material` the API reports — see
+  construction. A saturated count renders as `255+`, never `255`. Slower and
+  No-mate moves render as chips under a shared distance label instead of a
+  full row each — within one distance every full row would have read the
+  same, so the distance is stated once and the moves that share it follow as
+  chips. Below the list, the optimal lines in SAN, exportable as PGN, and
+  (since v0.8.0) the current position's themes — fetched via `probe --themes`
+  (opt-in on the client too), showing `themes_note` in place of the list for
+  a color-flipped position rather than a blank field. The position is
+  encoded in the URL (`/#fen=<urlencoded>`), so every position is a
+  shareable link and the browser's back button walks the history. Since
+  v0.11.0, a band below the board and the move list names the table that
+  answered the current position (the `material` the API reports — see
   [`GET /v1/probe`](#get-v1probe) below — which is the mirrored table
-  whenever colours were flipped to find an answer), with a link straight into
-  Materials for that entry.
+  whenever colours were flipped to find an answer); since v0.12.0 that band
+  is one line — the material, its deepest mate and how much of it is
+  solvable — with a link straight into Materials for that entry's full
+  histograms, rather than repeating them under every position.
 - **Materials** — every table the server can reach, with piece count, size and
   location (`local` / `cached` / `remote`). Since v0.11.0 the list opens on a
   pinned **All tables** entry showing the corpus aggregate from
@@ -1367,35 +1374,91 @@ Three screens:
   queued there; the server still finishes or drops the scan on its own
   `--mine-timeout` clock. Pressing Stop says this in the status line rather
   than implying the server stopped too.
+- **Puzzles** (since v0.13.0) — a session of ten one-solution positions
+  drawn from a committed EPD file, one per difficulty rung (mate length
+  first, piece count second, ascending), easiest first. It reuses the
+  explorer's own board construction, not a second editor: the same
+  borderless square style, the same rail/readout layout — but no palette, no
+  relocation, no FEN box, and only the one move expected at the current ply
+  is ever graded. Solving means playing the *whole* line, both colours: a
+  helpmate is cooperative, so proving the solution means supplying Black's
+  moves too, not just answering "what does White play". Each ply the player
+  supplies gets a check or a cross; a wrong move reveals the correct SAN for
+  that ply without ending the puzzle, and once the running error count
+  passes the puzzle's error budget the rest of the line is revealed
+  automatically. The session is filtered, before it is drawn, to materials
+  this installation's [`GET /v1/materials`](#get-v1materials) actually lists
+  — a puzzle whose material nobody has generated is not a harder puzzle, it
+  is a 404 — and when none of the shipped set's materials match, the screen
+  says so by name and prints the `helpmate gen` command that would fix it,
+  rather than presenting an empty or broken session. See [Puzzle set
+  (EPD)](#puzzle-set-epd) below for the file format and how to regenerate
+  it.
+- **Themes** (since v0.13.0) — every motif this build's tablebase detects,
+  in five groups (the mate picture, how a unit travels, pawns and promotion,
+  where the mate happens, the structure of the solution) plus a trailing
+  "other" group for anything the registry adds later, each group introduced
+  by a sentence before its members. Rendered straight from
+  [`GET /v1/themes`](#get-v1themes) — never a hard-coded list — so this
+  screen cannot drift from the binary it is talking to: a new motif shows up
+  here with no edit to the dashboard. Every entry shows the motif's name,
+  its definition (the API's own `doc` string), and a one-line explanation of
+  what its `needs` value means for a position whose stored solution count
+  has saturated at 255 (see [`needs`: what a theme actually
+  reads](#needs-what-a-theme-actually-reads) above) — `solutions` detectors
+  are silently skipped on such a position, `plane`/`position` ones still
+  answer.
 
-**Theme.** The header's `Theme:` button cycles through three states — system,
-light, dark — rather than a plain on/off switch. System means "follow the
-OS": the page reads `prefers-color-scheme` and needs no explicit choice.
-Picking light or dark overrides that for this browser; the choice is
-remembered (`localStorage`) and survives a reload. It is also applied
-*before* first paint, via a small inline script in `<head>` that runs ahead
-of the page's own module — so a dark-mode user never sees a flash of the
-light page on load.
+**Palette.** One palette, full stop. There is no colour-theme control on
+this page, and nothing to keep in sync with the OS's own
+`prefers-color-scheme` — earlier releases carried a three-state
+system/light/dark toggle, remembered per browser and applied before first
+paint via a pre-paint script in `<head>`; v0.13.0 removed the toggle, the
+stored preference, that script, its drift test, and both dark token blocks
+in `app.css` (a net −200 lines). The bare `:root` in `app.css` is the whole
+system now.
 
-**Editing a position.** Under the board, a palette places pieces. There are
-two ways to do it, and both stay available side by side:
+**Footer.** Every screen shares one footer: a live line naming the corpus
+the server is reading from left, and on the right a row of about-this-site
+links (`Source`, `Dataset`, `Licence`) that are marked as placeholders
+(`data-placeholder`, an underlined-dotted style) rather than silently
+pointing at `#` — they are wired up to real destinations once this project
+is public, not before.
 
-- **Click-to-place** — pick a palette piece, then click squares (this is also
-  the keyboard/touch path: it needs no drag gesture). Clicking the armed
-  piece again disarms it.
-- **Drag**, added in v0.11.0, in three gestures: drag a piece from the
-  palette onto a square to place it there; click **Arrange** and drag a piece
-  already on the board to another square to move it (legal or not — the
-  editor does not judge placement, only the final position); or drag a piece
-  off the edge of the board to remove it.
+**Editing a position.** Since v0.12.0 the board has **no editing modes** —
+no armed piece, no `Erase`, no `Arrange`, no `Done — evaluate` button to
+commit a half-built position. One rule covers every drag:
 
-`Erase` empties the squares you click, `Clear board` empties all of them, and
-the `To move` selector sets the side. While editing, the board is not probed
-on every click or drop — a half-built position is illegal by definition — so
-either click the armed palette entry again or press the visible **Done —
-evaluate** button to evaluate what you have built. A position with no king,
-or two of one colour, says so directly instead of spending a request to be
-told `invalid_fen`.
+- A drag whose start and end square match a legal move **plays that move**.
+- Any other drag **relocates** the piece to wherever it was dropped —
+  including a square already occupied, which is simply overwritten.
+- A drag released off the board **deletes** the piece.
+- A drag started on either **tray** — black's above the board, white's
+  below, each on the side of the board its colour occupies, swapping
+  position with `Flip` — **places** that piece on the square it lands on.
+
+`Back` undoes all four the same way: one entry in the same history stack the
+move list uses. The one deliberate risk this design accepts: relocating a
+piece onto a square that happens to be a legal destination for it **will
+play that move** rather than merely place it there — the board cannot tell
+"I am rearranging" from "I am moving" except by asking, and asking on every
+drop was the armed-mode overhead this removed. If that happens, `Back`
+undoes it exactly as it would undo an intended move.
+
+There is also a non-drag path: **two plain clicks on a piece relocate it**,
+a side effect of the board's own move-input handling treating a
+click-then-click the same as a drag that starts and ends on different
+squares. With click-to-place gone, this and dragging from a tray are the
+only ways to place or move a piece by hand — there is **no keyboard path**
+to placing a tray piece; the **FEN** field (which applies on Enter, no
+separate `Set` button) is the keyboard route to an arbitrary position.
+`Clear board` still empties every square in one action, and the `To move`
+selector still sets the side. Since v0.12.0 the board **is probed on every
+drop** — the consequence is that building a position piece by piece can raise
+the error banner on an intermediate step, because an intermediate material
+may have no table. The one case that still skips the round trip is a
+position with no king, or two of one colour: that says so directly instead
+of spending a request to be told `invalid_fen`.
 
 **What it needs from the server.** Only the read-only `/v1` routes. Every
 contract the API defines is surfaced rather than hidden: `202 fetching` shows
@@ -1407,6 +1470,57 @@ Third-party code is vendored, not fetched: **cm-chessboard** 8.7.5 (MIT) lives
 under `src/packages/web/helpmate_web/static/vendor/cm-chessboard/` with its
 LICENSE and upstream version recorded in
 `src/packages/web/helpmate_web/static/vendor/README.md`.
+
+### Puzzle set (EPD)
+
+The Puzzles screen is served against a plain static file,
+`src/packages/web/helpmate_web/static/puzzles.epd` (fetched by the client as
+`/puzzles.epd` — no dedicated API endpoint), in
+[EPD](https://www.chessprogramming.org/Extended_Position_Description),
+chess's standard container for a collection of positions. It is committed to
+the repo and meant to be **hand-editable**: a custom problem can be added by
+typing one line.
+
+```
+8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "KQvk.0001"
+```
+
+Each line is the four FEN fields — placement, side to move, castling
+rights, en passant target; EPD has no halfmove/fullmove clocks, so the
+client's own parser appends `0 1` to turn a line back into a FEN the rest of
+the dashboard understands — followed by `;`-separated opcodes. Exactly two
+are read:
+
+- **`hm`** — the helpmate distance **in plies**, the same unit `dtm` uses
+  everywhere else in this project (so `hm 4` is h#2). Stored rather than
+  probed, so ordering the whole set by difficulty costs nothing at load
+  time.
+- **`id`** — a free-form label, not currently shown on screen but kept for
+  provenance and hand-editing.
+
+Any other opcode is parsed and ignored (so a future field costs nothing to
+add), and a line starting with `#` is a comment. A line with no positive
+`hm` is skipped. Piece count is *not* stored — it's derived from the FEN
+each time, since it's cheap and storing it would risk drifting from the FEN
+it describes.
+
+The committed 930-position file was mined from a real corpus with
+[`tools/mine_puzzles.py`](../tools/mine_puzzles.py): a ladder of ten
+`(piece count, mate length)` rungs, each queried against helpmate's mining
+API for positions with a unique solution (`count=1`), ranked by how many
+such positions each candidate material actually holds (read straight from
+that material's `stats.json` uniqueness histogram, no probing needed).
+Read-only against `--tables` and deterministic given `--seed`, so
+regenerating the file produces a reviewable diff rather than a reshuffle:
+
+```bash
+taskset -c 0-3 python3 tools/mine_puzzles.py --tables ~/tb \
+    --out src/packages/web/helpmate_web/static/puzzles.epd --seed 1
+```
+
+It refuses to write `--out` anywhere under `~/tb` — the same live-corpus
+guard `tools/bench_compression.py` applies to `--tables`, here applied to
+the write target instead.
 
 ## API server
 
@@ -1473,7 +1587,7 @@ uncaught exceptions) has the same shape:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/health
-{"status":"ok","version":"0.11.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
+{"status":"ok","version":"0.13.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
 ```
 
 `mine_timeout` (since v0.11.0) echoes the server's `--mine-timeout` setting
@@ -1609,6 +1723,19 @@ $ curl -sG http://127.0.0.1:8642/v1/probe --data-urlencode "fen=garbage"
 {"error":{"code":"invalid_fen","message":"substring not found","hint":null}}
 ```
 
+A position that is illegal in a way the table's index cannot address — the
+two kings adjacent, or the side not to move left in check — is a different
+400: `unprobeable_position`, not `unknown_material`. The table named in the
+error *is* present; the position just isn't one it stores. This is distinct
+from `404 unknown_material`, which means there is no table at all for that
+material — `unprobeable_position` fires even when the Materials screen lists
+the table as local, so it must never suggest generating it:
+
+```
+$ curl -sG http://127.0.0.1:8699/v1/probe --data-urlencode "fen=8/8/8/8/8/8/1k6/K1Q5 b - - 0 1"
+{"error":{"code":"unprobeable_position","message":"this position cannot be looked up in the 'KQvk' table","hint":"the table is present -- the position is not one it stores. An illegal position is the usual cause: check that the two kings are not adjacent and that the side NOT to move is not left in check."}}
+```
+
 Like the CLI, `probe` transparently falls back to the color-flipped material
 when only that slice is generated, and reports it via `"flipped": true`.
 `material` (since v0.11.0) names the table that actually answered — the
@@ -1671,7 +1798,9 @@ $ curl -sG http://127.0.0.1:8642/v1/moves --data-urlencode "fen=8/7k/5K2/8/8/8/8
   the dashboard calls `/v1/moves` fresh for the position it lands on after
   following a move, and re-reads `material` from that response, rather than
   reusing the value from the position it moved away from.
-- Errors follow `probe`: 400 `invalid_fen`, 404 `unknown_material` with the
+- Errors follow `probe`: 400 `invalid_fen`, 400 `unprobeable_position` for a
+  position the table's index can't address (kings adjacent, etc. — see
+  [`/v1/probe`](#get-v1probe) above), 404 `unknown_material` with the
   `helpmate gen …` hint, and the 202-fetching contract for remote-only
   material. The color-flip fallback applies too, reported as `"flipped": true`.
 

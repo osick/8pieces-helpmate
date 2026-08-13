@@ -60,4 +60,6 @@ export const api = {
   moves: (fen) => getJson("/v1/moves", { fen }),
   mine: (q, opts) => getJson("/v1/mine", q, opts),
   themes: () => getJson("/v1/themes"),
+  // A static asset, not a JSON envelope -- so it bypasses getJson entirely.
+  puzzles: () => fetch("/puzzles.epd").then((r) => r.text()),
 };

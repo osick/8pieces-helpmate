@@ -1,3 +1,5 @@
+import json
+import re
 from urllib.parse import quote, urlparse, parse_qs
 
 import pytest
@@ -40,7 +42,7 @@ def test_setting_an_invalid_fen_shows_the_server_message(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
     page.fill("#fen-input", "garbage")
-    page.click("#fen-form button[type=submit]")
+    page.press("#fen-input", "Enter")
     page.wait_for_selector("#error-banner:not([hidden])")
     assert page.inner_text("#error-banner")
 
@@ -88,42 +90,261 @@ def test_material_stats_render_both_histograms(page, server):
     assert page.eval_on_selector("#dtm-hist .k", "e => e.textContent").startswith("h#")
 
 
-def test_the_palette_places_a_piece_and_evaluates_on_exit(page, server):
+def _square_box(page, square):
+    return page.locator(f"#board rect[data-square={square}]").bounding_box()
+
+
+def _drag_square_to_square(page, frm, to):
+    a, b = _square_box(page, frm), _square_box(page, to)
+    page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2, steps=10)
+    page.mouse.up()
+
+
+def test_a_legal_drag_plays_the_move(page, server):
+    # 8/7k/5K2/8/8/8/8/6Q1 b: Black to move, Kh7 may go to h8, landing on
+    # 7k/8/5K2/8/8/8/8/6Q1 w -- dtm 1 (h#0.5), 1 optimal line. Measured
+    # against the KPvk fixture (whose closure contains KQvk) on 2026-08-12.
+    #
+    # render() never clears #position-summary before its /v1/moves await
+    # (only the move list, lines and themes), so a bare "dtm" substring
+    # check here is satisfied instantly by the PARENT's own verdict, still
+    # on screen from before the drag ever happened -- proven by fix round
+    # 1's route-blocking run, recorded in the report. Assert the actual
+    # child answer instead, which can only appear once the real fetch for
+    # THIS position has landed.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector("#stm-select", "e => e.value") == "b"
+    _drag_square_to_square(page, "h7", "h8")
+    page.wait_for_function(
+        "() => document.getElementById('stm-select').value === 'w'")
+    assert "8/7k" not in page.input_value("#fen-input")
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent === "
+        "'dtm 1 (h#0.5) · 1 optimal line(s)'")
+
+
+def test_an_illegal_drag_relocates_and_keeps_the_side_to_move(page, server):
+    # The white queen cannot legally move at all here -- it is Black's turn --
+    # so dragging it is unambiguously a relocation, landing on
+    # 8/7k/5K2/8/3Q4/8/8/8 b -- dtm 2 (h#1), 1 optimal line (Kh6 the only
+    # answer, the queen having lost its original mating square). Measured
+    # against the KPvk fixture on 2026-08-12.
+    #
+    # Same defect as test_a_legal_drag_plays_the_move above: a bare
+    # `includes('dtm')` wait is satisfied in under a millisecond by the
+    # PRE-drag summary, never actually observing the recomputed verdict --
+    # proven by fix round 1's route-blocking run. Assert the real,
+    # recomputed text.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    _drag_square_to_square(page, "g1", "d4")
+    page.wait_for_function(
+        "() => document.getElementById('fen-input').value.startsWith('8/7k/5K2/8/3Q4/')")
+    assert page.eval_on_selector("#stm-select", "e => e.value") == "b", "a relocation flipped the turn"
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent === "
+        "'dtm 2 (h#1) · 1 optimal line(s)'")
+
+
+def test_back_undoes_a_relocation(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
     before = page.input_value("#fen-input")
-
-    # Move the queen from g1 to d4 by erasing and placing. Both ends stay
-    # inside KQvk, the only closure the fixture generated.
-    # rect[]: piece groups carry data-square too, and their layer has
-    # pointer-events: none, so only the square rects are clickable.
-    page.click("#btn-erase")
-    assert page.get_attribute("#btn-erase", "aria-pressed") == "true"
-    # entering edit mode retires the old position's value rather than
-    # leaving a stale dtm on screen
-    assert "dtm" not in page.inner_text("#position-summary")
-    assert page.eval_on_selector_all("#move-list li", "els => els.length") == 0
-
-    page.click("#board rect[data-square=g1]")
+    _drag_square_to_square(page, "g1", "d4")
     page.wait_for_function(
-        "before => document.getElementById('fen-input').value !== before", arg=before)
-    assert "Q" not in page.input_value("#fen-input").split()[0]
-
-    page.click("#palette-pieces button[data-piece=wq]")
-    assert page.get_attribute("#btn-erase", "aria-pressed") == "false"
-    assert page.get_attribute("#palette-pieces button[data-piece=wq]", "aria-pressed") == "true"
-    page.click("#board rect[data-square=d4]")
+        "b => document.getElementById('fen-input').value !== b", arg=before)
+    page.click("#btn-back")
     page.wait_for_function(
-        "document.getElementById('fen-input').value.startsWith('8/7k/5K2/8/3Q4/')")
+        "b => document.getElementById('fen-input').value === b", arg=before)
 
-    # Editing does not probe on every click -- the value appears when the
-    # user leaves edit mode by clicking the armed piece again.
-    page.click("#palette-pieces button[data-piece=wq]")
-    assert page.get_attribute("#palette-pieces button[data-piece=wq]", "aria-pressed") == "false"
+
+def test_a_relocation_reaches_the_url(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    _drag_square_to_square(page, "g1", "d4")
+    page.wait_for_function("() => location.hash.includes('3Q4')")
+
+
+def test_a_failed_evaluation_clears_the_move_lookup(page, server):
+    # H1 from the v0.12.0 whole-branch review. render()'s kingProblem branch
+    # clears lastMoves; the ApiError branch did not. A drag after a failed
+    # evaluation then matched against the PREVIOUS position's moves and
+    # navigated to that move's child -- discarding the user's edit and
+    # rewriting the URL to a position they never built.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    # Put the kings adjacent: legal to build, impossible to probe.
+    _drag_square_to_square(page, "f6", "g6")
+    page.wait_for_selector("#error-banner:not([hidden])")
+    assert page.eval_on_selector_all("#move-list li", "e => e.length") == 0
+    broken = page.input_value("#fen-input")
+    # This drag corresponds to a move that was legal in the PREVIOUS position.
+    _drag_square_to_square(page, "h7", "h8")
+    page.wait_for_timeout(400)
+    final = page.input_value("#fen-input")
+    assert final != "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", \
+        "the board jumped back to a stale position"
+    assert "5K2" not in final, \
+        "the white king reappeared on f6 -- the stale move list was replayed"
+    assert final != broken, "the drag was silently swallowed"
+
+
+def test_a_pending_download_clears_the_move_lookup_too(page, server):
+    # Fix round 1 (code review): the 202 branch was the SAME hazard as H1
+    # above, but worse -- it needs no coincidental uci match and is reachable
+    # on a routine "downloading..." banner, not only after the retry cap.
+    # board.setPosition() and syncControls() at the top of render() have
+    # already moved the board and the FEN field to the clicked/dragged
+    # position by the time the 202 arrives, so a previous position's move
+    # list left on screen let a stale drag navigate to a child of a position
+    # no longer displayed -- and worse, to a FEN that didn't even reflect
+    # what was actually on the board (see the queen below).
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    start = page.input_value("#fen-input")
+
+    # From here on, every /v1/moves call reports "still downloading" --
+    # exactly what a fresh install, or navigating into newly-mined material,
+    # produces routinely.
+    page.route("**/v1/moves**", lambda route: route.fulfill(
+        status=202, content_type="application/json",
+        body='{"status": "fetching", "material": "KQvk"}'))
+
+    # Relocate the queen, not a king: kings stay non-adjacent, so this
+    # (unlike H1's own kingProblem trigger) actually reaches api.moves() and
+    # gets the mocked 202. The black king is untouched and stays on h7.
+    _drag_square_to_square(page, "g1", "g6")
+    page.wait_for_selector("#error-banner:not([hidden])")
+    assert page.eval_on_selector_all("#move-list li", "e => e.length") == 0
+    pending = page.input_value("#fen-input")
+    assert pending != start, "the queen relocation was silently swallowed"
+
+    # h7h8 was legal in the STARTING position only, before the queen ever
+    # moved. If lastMoves were still the starting position's, this would
+    # match it and navigate to the starting position's OWN h7h8 child --
+    # silently undoing the queen relocation above along the way.
+    _drag_square_to_square(page, "h7", "h8")
+    page.wait_for_timeout(400)
+    final = page.input_value("#fen-input")
+    assert final != pending, "the drag was silently swallowed"
+    assert "5K2" not in final, \
+        "the board reverted to the stale child fen -- the queen relocation " \
+        "was undone and the stale move list was replayed"
+
+
+PROMOTION_START = "7k/4P3/5K2/8/8/8/8/8 w - - 0 1"
+
+
+def test_a_multi_candidate_promotion_drag_waits_for_the_dialog(page, server):
+    # e7-e8 alone is ambiguous -- four legal moves share the uci prefix
+    # (e7e8q/e7e8r/e7e8b/e7e8n) -- so this is the one path playedMove
+    # actually guards: validateMoveInput shows the dialog and returns
+    # before any piece is chosen, moveInputFinished fires a microtask
+    # later (well before the user has clicked anything), and without the
+    # flag commitPlacement() would commit whatever cm-chessboard's own
+    # movePiece() already dropped on e8 -- a bare, unpromoted pawn -- as a
+    # bogus relocation. Measured against a freshly generated KPvk table on
+    # 2026-08-12: dtm 3 (h#1.5) to start; e7e8q -> dtm 4 (h#2), 29 optimal
+    # lines (e7e8n/e7e8b are dead: not solvable at all).
+    page.goto(f"{server}/#fen={quote(PROMOTION_START)}")
+    page.wait_for_selector("#move-list li")
+    before = page.input_value("#fen-input")
+
+    _drag_square_to_square(page, "e7", "e8")
+
+    page.wait_for_selector(".promotion-dialog-button[data-piece=wq]")
+    # The dialog is up and nothing has been picked yet: the position on
+    # screen must still be the one the drag started from.
+    assert page.input_value("#fen-input") == before
+
+    page.click(".promotion-dialog-button[data-piece=wq]")
     page.wait_for_function(
-        "document.getElementById('position-summary').textContent.includes('dtm')")
-    assert page.eval_on_selector_all("#move-list li", "els => els.length") > 0
-    assert page.is_hidden("#error-banner")
+        "() => document.getElementById('fen-input').value.startsWith('4Q2k/8/5K2/')")
+    # Same staleness trap as test_a_legal_drag_plays_the_move: the summary
+    # is not cleared before the /v1/moves await, so read it only once it has
+    # actually become the CHILD's verdict, not the STARTING position's.
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent === "
+        "'dtm 4 (h#2) · 29 optimal line(s)'")
+
+    page.click("#btn-back")
+    page.wait_for_function(
+        "b => document.getElementById('fen-input').value === b", arg=before)
+
+
+def test_the_trays_flank_the_board_black_above_white_below(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    black = page.eval_on_selector("#tray-black", "e => e.getBoundingClientRect()")
+    white = page.eval_on_selector("#tray-white", "e => e.getBoundingClientRect()")
+    assert black["bottom"] <= board["top"] + 1, "the black tray is not above the board"
+    assert white["top"] >= board["bottom"] - 1, "the white tray is not below the board"
+
+
+def test_the_trays_swap_when_the_board_is_flipped(page, server):
+    # The placement is only meaningful because each tray sits on its own
+    # colour's side; after a flip, black is at the bottom and so is its tray.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    page.click("#btn-flip")
+    page.wait_for_function(
+        "() => document.getElementById('tray-black').getBoundingClientRect().top"
+        " > document.getElementById('board').getBoundingClientRect().top")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    black = page.eval_on_selector("#tray-black", "e => e.getBoundingClientRect()")
+    white = page.eval_on_selector("#tray-white", "e => e.getBoundingClientRect()")
+    assert black["top"] >= board["bottom"] - 1, "the black tray did not move below"
+    assert white["bottom"] <= board["top"] + 1, "the white tray did not move above"
+
+
+def test_the_fen_applies_on_enter_without_a_set_button(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.eval_on_selector_all("#fen-form button[type=submit]", "e => e.length") == 0
+    page.fill("#fen-input", "7k/8/5K2/8/8/8/8/6Q1 w - - 0 1")
+    page.press("#fen-input", "Enter")
+    page.wait_for_function(
+        "() => document.getElementById('stm-select').value === 'w'")
+
+
+def test_the_fen_input_has_its_own_row_and_the_rest_share_one_line(page, server):
+    # Fix round 1: a 460px rail can't fit a FEN input, a select and three
+    # buttons on one line (measured: 764px of children in a 428px content
+    # box) -- the first cut's "one line" comment and the report that verified
+    # it were both wrong. The real, deliberate layout is two rows: the FEN
+    # input alone (it's the longest datum here, ~30 characters), then
+    # everything else -- To move / Flip / Clear board / Back, 335px against
+    # the same 428px -- sharing a single line at the >=860px breakpoint.
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    fen = page.eval_on_selector("#fen-input", "e => e.getBoundingClientRect()")
+    select = page.eval_on_selector("#stm-select", "e => e.getBoundingClientRect()")
+    flip = page.eval_on_selector("#btn-flip", "e => e.getBoundingClientRect()")
+    clear = page.eval_on_selector("#btn-clear-board", "e => e.getBoundingClientRect()")
+    back = page.eval_on_selector("#btn-back", "e => e.getBoundingClientRect()")
+    assert select["top"] >= fen["bottom"] - 1, "the FEN input does not have its own row"
+    tops = [select["top"], flip["top"], clear["top"], back["top"]]
+    # align-items: center puts a <label> wrapping a <select> at a slightly
+    # different top than a plain <button> even on the same line (their
+    # heights differ by a few px), so the same-row tolerance is generous --
+    # a genuine wrap to a second line differs by a full row height (~30px+
+    # the row gap), nowhere close to this margin.
+    assert max(tops) - min(tops) <= 8, "the remaining controls do not share one row"
+
+
+def test_the_board_has_no_mode_controls(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    for gone in ("#btn-erase", "#btn-arrange", "#btn-done-editing", "#edit-hint"):
+        assert page.eval_on_selector_all(gone, "e => e.length") == 0, f"{gone} still exists"
+    # and a tray piece is draggable without arming anything first
+    assert page.eval_on_selector_all(
+        ".tray button[aria-pressed]", "e => e.length") == 0
 
 
 def test_clearing_the_board_names_the_missing_kings(page, server):
@@ -176,7 +397,6 @@ def test_theme_picker_marks_themes_that_answer_on_saturated_positions(page, serv
     # positions whose stored solution count has saturated (capped at 255) --
     # the picker must mark those, driven by the server's own `needs` field,
     # not by a hard-coded theme name.
-    import json
     import urllib.request
     with urllib.request.urlopen(f"{server}/v1/themes") as r:
         registry = json.load(r)["themes"]
@@ -259,6 +479,48 @@ def _rows(page, selector="#move-list li"):
     return page.eval_on_selector_all(selector, "els => els.map(e => e.dataset.san)")
 
 
+def _sticky_is_wired(page):
+    """Structural proof that `.board-pin` CAN stick, independent of how much
+    scroll room actually exists on the current position.
+
+    Before the chip pass, the Slower group's 25 full rows made `.side` far
+    taller than `.board-col`'s own ~700px of content, and `.rail`/
+    `.board-col` stretches to match the taller of the two (see the Fix
+    round 1 comment on `.board-pin` in app.css) -- so a long move list gave
+    the sticky element roughly 2000px of travel room, comfortably more than
+    a fixed 400/600px test scroll. Task 4 collapsed that same group to a
+    handful of chip rows, and the travel room a sticky element gets is
+    `containing-block content height - element's own height`, not the
+    padding either side of it: verified live on THREE_GROUPS post-chips,
+    scrolling every 2px from 70 to 128 moved `.board-pin`'s top by exactly
+    -2px each step with no plateau anywhere -- the two are now equal in
+    height (`.board-col` -- not `.side` -- is the taller natural item, so
+    the row is sized to IT, and `.board-pin` already fills its container's
+    content box with zero slack). That is a structural consequence of a
+    short move list, not a bug: once `.side` is no longer taller than the
+    board column, there is nothing left for `.board-pin` to travel through,
+    on ANY position, not just this one. A scroll-and-measure assertion can
+    no longer tell "sticky is wired correctly" apart from "there happens to
+    be no room to prove it either way", so this checks the two structural
+    preconditions for sticking instead: the computed position is `sticky`
+    (not `static`, e.g. from a deleted rule), and no ancestor between it and
+    the document root clips or scrolls (`overflow` other than `visible`
+    anywhere in the chain silently kills stickiness -- see the caller's own
+    comment).
+    """
+    return page.evaluate("""() => {
+      const pin = document.querySelector('.board-pin');
+      if (getComputedStyle(pin).position !== 'sticky') return { ok: false, why: 'position is not sticky' };
+      for (let el = pin.parentElement; el; el = el.parentElement) {
+        const ov = getComputedStyle(el).overflow;
+        if (ov !== 'visible') {
+          return { ok: false, why: `${el.tagName}.${el.className} has overflow: ${ov}` };
+        }
+      }
+      return { ok: true, why: null };
+    }""")
+
+
 def test_optimal_moves_are_ordered_by_ascending_child_count(page, server):
     # Landing position: Kh6 has 3 optimal continuations, Kh8 has 1, and the
     # move generator emits them in that (wrong) order. Kh8 is the more forcing
@@ -278,7 +540,10 @@ def test_a_saturated_child_count_renders_as_a_ceiling_not_a_number(page, server)
     assert _rows(page, optimal) == ["Kh5", "Kg5"]
     badges = page.eval_on_selector_all(
         f"{optimal} .badge", "els => els.map(e => e.textContent)")
-    assert badges == ["h#4.5 · 246 ways", "h#4.5 · 255+ ways"]
+    # The optimal group's badge no longer repeats the h#N distance -- every
+    # optimal move sits at the same distance, and #position-summary (checked
+    # below) already states it once.
+    assert badges == ["246 ways", "255+ ways"]
     # The position's OWN count also saturates here (it is the sum of its
     # optimal children's counts, capped at the same ceiling) -- the summary
     # line above the badges must honour the same rule they do: a ceiling is
@@ -305,7 +570,7 @@ def test_all_three_groups_render_in_order_with_counted_headers(page, server):
     # Row one is the answer, whatever the generator emitted.
     assert _rows(page)[0] == "Qg7#"
     assert page.eval_on_selector(
-        "#move-list li .badge", "e => e.textContent") == "h#0 · only reply"
+        "#move-list li .badge", "e => e.textContent") == "only reply"
 
     # The slower group is ordered by mate length first, then by count.
     assert _rows(page, "#move-list section[data-group=slower] li")[:6] == [
@@ -340,6 +605,80 @@ def test_a_mate_position_renders_prose_not_a_miscounted_move_row(page, server):
     assert page.is_visible("#move-list .empty")
 
 
+def test_slower_moves_render_as_chips_under_a_distance_band(page, server):
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    labels = page.eval_on_selector_all(
+        "#move-list section[data-group=slower] .band-label",
+        "els => els.map(e => e.textContent.trim())")
+    assert labels and all(lbl.startswith("h#") for lbl in labels), labels
+    # the chips carry no badge -- the band label already said it
+    assert page.eval_on_selector_all(
+        "#move-list section[data-group=slower] .badge", "e => e.length") == 0
+    # and the optimal group still does
+    assert page.eval_on_selector_all(
+        "#move-list section[data-group=optimal] .badge", "e => e.length") > 0
+
+
+def test_the_no_mate_bands_label_cell_is_empty_not_omitted(page, server):
+    # The no-mate group's band() returns a null label. .band is a two-column
+    # grid (label, chips); if the (empty) label span were omitted instead of
+    # rendered empty, the <ul class="chips"> would become the grid's FIRST
+    # child and land in the 3.2rem label column instead of the 1fr chip
+    # column -- narrow enough that every chip wraps onto its own row. Proven
+    # to bite: reverting renderGroup's unconditional `wrap.appendChild(lab)`
+    # back to `if (band.label) wrap.appendChild(lab)` fails this test (Qg6
+    # and Qg8+ land at different `top`s instead of sharing a row).
+    page.set_viewport_size({"width": 1280, "height": 900})
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list section[data-group=dead] li")
+    tops = page.eval_on_selector_all(
+        "#move-list section[data-group=dead] .chips li",
+        "els => els.map(e => e.getBoundingClientRect().top)")
+    assert len(tops) == 2, tops   # Qg6, Qg8+ -- both dead moves on THREE_GROUPS
+    assert tops[0] == tops[1], f"the dead group's chips did not share a row: {tops}"
+
+
+def test_every_legal_move_is_still_one_list_item(page, server):
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list li")
+    shown = page.eval_on_selector_all("#move-list li", "els => els.length")
+    api = page.evaluate("""async () => {
+      const fen = document.getElementById('fen-input').value;
+      const r = await fetch('/v1/moves?fen=' + encodeURIComponent(fen));
+      return (await r.json()).moves.length;
+    }""")
+    assert shown == api, f"{shown} rendered vs {api} legal moves"
+
+
+def test_a_chip_plays_its_move(page, server):
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
+    page.wait_for_selector("#move-list section[data-group=slower] li")
+    before = page.input_value("#fen-input")
+    page.click("#move-list section[data-group=slower] li")
+    page.wait_for_function("b => document.getElementById('fen-input').value !== b", arg=before)
+
+
+def test_playing_a_move_never_collapses_the_move_list(page, server):
+    # render() used to empty the move list synchronously before awaiting the
+    # fetch that refills it, so everything below the list jumped up ~286px
+    # for the ~22ms the fetch was in flight. Measured live on this fixture
+    # (2026-08-13). Poll the list's rendered height across a couple of
+    # animation frames after the click and require it never touches zero.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    trace = page.evaluate("""() => new Promise(res => {
+      const H = () => Math.round(document.getElementById('move-list').getBoundingClientRect().height);
+      const seen = [];
+      const t0 = performance.now();
+      const tick = () => { seen.push(H());
+        if (performance.now() - t0 < 1200) requestAnimationFrame(tick); else res(seen); };
+      document.querySelector('#move-list section[data-group=optimal] li').click();
+      tick();
+    })""")
+    assert min(trace) > 0, f"the move list collapsed to zero during the move: {trace[:8]}"
+
+
 def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # Syzygy's structural win, without its 310px cap: a long move list must
     # never drag the board off screen. No sticky headers, no scroll sync --
@@ -349,15 +688,21 @@ def test_the_board_stays_put_while_the_answer_scrolls(page, server):
     # whole column -- see the C2 comment in app.css) onto .board-pin, the
     # inner wrapper around #board and .palette that is still only as tall as
     # its own content. So this now asserts on .board-pin, not .board-col.
+    #
+    # Task 4: this used to scroll by a fixed 600px and assert the pin held
+    # near the top -- reliable back when the Slower group's 25 full rows
+    # made .side (and so the stretched .board-col/.rail containing it) far
+    # taller than the board, giving roughly 2000px of travel room. Chips
+    # collapsed that margin to zero on THREE_GROUPS (see _sticky_is_wired's
+    # docstring for the live measurement), so a scroll-and-measure assertion
+    # can no longer distinguish "sticky is wired" from "there is nothing to
+    # prove it with either way" on this position. Assert the structural
+    # preconditions instead.
     page.set_viewport_size({"width": 1280, "height": 700})
-    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")   # 28 moves: taller than the viewport
+    page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
     page.wait_for_selector("#move-list li")
-    page.mouse.wheel(0, 600)
-    page.wait_for_function("() => window.scrollY > 100")
-    top_after = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
-    # Without sticky this is around -500 (scrolled off the top). With it, the
-    # column parks at --s3 from the viewport top and stays there.
-    assert top_after >= 0, f"the board column scrolled out of view (top={top_after})"
+    wired = _sticky_is_wired(page)
+    assert wired["ok"], wired["why"]
     # Above the breakpoint #panel-explorer is a grid. grid-template-columns
     # computes to "none" when the element is not a grid and to resolved track
     # sizes when it is, so this pins the media query itself rather than a side
@@ -375,7 +720,7 @@ def test_below_the_breakpoint_the_columns_stack_and_nothing_is_hidden(page, serv
     side = page.eval_on_selector(".side", "e => e.getBoundingClientRect()")
     assert side["top"] >= board["bottom"] - 1, "columns did not stack"
     # Nothing is hidden on a small screen -- hiding controls is a support burden.
-    for sel in ("#palette", "#fen-form", "#move-list", "#btn-export-pgn"):
+    for sel in ("#tray-white", "#fen-form", "#move-list", "#btn-export-pgn"):
         assert page.is_visible(sel), f"{sel} disappeared at 420px"
     # And the page never scrolls sideways.
     assert page.evaluate(
@@ -401,57 +746,48 @@ def test_reference_material_appears_only_on_the_landing_position(page, server):
     assert not page.is_visible("#explorer-help")
 
 
-def test_theme_toggle_cycles_all_three_states_and_persists(page, server):
+def test_there_is_no_colour_theme_control_and_no_theme_attribute(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    assert page.get_attribute("#theme-toggle", "data-mode") == "system"
-    assert page.evaluate(
-        "document.documentElement.hasAttribute('data-theme')") is False
-    assert page.inner_text("#theme-toggle") == "Theme: system"
-
-    page.click("#theme-toggle")
-    assert page.get_attribute("html", "data-theme") == "light"
-    page.click("#theme-toggle")
-    assert page.get_attribute("html", "data-theme") == "dark"
-    assert page.inner_text("#theme-toggle") == "Theme: dark"
-
-    # The choice survives a reload -- and is applied before first paint, so
-    # a dark-mode user never gets a white flash.
-    page.reload()
-    page.wait_for_selector("#move-list li")
-    assert page.get_attribute("html", "data-theme") == "dark"
-
-    page.click("#theme-toggle")   # back round to system
-    assert page.evaluate(
-        "document.documentElement.hasAttribute('data-theme')") is False
+    assert page.eval_on_selector_all("#theme-toggle", "e => e.length") == 0
+    assert page.evaluate("document.documentElement.getAttribute('data-theme')") is None
 
 
-def test_an_explicit_light_choice_beats_a_dark_operating_system(browser, server):
-    # The three-state point: prefers-color-scheme is the DEFAULT, not the
-    # authority. If the media query were unguarded, a dark OS would win and
-    # the light setting would do nothing.
-    ctx = browser.new_context(color_scheme="dark")
-    pg = ctx.new_page()
-    pg.goto(server)
-    pg.wait_for_selector("#move-list li")
-    dark_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
-    pg.click("#theme-toggle")   # -> light
-    assert pg.get_attribute("html", "data-theme") == "light"
-    light_bg = pg.eval_on_selector("body", "e => getComputedStyle(e).backgroundColor")
-    assert light_bg != dark_bg, "explicit light did not override the dark OS"
-    ctx.close()
-
-
-def test_the_theme_toggle_is_not_treated_as_a_panel_button(page, server):
-    # panels.js binds EVERY `nav button` as a panel switch and reads
-    # btn.dataset.panel. A stray button inside <nav> would call
-    # showPanel(undefined) on click and hide all three panels at once -- a
-    # failure that looks like a blank page and has no other test guarding it.
+def test_the_title_is_the_most_prominent_text_in_the_header(page, server):
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    assert page.eval_on_selector("#theme-toggle", "e => e.closest('nav') === null")
-    page.click("#theme-toggle")
-    assert page.is_visible("#panel-explorer")
+    title = page.eval_on_selector("header h1", "e => parseFloat(getComputedStyle(e).fontSize)")
+    tagline = page.eval_on_selector(".tagline", "e => parseFloat(getComputedStyle(e).fontSize)")
+    nav = page.eval_on_selector("nav button", "e => parseFloat(getComputedStyle(e).fontSize)")
+    assert title >= tagline * 1.6, f"title {title}px vs tagline {tagline}px"
+    assert title > nav, f"title {title}px vs nav {nav}px"
+
+
+def test_the_footer_renders_with_marked_placeholders(page, server):
+    page.goto(server)
+    page.wait_for_selector("footer")
+    assert page.is_visible("footer")
+    # Placeholder links are marked so none ships as a live-looking dead link.
+    holders = page.eval_on_selector_all("footer a[data-placeholder]", "e => e.length")
+    assert holders >= 3, f"only {holders} marked placeholders"
+
+
+def test_the_drag_ghost_has_no_background_and_is_smaller_than_the_tray(page, server):
+    page.goto(server)
+    page.wait_for_selector("#tray-white button")
+    box = page.locator("#tray-white button[data-piece=wq]").bounding_box()
+    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(box["x"] + 120, box["y"] - 60, steps=6)
+    ghost = page.eval_on_selector(".drag-ghost", """e => {
+      const s = getComputedStyle(e);
+      return {bg: s.backgroundColor, border: s.borderTopWidth,
+              w: e.getBoundingClientRect().width};
+    }""")
+    page.mouse.up()
+    assert ghost["bg"] in ("rgba(0, 0, 0, 0)", "transparent"), ghost["bg"]
+    assert ghost["border"] == "0px", ghost["border"]
+    assert ghost["w"] < box["width"], f"ghost {ghost['w']} >= tray {box['width']}"
 
 
 def test_search_results_are_numbered_and_open_in_the_explorer(page, server):
@@ -532,26 +868,91 @@ def test_the_board_stays_put_while_the_readout_scrolls(page, server):
     # on any ancestor would create a scroll container and silently kill that
     # -- an easy thing to add while clipping surfaces to a border radius, and
     # invisible to every other test.
+    #
+    # Task 4: this used to scroll by a fixed 400px and assert #board's top
+    # moved by less than the raw scroll (sticking) and stayed on screen.
+    # Measured live (2026-08-13, fine 4px scan of scrollY 0..200 on this
+    # exact fen/viewport): .board-pin's top decreases in EXACT lockstep with
+    # scrollY the entire way -- no plateau anywhere -- because collapsing the
+    # Slower group to chips removed .board-pin's containing block's entire
+    # travel room on THREE_GROUPS (see _sticky_is_wired's docstring). There
+    # is no scroll amount, fixed or computed, that lands #board near the top:
+    # scrolling by 400px (the old fixed amount) puts it at top=-222.6, and
+    # the same monotonic slope holds at every point tried. A scroll-and-
+    # measure assertion cannot distinguish "sticky is wired" from "there is
+    # nothing to prove it with either way" on this position -- the same
+    # finding the sibling test
+    # (test_the_board_stays_put_while_the_answer_scrolls) already acted on.
+    # Assert the structural preconditions instead, via the same helper.
     page.set_viewport_size({"width": 1280, "height": 700})
     page.goto(f"{server}/#fen={quote(THREE_GROUPS)}")
     page.wait_for_selector("#move-list li")
-    before = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
+    wired = _sticky_is_wired(page)
+    assert wired["ok"], wired["why"]
+    # #board sits inside .board-pin at a fixed internal offset that scrolling
+    # must never disturb, independent of whether the pin itself has room to
+    # stick on this particular position -- if this ever moves, #board and
+    # .board-pin have come apart (e.g. #board gained its own margin/position)
+    # even though the pin's own sticky wiring is untouched.
+    offset = page.evaluate("""() => {
+      const pin = document.querySelector('.board-pin');
+      const board = document.getElementById('board');
+      return board.getBoundingClientRect().top - pin.getBoundingClientRect().top;
+    }""")
     page.evaluate("window.scrollBy(0, 400)")
     page.wait_for_timeout(100)
-    after = page.eval_on_selector("#board", "e => e.getBoundingClientRect().top")
-    assert after > before - 400 + 50, "the board scrolled away instead of sticking"
-    assert after >= -1, "the board is above the viewport"
+    offset_after = page.evaluate("""() => {
+      const pin = document.querySelector('.board-pin');
+      const board = document.getElementById('board');
+      return board.getBoundingClientRect().top - pin.getBoundingClientRect().top;
+    }""")
+    assert abs(offset_after - offset) < 1, (
+        "#board's offset inside .board-pin shifted while scrolling "
+        f"({offset} -> {offset_after})")
+
+
+def test_the_board_actually_sticks_when_the_page_scrolls(page, server):
+    # M5. The earlier structural-only checks passed even with `top` removed,
+    # which disables sticky entirely. .board-col's own height minus
+    # .board-pin's height leaves ~101.7px of slack on the landing position at
+    # 900px, so sticky is doing real work here and this can assert the real
+    # behaviour rather than the CSS declaration.
+    #
+    # That slack is room at the BOTTOM of the sticky range, not the amount of
+    # scroll needed to REACH it -- a distinction the review's own first draft
+    # of this test missed (scrolling by a bare 100px and expecting the pin to
+    # have mostly stopped moving already). Measured live on this fixture
+    # (2026-08-13, 900x700): .rail's 16px padding-top plus the header/nav
+    # above .board-col put the pin's resting top at ~154px, so the page must
+    # scroll ~138px before the pin reaches the sticky offset (var(--s3),
+    # 16px) at all; below that it tracks the scroll 1:1, which is correct,
+    # not broken. The stuck plateau (top pinned at exactly 16px) runs from
+    # scroll≈138 to scroll≈205 before .board-col's bottom edge starts pushing
+    # the pin off again. Scroll well inside that plateau -- with margin on
+    # both sides so this cannot flake on the boundary -- and prove the pin
+    # has actually stopped moving across a further scroll delta, which no
+    # amount of scrolling below the engagement point could show.
+    page.set_viewport_size({"width": 900, "height": 700})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    page.evaluate("window.scrollBy(0, 170)")
+    page.wait_for_timeout(120)
+    mid = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
+    page.evaluate("window.scrollBy(0, 25)")
+    page.wait_for_timeout(120)
+    after = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
+    assert abs(after - mid) < 1, (
+        f"the pin kept moving with the page ({mid:.1f} -> {after:.1f}); sticky is inert")
 
 
 def test_the_explorer_shows_the_table_this_position_came_from(page, server):
     page.goto(server)
-    page.wait_for_selector("#table-stats .stats-head")
-    assert "KQvk" in page.inner_text("#table-stats .stats-head")
-    # its own ids, so the Materials panel's charts stay uniquely selectable
-    assert page.eval_on_selector_all("#tbl-dtm-hist", "e => e.length") == 1
-    assert page.eval_on_selector_all("#dtm-hist", "e => e.length") == 0
-    # and no sample list -- the explorer already is a position
-    assert page.eval_on_selector_all("#tbl-material-samples", "e => e.length") == 0
+    page.wait_for_selector("#table-stats .table-line")
+    assert "KQvk" in page.inner_text("#table-stats .table-line")
+    # the band is a one-line summary, not a second copy of Materials' charts --
+    # those live one click away, via #btn-open-material
+    assert page.eval_on_selector_all("#table-stats .hist", "e => e.length") == 0
+    assert page.eval_on_selector_all("#table-stats .tiles", "e => e.length") == 0
 
 
 def test_the_table_band_refetches_only_when_the_material_actually_changes(page, server):
@@ -569,8 +970,8 @@ def test_the_table_band_refetches_only_when_the_material_actually_changes(page, 
     # 2026-08-12: material "KQvk" before, "Kvk" after.
     capture_fen = "K7/8/8/8/8/8/6k1/6Q1 b - - 0 1"
     page.goto(f"{server}/#fen={quote(capture_fen)}")
-    page.wait_for_selector("#table-stats .stats-head")
-    assert "KQvk" in page.inner_text("#table-stats .stats-head")
+    page.wait_for_selector("#table-stats .table-line")
+    assert "KQvk" in page.inner_text("#table-stats .table-line")
 
     # Match /v1/materials/<name>/stats only. A bare "/stats" would also match
     # the corpus aggregate, which initMaterials() requests on load -- an async
@@ -606,7 +1007,7 @@ def test_the_table_band_refetches_only_when_the_material_actually_changes(page, 
 
 def test_the_table_band_opens_the_material(page, server):
     page.goto(server)
-    page.wait_for_selector("#table-stats .stats-head")
+    page.wait_for_selector("#table-stats .table-line")
     page.click("#btn-open-material")
     page.wait_for_selector("#panel-materials:not([hidden])")
     assert page.get_attribute(
@@ -854,18 +1255,28 @@ def test_the_search_rail_matches_the_readout_height(page, server):
 
 
 def test_dragging_a_piece_from_the_palette_places_it(page, server):
+    # Dropping onto h7 overwrites the landing position's black king rather
+    # than adding a piece: the fixture only ever generates KPvk, whose
+    # closure is KBvk, KNvk, KPvk, KQvk, KRvk, Kvk, so a drop that ADDED a
+    # rook alongside the existing queen would land on KQRvk -- a material
+    # the fixture never generated -- and 404 instead of ever showing "dtm".
+    # Overwriting the king instead exercises kingProblem's no-request short
+    # circuit, which answers instantly and deterministically, and still
+    # proves the point: the drop evaluates on its own, with nothing clicked
+    # first.
     page.goto(server)
     page.wait_for_selector("#move-list li")
-    src = page.locator("#palette-pieces button[data-piece=wr]")
-    dst = page.locator("#board rect[data-square=d4]")
+    src = page.locator("#tray-white button[data-piece=wr]")
+    dst = page.locator("#board rect[data-square=h7]")
     src.drag_to(dst)
     page.wait_for_function(
         "document.getElementById('fen-input').value.split(' ')[0].includes('R')")
     placement = page.input_value("#fen-input").split()[0]
-    assert placement.split("/")[4].startswith("3R"), placement
-    # a drag enters edit mode, so the previous position's value is retired
-    assert "dtm" not in page.inner_text("#position-summary")
-    assert page.is_visible("#btn-done-editing")
+    assert placement.split("/")[1] == "7R", placement
+    # a drop evaluates immediately: no arming, no separate Done step
+    page.wait_for_function(
+        "() => document.getElementById('position-summary').textContent.includes('king')")
+    assert page.is_hidden("#error-banner")
 
 
 def _drag_piece_off_the_board(page, square):
@@ -874,7 +1285,7 @@ def _drag_piece_off_the_board(page, square):
     Right of the board's right edge, at the same y. Straight down (as a naive
     brief once had it) can land below the fixture's 1280x720 viewport, where
     mouse events never dispatch; beside the board stays inside the viewport in
-    every layout. The caller must already be in Arrange mode.
+    every layout.
     """
     box = page.locator(f"#board rect[data-square={square}]").bounding_box()
     board_box = page.locator("#board").bounding_box()
@@ -887,45 +1298,13 @@ def _drag_piece_off_the_board(page, square):
     page.mouse.up()
 
 
-# The verdict line setArmed() writes when an edit session opens. It is not an
-# evaluation: the tests below have to see the summary move OFF it, because a
-# bare "the summary says something" wait is satisfied by this text the instant
-# edit mode is entered -- which is how the old Done test passed with the whole
-# commit path deleted.
-EDITING = "editing"
-
-# The landing position is KQvk (white Kf6+Qg1, black Kh7) and the UI fixture
-# generates KQvk and nothing else, so any edit that ends outside that material
-# ends on a 404 banner instead of an evaluation. Dropping a second white queen
-# on d4 and then dragging the original off g1 stays in KQvk the whole way out:
-# the end state is 8/7k/5K2/8/3Q4/8/8/8 b - - 0 1, which the table answers
-# with dtm 2 / 1 optimal line (verified against helpmate.Tablebase.probe).
-EDITED_PLACEMENT = "8/7k/5K2/8/3Q4/8/8/8"
-
-
-def _edit_queen_to_d4(page):
-    page.locator("#palette-pieces button[data-piece=wq]").drag_to(
-        page.locator("#board rect[data-square=d4]"))
-    page.wait_for_function(
-        "document.getElementById('fen-input').value.split('/')[4].startsWith('3Q')")
-    page.click("#btn-arrange")            # arrange mode: drag, don't place
-    _drag_piece_off_the_board(page, "g1")
-    page.wait_for_function(
-        "p => document.getElementById('fen-input').value.split(' ')[0] === p",
-        arg=EDITED_PLACEMENT)
-
-
 def test_dragging_a_piece_off_the_board_removes_it(page, server):
-    # The landing position has a white queen on g1. Enter edit mode, drag it
-    # off the board, and it should be gone.
+    # The landing position has a white queen on g1. Drag it off the board and
+    # it should be gone -- no preparation needed first.
     page.goto(server)
     page.wait_for_selector("#move-list li")
     before = page.input_value("#fen-input")
     assert "Q" in before.split()[0]
-
-    page.click("#btn-arrange")            # arrange mode: drag, don't place
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    assert page.get_attribute("#btn-arrange", "aria-pressed") == "true"
 
     _drag_piece_off_the_board(page, "g1")
 
@@ -934,139 +1313,30 @@ def test_dragging_a_piece_off_the_board_removes_it(page, server):
     assert "Q" not in page.input_value("#fen-input").split()[0]
 
 
-def test_done_evaluates_and_leaves_edit_mode(page, server):
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-
-    page.locator("#palette-pieces button[data-piece=wq]").drag_to(
-        page.locator("#board rect[data-square=d4]"))
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    # The state the old assertion mistook for an answer.
-    assert EDITING in page.inner_text("#position-summary")
-
-    page.click("#btn-arrange")
-    _drag_piece_off_the_board(page, "g1")
-    page.wait_for_function(
-        "p => document.getElementById('fen-input').value.split(' ')[0] === p",
-        arg=EDITED_PLACEMENT)
-
-    page.click("#btn-done-editing")
-
-    # A real evaluation: the move list repopulates and the verdict leaves the
-    # editing text for a distance. Neither happens on the 404 screen a
-    # closure-leaving edit lands on.
-    page.wait_for_selector("#move-list li")
-    summary = page.inner_text("#position-summary")
-    assert EDITING not in summary, summary
-    assert "dtm 2" in summary, summary
-    assert page.is_hidden("#error-banner")
-    assert page.is_hidden("#btn-done-editing")
-    assert page.get_attribute("#btn-arrange", "aria-pressed") == "false"
-
-
-def test_done_puts_the_edited_position_in_the_url_and_back_undoes_it(page, server):
-    # The edit is a position in its own right: index.html and docs/USAGE.md
-    # both promise that a copied link reopens what is on screen, and Back is
-    # the only way out of an edit. commitBoard() compared the committed FEN
-    # against `current`, which every placement path had already advanced to
-    # the edited FEN, so the comparison was always false: nothing reached the
-    # hash, nothing reached the history, and one nav click (panels.js
-    # re-encodes whatever the hash says) put the pre-edit position back.
+def test_a_drag_released_on_the_boards_own_bounds_does_not_delete_the_piece(page, server):
+    # With `style: { borderType: "frame" }` the widget drew a ~20px
+    # coordinate band INSIDE its visible bounds but outside the squares --
+    # elementFromPoint at a drop released there hit that border rect, which
+    # carries no data-square, and cm-chessboard read that as movedOutOfBoard
+    # and deleted the piece, even though the drop looked, to the eye, like it
+    # landed on the board. Switching to borderType "none" (inline
+    # coordinates, pointer-events: none) removes that band: the squares now
+    # tile the board element's full bounds, so any drop inside #board lands
+    # on a square. Release right at the board's own top-left corner -- the
+    # old frame border's coordinate band used to sit exactly there.
     page.goto(server)
     page.wait_for_selector("#move-list li")
     before = page.input_value("#fen-input")
-
-    _edit_queen_to_d4(page)
-    page.click("#btn-done-editing")
-    page.wait_for_selector("#move-list li")
-    edited = page.input_value("#fen-input")
-    assert edited.split(" ")[0] == EDITED_PLACEMENT
-    assert edited != before
-
-    hash_fen = page.evaluate("new URLSearchParams(location.hash.slice(1)).get('fen')")
-    assert hash_fen == edited, "the edited position never reached the URL"
-
-    # A round trip through another panel must not resurrect the pre-edit FEN.
-    page.click("nav button[data-panel=materials]")
-    page.click("nav button[data-panel=explorer]")
-    assert page.input_value("#fen-input") == edited
-
-    # ...and Back returns to what the edit session started from.
-    assert page.is_enabled("#btn-back"), "the edit left no history entry"
-    page.click("#btn-back")
+    assert "Q" in before.split()[0]
+    src = _square_box(page, "g1")
+    board = page.eval_on_selector("#board", "e => e.getBoundingClientRect()")
+    page.mouse.move(src["x"] + src["width"] / 2, src["y"] + src["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(board["x"] + 1, board["y"] + 1, steps=10)
+    page.mouse.up()
     page.wait_for_function(
-        "f => document.getElementById('fen-input').value === f", arg=before)
-    assert page.evaluate(
-        "new URLSearchParams(location.hash.slice(1)).get('fen')") == before
-
-
-def test_arming_and_disarming_without_editing_pushes_no_history(page, server):
-    # The other half of the same comparison: opening an edit session and
-    # closing it again without touching a square must not spend a request or
-    # leave a duplicate entry for Back to walk through.
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-    before = page.input_value("#fen-input")
-    assert page.get_attribute("#btn-back", "disabled") is not None
-
-    page.click("#palette-pieces button[data-piece=wq]")
-    page.wait_for_selector("#btn-done-editing:not([hidden])")
-    page.click("#btn-done-editing")
-    page.wait_for_selector("#move-list li")
-
-    assert page.input_value("#fen-input") == before
-    assert page.get_attribute("#btn-back", "disabled") is not None, \
-        "an edit that changed nothing pushed a history entry"
-
-
-def test_a_cancelled_drag_does_not_swallow_the_next_tap(page, server):
-    # Fix round 1 (code review): pointerup and pointercancel shared one `up`
-    # handler, which unconditionally set btn.dataset.dragged = "1" to
-    # suppress the click that follows a completed drag. But a pointercancel
-    # never produces a click (per spec), so that flag had no click left to
-    # consume it -- it stayed stuck until some LATER click silently ate
-    # itself clearing it, meaning the user's very next tap on that button
-    # after any cancelled drag did nothing at all.
-    #
-    # touchCancel via CDP is the same signature Step 10's hand check saw on
-    # a real touchscreen (pointerdown, pointermove, pointercancel, no
-    # pointerup) -- the browser's scroll-vs-drag heuristic reclaiming the
-    # gesture -- but dispatched deterministically rather than relying on
-    # that heuristic to fire.
-    page.goto(server)
-    page.wait_for_selector("#move-list li")
-
-    box = page.locator("#palette-pieces button[data-piece=wr]").bounding_box()
-    cx, cy = box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
-
-    cdp = page.context.new_cdp_session(page)
-
-    def touch_point(x, y):
-        return [{"x": x, "y": y, "radiusX": 5, "radiusY": 5, "force": 1}]
-
-    cdp.send("Input.dispatchTouchEvent", {
-        "type": "touchStart", "touchPoints": touch_point(cx, cy)})
-    cdp.send("Input.dispatchTouchEvent", {
-        "type": "touchMove", "touchPoints": touch_point(cx + 30, cy + 30)})
-    cdp.send("Input.dispatchTouchEvent", {"type": "touchCancel", "touchPoints": []})
-    page.wait_for_timeout(150)
-
-    # The move past the threshold armed wr before the cancel arrived --
-    # that part is unaffected by this bug.
-    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true"
-
-    # Return to the unarmed state through a DIFFERENT control -- Erase has
-    # no drag handling of its own, so this can't itself be the tap that
-    # clears a stuck flag on wr's button.
-    page.click("#btn-erase")
-    page.click("#btn-erase")
-    assert page.get_attribute("#btn-erase", "aria-pressed") == "false"
-    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "false"
-
-    # The tap that a stuck dataset.dragged flag would silently swallow.
-    page.click("#palette-pieces button[data-piece=wr]")
-    assert page.get_attribute("#palette-pieces button[data-piece=wr]", "aria-pressed") == "true", \
-        "the tap after a cancelled drag was silently swallowed"
+        "before => document.getElementById('fen-input').value !== before", arg=before)
+    assert "Q" in page.input_value("#fen-input").split()[0]
 
 
 def test_filtering_an_empty_corpus_does_not_throw(page, empty_server):
@@ -1128,7 +1398,7 @@ def test_a_superseded_band_response_does_not_hide_the_current_band(page, server)
 
     # Move to a Kvk position; its band answers immediately.
     page.fill("#fen-input", "8/8/8/8/8/4k3/8/4K3 w - - 0 1")
-    page.click("#fen-form button[type=submit]")
+    page.press("#fen-input", "Enter")
     page.wait_for_function(
         "document.getElementById('table-stats').dataset.material === 'Kvk'")
     page.wait_for_selector("#table-stats:not([hidden])")
@@ -1165,3 +1435,469 @@ def test_the_explorer_rail_has_no_rounded_corner_mid_panel(page, server):
     page.wait_for_function("document.getElementById('table-stats').hidden === true")
     top2, bottom2 = page.eval_on_selector("#panel-explorer .rail", radii)
     assert bottom2 == top2, f"the rail is the panel's bottom but is not rounded: {bottom2}"
+
+
+def test_the_explorer_table_band_is_one_line_with_no_histogram(page, server):
+    page.goto(server)
+    # #table-stats-body is in the static tree and holds "Loading…" while the
+    # request is in flight, so waiting on it resolved before the band had any
+    # real content -- and the height assertion below then measured the
+    # placeholder. Wait for the rendered line itself, the same idiom
+    # test_the_explorer_shows_the_table_this_position_came_from uses.
+    page.wait_for_selector("#table-stats .table-line")
+    assert "KQvk" in page.inner_text("#table-stats")
+    # the histograms live on Materials, one click away
+    assert page.eval_on_selector_all("#table-stats .hist", "e => e.length") == 0
+    assert page.eval_on_selector_all("#table-stats .tiles", "e => e.length") == 0
+    h = page.eval_on_selector("#table-stats", "e => e.getBoundingClientRect().height")
+    assert h < 120, f"the band is {h:.0f}px tall"
+
+
+def test_actionable_controls_are_weighted(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    for sel in ("#btn-flip", "#btn-clear-board", "#btn-back", "#btn-export-pgn"):
+        w = page.eval_on_selector(sel, "e => getComputedStyle(e).fontWeight")
+        assert int(w) >= 600, f"{sel} is weight {w}"
+    # inert text is not
+    w = page.eval_on_selector("#position-summary", "e => getComputedStyle(e).fontWeight")
+    assert int(w) < 600, f"the verdict is weight {w}"
+
+
+def test_the_themes_screen_explains_every_motif_the_build_detects(page, server):
+    page.goto(f"{server}/#panel=themes")
+    page.wait_for_selector("#themes-doc .theme-entry")
+    names = page.eval_on_selector_all("#themes-doc .theme-entry h3",
+                                      "els => els.map(e => e.textContent.trim())")
+    api = page.evaluate("""async () => (await (await fetch('/v1/themes')).json())
+                             .themes.map(t => t.name)""")
+    # Set equality, not a literal list: a motif the build detects but this
+    # screen has no named group for must still render (in "other"), so
+    # asserting against the live API is the only version of this check that
+    # can catch a motif silently dropped.
+    assert sorted(names) == sorted(api), f"{len(names)} documented vs {len(api)} detected"
+    # every entry says what it reads, because that decides whether it can
+    # answer on a saturated position
+    needs = page.eval_on_selector_all("#themes-doc .theme-needs", "e => e.length")
+    assert needs == len(api)
+
+
+def test_an_unknown_motif_with_colour_variants_lands_in_other_exactly_once(page, server):
+    # The "other" group is this screen's whole reason for existing: a motif
+    # the build detects that no hand-written group here names must still
+    # appear, with no edit to themes-doc.js. It broke in exactly the shape
+    # the registry already ships -- a base motif WITH colour variants.
+    # renderGroup snapshotted its member list before the loop and never
+    # re-checked it against `placed`, so `pin` correctly nested pin:white and
+    # pin:black inside itself and then the snapshot rendered both AGAIN as
+    # top-level entries. Task 6a's proof injected a single variant-less motif
+    # and could not see it. This one injects the real shape.
+    injected = [
+        {"name": "pin", "doc": "a made-up motif, for this test only.", "needs": "position"},
+        {"name": "pin:white", "doc": "the white-side variant.", "needs": "position"},
+        {"name": "pin:black", "doc": "the black-side variant.", "needs": "position"},
+    ]
+
+    def with_injection(route):
+        body = json.loads(route.fetch().text())
+        body["themes"] = body["themes"] + injected
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(body))
+
+    page.route("**/v1/themes", with_injection)
+    page.goto(f"{server}/#panel=themes")
+    page.wait_for_selector("#themes-doc .theme-entry[data-theme=pin]")
+
+    names = page.eval_on_selector_all("#themes-doc .theme-entry h3",
+                                      "els => els.map(e => e.textContent.trim())")
+    for name in ("pin", "pin:white", "pin:black"):
+        assert names.count(name) == 1, f"{name} rendered {names.count(name)} times: {names}"
+
+    # ...and the variants are nested under their base, not siblings of it.
+    nested = page.eval_on_selector_all(
+        "#themes-doc .theme-entry[data-theme=pin] .theme-variants .theme-entry",
+        "els => els.map(e => e.dataset.theme)")
+    assert sorted(nested) == ["pin:black", "pin:white"], nested
+
+    # The whole injected set still appears exactly once each overall, so this
+    # cannot pass by dropping an entry instead of de-duplicating it.
+    api = page.evaluate("""async () => (await (await fetch('/v1/themes')).json())
+                             .themes.map(t => t.name)""")
+    assert sorted(names) == sorted(api), f"{len(names)} documented vs {len(api)} detected"
+
+
+PUZZLE_URL = "/#panel=puzzles"
+
+# The `server` fixture's `tables` only generate the KPvk closure (KQvk, KRvk,
+# KBvk, KNvk, KPvk, Kvk -- see conftest.py) for speed, while the real
+# puzzles.epd Task 4 shipped spans materials well outside it entirely (up to
+# 6-man combinations like KBvkqrn, verified by inspection: zero overlap with
+# the closure) -- every one of those 404s against this fixture, whichever ten
+# pickSession happened to draw. So the set served here is mined out of THAT
+# closure instead, and what these tests exercise is the puzzle screen's own
+# grading logic rather than whether a speed-oriented fixture happens to have
+# generated the right table.
+#
+# Eleven entries across ten distinct (dtm, piece-count) rungs, which is what
+# makes the draw both non-trivial and deterministic:
+#
+#   * eleven is MORE than SESSION_SIZE, so pickSession does not return early
+#     at `sorted.length <= n`. The previous set was exactly ten identical
+#     puzzles, which took that early return every time -- the banding
+#     arithmetic below it was never reached from a browser at all.
+#   * ten rungs against ten slots means bandRanges cuts exactly one rung per
+#     band, so slot i is rung i for every i and the only randomness left is
+#     WHICH of the two dtm-13 positions fills the last slot.
+#
+# So puzzle 1 is always the dtm-4 position: a FOUR-ply line, hence two move
+# rows rather than one, and a solve that actually reaches
+# `plyIndex >= solutionSan.length`. Every (dtm, FEN) pair below was mined out
+# of a freshly generated KPvk closure and its line length re-checked against
+# it, 2026-08-13.
+_PUZZLE_SET = [
+    (4,  "8/8/8/8/8/k7/8/1K2Q3 b - -"),      # KQvk -- line: Ka4 Kc2 Ka3 Qa5#
+    (5,  "8/8/8/8/8/8/6Q1/K1k5 w - -"),      # KQvk
+    (6,  "8/8/8/8/Q7/8/8/K1k5 b - -"),       # KQvk
+    (7,  "8/8/8/8/8/8/2Q5/K6k w - -"),       # KQvk
+    (8,  "8/8/8/8/8/6k1/5Q2/K7 b - -"),      # KQvk
+    (9,  "8/8/7k/5Q2/8/8/1K6/8 w - -"),      # KQvk
+    (10, "8/8/7k/6Q1/8/8/1K6/8 b - -"),      # KQvk
+    (11, "8/7k/8/6Q1/8/8/8/K7 w - -"),       # KQvk
+    (12, "8/8/7k/6Q1/8/8/8/K7 b - -"),       # KQvk
+    (13, "6k1/8/8/8/8/8/4P3/2K5 w - -"),     # KPvk -- the doubled rung, so the
+    (13, "8/8/7k/8/8/K7/P7/8 w - -"),        # only random slot is the last one
+]
+
+# EPD carries no clocks; parseEpd appends the two the rest of the app expects.
+FIRST_PUZZLE_FEN = _PUZZLE_SET[0][1] + " 0 1"
+
+
+def _mock_puzzle_set(page, count=len(_PUZZLE_SET)):
+    body = "".join(f'{fen} ; hm {dtm} ; id "p{i}"\n'
+                   for i, (dtm, fen) in enumerate(_PUZZLE_SET[:count]))
+    page.route("**/puzzles.epd", lambda route: route.fulfill(
+        status=200, content_type="text/plain", body=body))
+
+
+# /v1/line answers in SAN only, so a ply's uci is recovered the same way the
+# screen recovers it: match that SAN against /v1/moves for the position
+# reached so far. Run in the page so it uses the page's own origin.
+_RESOLVE_LINE = """async (fen) => {
+  const get = async (path, f) =>
+    (await (await fetch(path + '?fen=' + encodeURIComponent(f))).json());
+  const line = (await get('/v1/line', fen)).lines[0];
+  const out = [];
+  let cur = fen;
+  for (const san of line) {
+    const m = (await get('/v1/moves', cur)).moves.find((x) => x.san === san);
+    out.push({ uci: m.uci, san });
+    cur = m.fen;
+  }
+  return out;
+}"""
+
+# A LEGAL move that is not the expected one. That is the only wrong move the
+# UI can produce: enableBoardInput rejects an illegal drag at
+# `candidates.length === 0`, well before judge() is reached, so driving an
+# illegal uci through the test hook graded a state the screen cannot reach.
+_LEGAL_BUT_UNEXPECTED = """async (fen) => {
+  const get = async (path, f) =>
+    (await (await fetch(path + '?fen=' + encodeURIComponent(f))).json());
+  const expected = (await get('/v1/line', fen)).lines[0][0];
+  return (await get('/v1/moves', fen)).moves.find((m) => m.san !== expected).uci;
+}"""
+
+
+def _revealed(page):
+    return page.eval_on_selector("#puzzle-line", "e => e.classList.contains('revealed')")
+
+
+def test_a_puzzle_screen_opens_with_a_prompt_and_a_board(page, server):
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    prompt = page.inner_text("#puzzle-prompt")
+    assert "h#" in prompt
+    assert "1 of 10" in page.inner_text("#puzzle-progress")
+
+
+def test_playing_the_whole_line_marks_every_ply_and_reports_it_solved(page, server):
+    # The screen's entire point, and it had no coverage: the previous version
+    # of this test clicked "Show solution" and asserted a span was non-empty,
+    # which reveal() alone satisfies. judge()'s success branch and
+    # afterJudge()'s success half could both be deleted whole and it passed;
+    # finishPuzzle() and #puzzle-solved were never reached at all. So: play
+    # every ply of a real line through the same grading path a drag uses.
+    # A single-puzzle session so that finishing it also ends the session --
+    # closing state (solved++) gets asserted below via the summary, which
+    # `finishPuzzle()` alone does not touch.
+    _mock_puzzle_set(page, count=1)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    plies = page.evaluate(_RESOLVE_LINE, FIRST_PUZZLE_FEN)
+
+    assert len(plies) == 4, plies
+    # four plies pair into two move rows -- a multi-row line, which a set of
+    # 2-ply puzzles never produced
+    assert page.eval_on_selector_all("#puzzle-line .move-row", "e => e.length") == 2
+    assert page.eval_on_selector_all("#puzzle-line .ply", "e => e.length") == 4
+    assert page.is_hidden("#puzzle-solved")
+
+    for i, ply in enumerate(plies):
+        page.evaluate("u => window.__puzzlePlay(u)", ply["uci"])
+        page.wait_for_selector(f"#puzzle-line .ply[data-ply='{i}'].correct")
+        assert page.eval_on_selector(
+            f"#puzzle-line .ply[data-ply='{i}']", "e => e.textContent.trim()") == ply["san"]
+
+    assert page.eval_on_selector_all("#puzzle-line .ply.correct", "e => e.length") == 4
+    assert page.eval_on_selector_all("#puzzle-line .ply.wrong", "e => e.length") == 0
+    # graded, not revealed -- reveal() would also have filled every cell
+    assert not _revealed(page), "the line was revealed, not solved"
+    assert page.is_hidden("#puzzle-correction")
+
+    page.wait_for_selector("#puzzle-solved:not([hidden])")
+    assert "Solved" in page.inner_text("#puzzle-solved")
+    assert plies[-1]["san"].endswith("#"), plies[-1]
+
+    # finishPuzzle()'s solved++ has to actually land somewhere observable:
+    # ending the (single-puzzle) session must report one solved, not zero.
+    page.click("#btn-puzzle-next")
+    page.wait_for_function(
+        "() => document.getElementById('puzzle-progress').textContent.includes('complete')")
+    assert "1 of 1 solved" in page.inner_text("#puzzle-progress")
+    assert "Nice work" in page.inner_text("#puzzle-prompt")
+
+
+def test_a_legal_but_unexpected_move_is_marked_wrong_and_does_not_advance(page, server):
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    wrong = page.evaluate(_LEGAL_BUT_UNEXPECTED, FIRST_PUZZLE_FEN)
+    assert len(wrong) == 4, wrong
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
+    page.wait_for_selector("#puzzle-line .ply.wrong")
+    assert page.eval_on_selector_all("#puzzle-line .ply.wrong", "e => e.length") == 1
+    assert page.eval_on_selector("#puzzle-line .ply.wrong", "e => e.dataset.ply") == "0"
+    assert page.is_visible("#puzzle-correction")
+
+    plies = page.evaluate(_RESOLVE_LINE, FIRST_PUZZLE_FEN)
+    assert page.inner_text("#puzzle-correction") == f"Correct move: {plies[0]['san']}"
+    # the ply the player still owes is ungraded, and the position is untouched:
+    # playing it now is accepted as ply 0
+    assert page.eval_on_selector_all("#puzzle-line .ply.correct", "e => e.length") == 0
+    page.evaluate("u => window.__puzzlePlay(u)", plies[0]["uci"])
+    page.wait_for_selector("#puzzle-line .ply[data-ply='0'].correct")
+
+
+def test_a_legal_but_unexpected_drag_snaps_the_piece_back(page, server):
+    # validateMoveInput returns judge()'s answer, so a wrong move must be
+    # REJECTED as a drag -- the piece returns to its square and the board
+    # still shows the position the player has to solve.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    wrong = page.evaluate(_LEGAL_BUT_UNEXPECTED, FIRST_PUZZLE_FEN)
+    frm, to = wrong[:2], wrong[2:4]
+
+    a = page.locator(f"#puzzle-board rect[data-square={frm}]").bounding_box()
+    b = page.locator(f"#puzzle-board rect[data-square={to}]").bounding_box()
+    page.mouse.move(a["x"] + a["width"] / 2, a["y"] + a["height"] / 2)
+    page.mouse.down()
+    page.mouse.move(b["x"] + b["width"] / 2, b["y"] + b["height"] / 2, steps=10)
+    page.mouse.up()
+
+    page.wait_for_selector("#puzzle-line .ply.wrong")
+    page.wait_for_timeout(400)      # let cm-chessboard finish animating the piece back
+    occupied = "#puzzle-board g[data-piece][data-square='%s']"
+    assert page.eval_on_selector_all(occupied % frm, "e => e.length") == 1, \
+        "the rejected drag left the origin square empty"
+    assert page.eval_on_selector_all(occupied % to, "e => e.length") == 0, \
+        "the rejected drag was played anyway"
+
+
+def test_the_error_budget_decides_when_the_line_is_revealed(page, server):
+    # A budget DIFFERENT from puzzle.js's own default of 1: setting it to 1
+    # was a no-op, so both a no-op __puzzleSetBudget and `errors > 0` passed.
+    # Both directions are pinned here -- errors inside the budget must NOT
+    # reveal, the first one past it must.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    wrong = page.evaluate(_LEGAL_BUT_UNEXPECTED, FIRST_PUZZLE_FEN)
+    page.evaluate("window.__puzzleSetBudget(2)")
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
+    page.wait_for_selector("#puzzle-line .ply.wrong")
+    assert not _revealed(page), "one error, inside a budget of 2, revealed the line"
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
+    assert not _revealed(page), "two errors, equal to the budget, revealed the line"
+
+    page.evaluate("u => window.__puzzlePlay(u)", wrong)
+    page.wait_for_selector("#puzzle-line.revealed")
+    filled = page.eval_on_selector_all(
+        "#puzzle-line .ply", "els => els.map(e => e.textContent.trim())")
+    assert all(filled), filled
+
+
+def test_a_superseded_puzzles_load_error_does_not_overwrite_the_current_one(page, server):
+    # movesWithRetry's catch was the last exit with no staleness check.
+    # Puzzle 1 sits on a table that is still downloading; the user clicks
+    # "Next puzzle" and puzzle 2 loads fine; then puzzle 1's abandoned
+    # request finally rejects -- /v1/moves answers a failed download with a
+    # real 500 -- and the error overwrote puzzle 2's prompt, naming a
+    # material that is not on the board. Puzzle 1's request is held open in
+    # the page and released by hand, so this is deterministic.
+    _mock_puzzle_set(page)
+    page.add_init_script("""
+      window.__failStaleMoves = null;
+      const orig = window.fetch;
+      let held = false;
+      window.fetch = function (input, init) {
+        if (!held && String(input).includes("/v1/moves")) {
+          held = true;
+          return new Promise((resolve) => {
+            window.__failStaleMoves = () => resolve(new Response(
+              JSON.stringify({error: {code: "internal",
+                                      message: "download of 'KQvk' failed"}}),
+              {status: 500, headers: {"content-type": "application/json"}}));
+          });
+        }
+        return orig.call(window, input, init);
+      };
+    """)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_function("window.__failStaleMoves !== null")
+
+    page.click("#btn-puzzle-next")
+    page.wait_for_selector("#puzzle-line .ply")
+    assert "2 of 10" in page.inner_text("#puzzle-progress")
+    prompt = page.inner_text("#puzzle-prompt")
+
+    page.evaluate("window.__failStaleMoves()")     # puzzle 1's request fails now
+    page.wait_for_timeout(400)
+    assert page.inner_text("#puzzle-prompt") == prompt, \
+        "a superseded puzzle's load error overwrote the puzzle on screen"
+
+
+def _endpoint_hits(urls, path):
+    """Requests to exactly `path`, ignoring anything nested under it.
+
+    "/v1/materials" is a prefix of "/v1/materials/KQvk/stats", so a substring
+    count would report the catalog as fetched every time a material's stats
+    are opened.
+    """
+    return [u for u in urls if urlparse(u).path == path]
+
+
+def test_a_hidden_screen_costs_nothing_at_page_load(page, server):
+    # First paint used to run every screen's init unconditionally: the puzzle
+    # screen fetched puzzles.epd, the material catalog AND a whole puzzle's
+    # /v1/moves -- which, on an install with a remote table chain, answers 202
+    # and STARTS A DOWNLOAD, polled for up to a minute, for a panel nobody has
+    # opened. /v1/materials and /v1/themes were each fetched twice for the
+    # same reason. Every screen's first paint is now deferred to its panel's
+    # first activation.
+    _mock_puzzle_set(page)
+    urls = []
+    page.on("request", lambda r: urls.append(r.url))
+    page.goto(f"{server}/#panel=materials")
+    page.wait_for_function("window.__materialsReady === true")
+    page.wait_for_timeout(300)
+
+    assert _endpoint_hits(urls, "/v1/moves") == [], "a hidden screen probed a position"
+    assert _endpoint_hits(urls, "/puzzles.epd") == [], "a hidden screen fetched the puzzle set"
+    assert len(_endpoint_hits(urls, "/v1/materials")) == 1, "the catalog was fetched twice"
+    assert len(_endpoint_hits(urls, "/v1/themes")) == 1, "the theme registry was fetched twice"
+
+    # ...and opening the panel does pay for it, so the assertions above are
+    # about laziness, not about the screen having quietly stopped working.
+    page.click("nav button[data-panel=puzzles]")
+    page.wait_for_selector("#puzzle-line .ply")
+    assert _endpoint_hits(urls, "/puzzles.epd")
+    assert _endpoint_hits(urls, "/v1/moves")
+
+
+def test_a_deep_link_to_another_screen_shows_no_explorer_error(page, empty_server):
+    # An install with no tables at all -- the first-run state of every public
+    # release. The explorer probed its landing position at page load whatever
+    # panel was active, and #error-banner lives OUTSIDE <main>, so a
+    # "#panel=themes" link painted a red "no table for material 'KQvk'" over a
+    # screen the user never opened.
+    page.goto(f"{empty_server}/#panel=themes")
+    page.wait_for_selector("#themes-doc .theme-entry")
+    assert page.is_hidden("#error-banner"), page.inner_text("#error-banner")
+
+    # The banner is still right where it belongs: on the explorer, which on
+    # this corpus genuinely cannot answer. Without this the assertion above
+    # would also pass if the banner had simply stopped working.
+    page.click("nav button[data-panel=explorer]")
+    page.wait_for_selector("#error-banner:not([hidden])")
+
+
+def test_a_placeholder_footer_link_cannot_navigate(page, server):
+    # `href="#"` is not inert: it CLEARS location.hash, which fires
+    # hashchange, and panels.js reads an empty hash as "explorer" -- so
+    # clicking "Source" mid-puzzle threw the position away and bounced the
+    # user to the explorer.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    before = page.url
+    page.click("footer a[data-placeholder]")
+    page.wait_for_timeout(200)
+    assert page.url == before, "a placeholder link navigated"
+    assert page.is_visible("#panel-puzzles")
+    assert not page.is_visible("#panel-explorer")
+
+
+def test_a_session_nobody_solved_is_not_congratulated(page, server):
+    # "Nice work -- 10 of 10" was printed whatever happened, including to
+    # someone who got every ply wrong. Two puzzles, neither solved.
+    _mock_puzzle_set(page, count=2)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    page.click("#btn-puzzle-next")
+    page.wait_for_selector("#puzzle-line .ply")
+    page.click("#btn-puzzle-next")
+    page.wait_for_function(
+        "() => document.getElementById('puzzle-progress').textContent.includes('complete')")
+    prompt = page.inner_text("#puzzle-prompt")
+    progress = page.inner_text("#puzzle-progress")
+    assert "Nice work" not in prompt, prompt
+    assert "None solved" in prompt, prompt
+    assert "0 of 2 solved" in progress, progress
+
+
+def test_an_installation_with_no_matching_tables_says_so_and_keeps_saying_it(page, empty_server):
+    # No tables at all, and the REAL puzzles.epd (no route mock): every puzzle
+    # in the set is unplayable, so the screen must name what to generate --
+    # and pressing "Next puzzle" must not replace that with a summary of a
+    # session that never ran ("Nice work -- 0 of 0").
+    page.goto(empty_server + PUZZLE_URL)
+    page.wait_for_function(
+        "() => document.getElementById('puzzle-prompt').textContent.includes('helpmate gen')")
+    page.click("#btn-puzzle-next")
+    page.wait_for_timeout(400)
+    prompt = page.inner_text("#puzzle-prompt")
+    assert "Nice work" not in prompt, prompt
+    assert "0 of 0" not in page.inner_text("#puzzle-progress")
+    assert "helpmate gen" in prompt, prompt
+
+    # And the table it names is one of the set's CHEAP closures, not the
+    # alphabetically first name in a sorted list -- which is KBBvkbb, a 6-man
+    # table, recommended to someone who has generated nothing at all.
+    named = re.search(r"helpmate gen (\S+)", prompt).group(1)
+    men = len(named) - 1          # the "v" separates the sides, it is not a piece
+    assert men == 4, f"recommended {named}, a {men}-man table"
+
+
+def test_the_puzzle_feedback_is_announced_to_assistive_tech(page, server):
+    # Correct/wrong/solved is the screen's only feedback, and none of it was
+    # announced: nothing in the static tree carried aria-live or role.
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    for sel in ("#puzzle-correction", "#puzzle-solved"):
+        role = page.get_attribute(sel, "role")
+        assert role == "status", f"{sel} has role {role!r}"

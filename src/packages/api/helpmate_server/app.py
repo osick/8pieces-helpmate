@@ -86,6 +86,43 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             "unknown_material", f"no table for material '{material}'",
             hint=f"generate it with: helpmate gen {material} --tables <dir>"))
 
+    def missing_table(exc: Exception, material: str | None, fen: str) -> JSONResponse:
+        """Answer a MissingTableError with the one of its two meanings that applies.
+
+        The core raises this exception for two unrelated situations (see
+        src/core/probe/tablebase.cpp's value_of/probe):
+
+          * "no table for X" -- X was never generated. That is
+            `unknown_material`, and "generate it" is real advice.
+          * "position not encodable in table for X" -- the table IS loaded and
+            the index simply cannot address this position, which is what an
+            ILLEGAL position looks like from the encoder's side. Two kings
+            placed adjacent is one drag away on the explorer's board, and
+            reporting it as `unknown_material` told the user to generate a
+            table the Materials screen was listing as local at that very
+            moment. Both new screens surface these messages verbatim, so the
+            wrong one is read as-is.
+
+        A "no table for X" naming something that is not a well-formed material
+        (the line walk of an unsolvable position can report a side with no
+        pieces left) falls back to the queried material rather than printing a
+        `helpmate gen` command for a table that cannot exist.
+        """
+        text = str(exc)
+        m = re.match(r"^position not encodable in table for (\S+)", text)
+        if m:
+            return JSONResponse(status_code=400, content=error_json(
+                "unprobeable_position",
+                f"this position cannot be looked up in the '{m.group(1)}' table",
+                hint="the table is present -- the position is not one it stores. "
+                     "An illegal position is the usual cause: check that the two "
+                     "kings are not adjacent and that the side NOT to move is not "
+                     "left in check."))
+        m = re.match(r"^no table for (\S+)", text)
+        if m and _MATERIAL_RE.match(m.group(1)):
+            return unknown(m.group(1))
+        return unknown(material or fen)
+
     def _resolve_or_response(material: str):
         if not _MATERIAL_RE.match(material):
             return None, JSONResponse(status_code=400, content=error_json(
@@ -246,8 +283,8 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                 return resp
             tb = _tb(chain, d)
             res = tb.probe(fen)
-        except helpmate.MissingTableError:
-            return unknown(material or fen)
+        except helpmate.MissingTableError as e:
+            return missing_table(e, material, fen)
         except ValueError as e:
             return JSONResponse(status_code=400,
                                 content=error_json("invalid_fen", str(e)))
@@ -302,13 +339,13 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                             "were detected from the first 100 solutions only, and the "
                             "list may differ between mirror-image representatives of the "
                             "same position.")
-                except helpmate.MissingTableError:
+                except helpmate.MissingTableError as e:
                     # solutions() (which detection forces) calls value_of() on
                     # every legal child move, including captures/promotions
                     # into material this table set doesn't have -- exactly the
                     # partial-table-set case /v1/line and a themes-less
                     # /v1/probe already answer with 404, not 500. Match them.
-                    return unknown(material or fen)
+                    return missing_table(e, material, fen)
                 except ValueError as e:
                     return JSONResponse(status_code=400,
                                         content=error_json("invalid_fen", str(e)))
@@ -324,8 +361,8 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
                 return resp
             tb = _tb(chain, d)
             lines = tb.lines(fen) if all else [tb.line(fen)]
-        except helpmate.MissingTableError:
-            return unknown(material or fen)
+        except helpmate.MissingTableError as e:
+            return missing_table(e, material, fen)
         except ValueError as e:
             return JSONResponse(status_code=400,
                                 content=error_json("invalid_fen", str(e)))
@@ -343,8 +380,8 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
             tb = _tb(chain, d)
             res = tb.probe(fen)
             raw = tb.moves(fen)
-        except helpmate.MissingTableError:
-            return unknown(material or fen)
+        except helpmate.MissingTableError as e:
+            return missing_table(e, material, fen)
         except ValueError as e:
             return JSONResponse(status_code=400,
                                 content=error_json("invalid_fen", str(e)))

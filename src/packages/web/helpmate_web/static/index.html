@@ -7,16 +7,6 @@
 <link rel="stylesheet" href="/css/app.css">
 <link rel="stylesheet" href="/vendor/cm-chessboard/assets/chessboard.css">
 <link rel="stylesheet" href="/vendor/cm-chessboard/assets/extensions/promotion-dialog/promotion-dialog.css">
-<script>
-  // Applied before first paint, so a dark-mode user reloading the page never
-  // sees a white flash. This is the ONE place theme-mode.js's logic is
-  // duplicated; it is deliberate (a module import cannot run before the CSS
-  // paints) and must stay in sync with normalizeMode/themeAttr.
-  try {
-    var m = localStorage.getItem("helpmate:theme");
-    if (m === "light" || m === "dark") document.documentElement.setAttribute("data-theme", m);
-  } catch (e) { /* storage unavailable: fall back to prefers-color-scheme */ }
-</script>
 </head>
 <body>
 <header>
@@ -26,13 +16,12 @@
   </div>
   <nav aria-label="Screens">
     <button data-panel="explorer" class="active">Explorer</button>
+    <button data-panel="puzzles">Puzzles</button>
     <button data-panel="materials">Materials</button>
     <button data-panel="mine">Search</button>
+    <button data-panel="themes">Themes</button>
   </nav>
-  <div class="header-end">
-    <button type="button" id="theme-toggle" data-mode="system">Theme: system</button>
-    <span id="server-chip" class="chip" hidden></span>
-  </div>
+  <div class="header-end"><span id="server-chip" class="chip" hidden></span></div>
 </header>
 
 <div id="error-banner" hidden></div>
@@ -41,23 +30,26 @@
   <section id="panel-explorer">
     <div class="rail board-col">
       <div class="board-pin">
+        <div id="tray-black" class="tray" data-color="b"></div>
         <div id="board"></div>
+        <div id="tray-white" class="tray" data-color="w"></div>
 
-        <div id="palette" class="palette">
-          <span class="eyebrow">Edit position</span>
-          <div id="palette-pieces" class="palette-pieces"></div>
-          <div class="palette-actions">
-            <button type="button" id="btn-erase" data-piece="">Erase</button>
-            <button type="button" id="btn-arrange" data-piece="arrange">Arrange</button>
+        <form id="fen-form" class="board-controls">
+          <label class="sr-label" for="fen-input">Position (FEN)</label>
+          <input id="fen-input" type="text" spellcheck="false" autocomplete="off"
+                 placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
+          <div class="board-controls-row">
+            <label class="inline" for="stm-select">To move
+              <select id="stm-select">
+                <option value="b">Black</option>
+                <option value="w">White</option>
+              </select>
+            </label>
+            <button type="button" id="btn-flip">Flip</button>
             <button type="button" id="btn-clear-board">Clear board</button>
-            <button type="button" id="btn-done-editing" hidden>Done — evaluate</button>
+            <button type="button" id="btn-back" disabled>Back</button>
           </div>
-          <p id="edit-hint" class="hint">
-            Drag a piece from here onto the board, or pick one and click squares.
-            <b>Arrange</b> drags the pieces already on the board — off the edge
-            removes them.
-          </p>
-        </div>
+        </form>
       </div>
     </div>
 
@@ -68,24 +60,6 @@
         take longer, then those that lead nowhere. The position lives in the
         address bar, so any link you copy reopens it.
       </p>
-
-      <form id="fen-form">
-        <label class="eyebrow" for="fen-input">Position (FEN)</label>
-        <input id="fen-input" type="text" spellcheck="false" autocomplete="off"
-               placeholder="8/7k/5K2/8/8/8/8/6Q1 b - - 0 1">
-        <div class="row">
-          <label class="inline" for="stm-select">To move
-            <select id="stm-select">
-              <option value="b">Black</option>
-              <option value="w">White</option>
-            </select>
-          </label>
-          <span class="spacer"></span>
-          <button type="submit">Set</button>
-          <button type="button" id="btn-flip">Flip</button>
-          <button type="button" id="btn-back" disabled>Back</button>
-        </div>
-      </form>
 
       <p id="position-summary" class="verdict"></p>
       <p id="position-themes" class="verdict"></p>
@@ -117,6 +91,33 @@
       </div>
       <div id="table-stats-body"></div>
     </section>
+  </section>
+
+  <section id="panel-puzzles" hidden>
+    <div class="rail board-col">
+      <div class="board-pin">
+        <div id="puzzle-board"></div>
+      </div>
+    </div>
+    <div class="readout side">
+      <p id="puzzle-progress" class="eyebrow"></p>
+      <p id="puzzle-prompt" class="verdict"></p>
+      <ol id="puzzle-line"></ol>
+      <!-- Both announce a result the moment it happens, so both are live
+           regions. role="status" carries an implicit aria-live="polite":
+           the correction and the "Solved." line are the only feedback the
+           puzzle screen gives, and without this a screen-reader user got no
+           announcement of right, wrong or solved at all. Each keeps its own
+           element rather than sharing one: a region that changes what it
+           MEANS mid-solve is exactly what "nothing quietly does double duty"
+           rules out. -->
+      <p id="puzzle-correction" hidden class="hint" role="status"></p>
+      <p id="puzzle-solved" hidden class="hint" role="status"></p>
+      <div class="row">
+        <button type="button" id="btn-puzzle-solution">Show solution</button>
+        <button type="button" id="btn-puzzle-next">Next puzzle</button>
+      </div>
+    </div>
   </section>
 
   <section id="panel-materials" hidden>
@@ -169,17 +170,37 @@
       </div>
     </div>
   </section>
+
+  <section id="panel-themes" hidden>
+    <div id="themes-doc"></div>
+  </section>
 </main>
+
+<footer>
+  <p class="footer-corpus" id="footer-corpus"></p>
+  <!-- No href until these have somewhere real to point. `href="#"` is not
+       inert: it CLEARS location.hash, which fires hashchange, and panels.js
+       reads an empty hash as "explorer" -- so clicking a placeholder
+       mid-puzzle threw the position away and bounced the user to a screen
+       they were not on. An <a> without href is not focusable or activatable,
+       which is what "not a link yet" should actually mean. -->
+  <nav aria-label="About">
+    <a data-placeholder>Source</a>
+    <a data-placeholder>Dataset</a>
+    <a data-placeholder>Licence</a>
+  </nav>
+  <p class="footer-note">Helpmate tablebases · distances in plies, h#n = 2n</p>
+</footer>
 
 <script type="module">
   import { initPanels } from "/js/panels.js";
   import { initExplorer } from "/js/explorer.js";
+  import { initPuzzles } from "/js/puzzle.js";
   import { initMaterials } from "/js/materials.js";
   import { initMine } from "/js/mine.js";
   import { initServerChip } from "/js/chip.js";
-  import { initTheme } from "/js/theme-toggle.js";
-  initTheme();
-  initPanels(); initExplorer(); initMaterials(); initMine(); initServerChip();
+  import { initThemesDoc } from "/js/themes-doc.js";
+  initPanels(); initExplorer(); initPuzzles(); initMaterials(); initMine(); initServerChip(); initThemesDoc();
 </script>
 </body>
 </html>

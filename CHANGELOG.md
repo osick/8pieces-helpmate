@@ -6,6 +6,99 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.13.0] - 2026-08-13
+
+Puzzles, a motif reference, and a round of correctness/polish fixes to the
+dashboard shell underneath them.
+
+### Added
+- **A puzzle screen.** A session of ten one-solution positions, one per
+  difficulty rung (mate length first, piece count second) and easiest first,
+  drawn from a committed, hand-editable EPD file
+  (`src/packages/web/helpmate_web/static/puzzles.epd`, 930 positions; see
+  [USAGE.md](docs/USAGE.md#puzzle-set-epd) for the format and
+  `tools/mine_puzzles.py` for regenerating it). Solving means playing the
+  whole line, both colours — a helpmate is cooperative, so proving the
+  solution means supplying Black's moves too. Each ply gets a check or a
+  cross; a wrong move reveals the correct one; exceeding the error budget
+  reveals the rest of the line. The session is filtered to materials this
+  installation actually has tables for, and when none match it names them
+  and the `helpmate gen` command that builds one.
+- **A motif documentation screen**, rendered straight from `/v1/themes` —
+  never a hard-coded list — covering all 22 registered motifs in five
+  groups (the mate picture, how a unit travels, pawns and promotion, where
+  the mate happens, the structure of the solution), each introduced by a
+  sentence, plus an "other" group that catches anything the registry adds
+  later. Every entry states its `needs` value and what that means for a
+  position whose solution count has saturated at 255.
+- A prominent page title, a footer with a live corpus line and clearly
+  marked placeholder links (Source, Dataset, Licence — real destinations
+  once this project is public), and a drag ghost that is transparent,
+  borderless and smaller than the tray button it's dragged from.
+
+### Fixed
+- **Two data-loss bugs.** `render()`'s `ApiError` branch left the move
+  lookup stale, so a drag after a failed evaluation replayed the previous
+  position's move list — discarding the user's edit and printing a
+  confident verdict for a position they never built. The same bug existed
+  on the "downloading" path, where it needed no coincidence at all: any
+  click on the still-visible stale list did it. Two further instances of
+  the same class — a failed `/v1/probe`, a `/v1/line` 404 — left previous
+  content on screen instead of being replaced.
+- **The page no longer jumps.** `render()` used to empty the move list
+  before awaiting the fetch that refilled it, so everything below leapt up
+  ~286px for ~22ms. It now builds the replacement and swaps it in
+  atomically.
+- **A new `400 unprobeable_position` error, split out of `404
+  unknown_material`.** `/v1/probe`, `/v1/moves`, and `/v1/line` used to
+  report every position the tablebase index couldn't address as "no table
+  for X" — including a position that is simply illegal (the two kings
+  adjacent, reachable in one drag on the explorer's board), which told the
+  user to generate a table the Materials screen was already listing as
+  local. That case is now `400 unprobeable_position`, distinct from `404
+  unknown_material`'s "there is no table for this material at all"; see
+  [USAGE.md](docs/USAGE.md#get-v1probe) for the full contract.
+
+### Removed
+- **The colour-theme control.** The three-state (system/light/dark) toggle,
+  its stored `localStorage` preference, the pre-paint script that applied
+  it before first paint, that script's own drift test, and both dark CSS
+  token blocks are gone — one palette now, net −200 lines.
+
+## [0.12.0] - 2026-08-13
+
+Dashboard UX round 2: no modes, and say the shared fact once.
+
+### Changed
+- **The board has no editing modes.** A drag matching a legal move plays it,
+  any other drag relocates the piece, and a drag off the board deletes it —
+  including a drag started on either piece tray, which places. **Erase**,
+  **Arrange** and **Done — evaluate** are gone, along with click-to-place and
+  the armed-state ring. Back undoes a relocation exactly as it undoes a move.
+  The accepted risk: relocating a piece onto a square that happens to be a
+  legal destination for it will play that move, not merely place it there.
+  Two plain clicks on a piece also relocate it, as a side effect of the same
+  handling. With click-to-place gone there is no keyboard path to placing a
+  tray piece; the FEN field, which applies on Enter, is the keyboard route to
+  an arbitrary position.
+- **The piece trays flank the board** — black above, white below, each on the
+  side of the board its colour occupies, swapping when the board is flipped.
+  Below the board, the FEN field keeps a row to itself (the longest datum
+  here, and the one field anyone might select or paste into); **To move**,
+  **Flip**, **Clear board** and **Back** share the row beneath it — two
+  deliberate rows, not the one line an earlier commit message on this branch
+  claimed before a follow-up fix corrected the layout itself.
+- **Slower and no-mate moves render as chips under a distance band.** Within
+  one distance every badge read the same string; the distance is now stated
+  once. The optimal group keeps its rows, because its per-move solution count
+  is what the list exists to show.
+- **The explorer's table band is one line** — the material, its deepest mate
+  and how much of it is solvable — with a link to Materials, where the
+  histograms already live, instead of repeating them under every position.
+- **Weight marks what you can act on**: actionable controls are 600, inert
+  text is not, and **Flip** and **Clear board** drop their borders now that
+  weight alone carries the affordance.
+
 ## [0.11.0] - 2026-08-12
 
 Dashboard UX: one skeleton for all three screens.

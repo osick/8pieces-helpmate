@@ -1,5 +1,5 @@
 import {
-  Chessboard, INPUT_EVENT_TYPE, COLOR, POINTER_EVENTS,
+  Chessboard, INPUT_EVENT_TYPE, COLOR, BORDER_TYPE,
 } from "../vendor/cm-chessboard/Chessboard.js";
 import {
   PromotionDialog,
@@ -12,37 +12,26 @@ import { toPgn } from "./lib/export.js";
 import { EMPTY_PLACEMENT, splitFen, composeFen, withSideToMove, withPlacement, kingProblem } from "./lib/fen.js";
 import { themeSummary } from "./lib/themes.js";
 import { groupMoves, moveBadge, moveClass, COUNT_SAT } from "./lib/moves.js";
-import { renderStats } from "./stats-view.js";
-import { showPanel } from "./panels.js";
+import { renderTableLine } from "./stats-view.js";
+import { showPanel, whenPanelShown } from "./panels.js";
 import { squareFromTarget, exceedsDragThreshold } from "./lib/board-edit.js";
 
 const START = "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1";
 const SPRITE = "/vendor/cm-chessboard/assets/pieces/standard.svg";
-const PALETTE = ["wk", "wq", "wr", "wb", "wn", "wp", "bk", "bq", "br", "bb", "bn", "bp"];
-// The fourth arming state. A piece name places, "" erases, null plays -- and
-// this drags what is already on the board. It is a distinct value rather than
-// a flag because click-to-place and drag-to-rearrange both bind pointerdown,
-// so exactly one of them may be live at a time.
-const ARRANGE = "arrange";
+const TRAY = {
+  b: ["bk", "bq", "br", "bb", "bn", "bp"],
+  w: ["wk", "wq", "wr", "wb", "wn", "wp"],
+};
 
 let board = null;
 let current = START;
 let lastMoves = [];      // the move list from the last /v1/moves call, for drag input
-// The armed palette entry: a piece name to place, "" to erase, or null when
-// the board is in play mode (drag = play a move). Editing and playing are
-// mutually exclusive on the same pointer, so arming swaps the board's input.
-let armed = null;
-// `current` as it stood when the present edit session began, or null when no
-// session is open. Every placement path (palette drop, click-to-place,
-// Arrange, Clear board, the side-to-move select) writes the new FEN straight
-// into `current`, so `current` cannot also serve as the "what did we start
-// from" baseline -- comparing the committed FEN against it was always false,
-// which is why an edit never reached the hash or the history. Capturing the
-// baseline once, when the session opens, is the smallest thing that survives
-// however many placements happen in between, and it is also the value Back
-// has to return to.
-let editBaseline = null;
 const history = [];
+
+// Whether the explorer's first render() has happened. Its initial probe is
+// deferred to the panel's first activation (see initExplorer's tail), so
+// until then there is no position on screen to keep in sync with the hash.
+let started = false;
 
 // Monotonic token guarding render(): every call captures its own seq at
 // entry, and bails out after each await if a newer render() has since
@@ -102,7 +91,7 @@ async function showTableStats(material) {
     }
   }
   if (bandMaterial !== material) return;                 // superseded while awaiting
-  renderStats(body, statsCache.get(material), { idPrefix: "tbl-", samples: false });
+  renderTableLine(body, statsCache.get(material));
 }
 
 // initMaterials() populates #material-list asynchronously and signals
@@ -136,19 +125,84 @@ function clearBanner() {
   el.hidden = true; el.textContent = ""; el.classList.remove("info");
 }
 
-// Reflect a FEN in the controls without touching the API. Used both by
-// render() and by the editor, which deliberately does not probe on every
-// placement -- a half-built position is illegal by definition and an error
-// banner per placed piece would be noise, not information.
+// Reflect a FEN in the controls without touching the API. Used by render()
+// itself: this runs before the /v1/moves call below (and before the
+// kingProblem short-circuit), so the FEN field and the "to move" selector
+// always show what the user just built, even on a position the probe
+// below is about to reject.
 function syncControls(fen) {
   document.getElementById("fen-input").value = fen;
   document.getElementById("stm-select").value = splitFen(fen).stm;
 }
 
+// A single move row, used both for the optimal group's own <ul> and for a
+// band's <ul class="chips"> -- same element, same click behaviour, so a chip
+// IS a row rather than a lookalike of one.
+function renderMoveRow(m) {
+  const li = document.createElement("li");
+  li.className = moveClass(m);
+  li.dataset.san = m.san;
+  const san = document.createElement("span");
+  san.className = "san";
+  san.textContent = m.san;
+  li.appendChild(san);
+  const text = moveBadge(m);
+  if (text) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.textContent = text;
+    li.appendChild(badge);
+  }
+  // Every row is clickable, including the dead ones: walking into a
+  // position with no helpmate is a legitimate thing to want to look at,
+  // and that is the behaviour the list has today.
+  li.addEventListener("click", () => { history.push(current); render(m.fen); });
+  return li;
+}
+
+// A group with `bands` (Slower, No mate) renders one shared distance label
+// per band plus its moves as chips -- the distance is a fact of the band,
+// not of any one move, so stating it once removes the per-row repetition
+// that made the Slower group 25 rows of near-identical text. A group
+// without `bands` (Optimal) keeps full rows: its per-move solution count
+// differs move to move, which is exactly what the list exists to show.
+function renderGroup(sec, g) {
+  if (!g.bands) {
+    const ul = document.createElement("ul");
+    for (const m of g.moves) ul.appendChild(renderMoveRow(m));
+    sec.appendChild(ul);
+    return;
+  }
+  for (const band of g.bands) {
+    const wrap = document.createElement("div");
+    wrap.className = "band";
+    // The label cell is ALWAYS emitted, even empty (the no-mate group's
+    // band() returns null): .band is a two-column grid, and skipping the
+    // cell for a null label would leave the <ul class="chips"> as the
+    // grid's first child instead of its second -- landing it in the label
+    // column (3.2rem) rather than the chip column (1fr), which wraps every
+    // chip onto its own row. An empty span with no text content renders no
+    // visible character and no gap artefact; it is exactly as tall as the
+    // chips beside it, so nothing shifts.
+    const lab = document.createElement("span");
+    lab.className = "band-label";
+    if (band.label) lab.textContent = band.label;
+    wrap.appendChild(lab);
+    const ul = document.createElement("ul");
+    ul.className = "chips";
+    for (const m of band.moves) ul.appendChild(renderMoveRow(m));
+    wrap.appendChild(ul);
+    sec.appendChild(wrap);
+  }
+}
+
 // #move-list is a <div> of <section class="move-group">, not a <ul>. Seven UI
 // tests use `#move-list li` as their "the page is ready" idiom and two COUNT
 // it, so a group header must never be an <li> -- it is the section's <h3>,
-// outside the <ul>. `#move-list li` then still selects exactly the move rows.
+// outside the <ul>. A banded group nests its rows one level deeper still
+// (section > .band > ul.chips > li rather than section > ul > li), but
+// `#move-list li` is a descendant selector and does not care about depth, so
+// it keeps selecting exactly the move rows either way.
 function renderMoveList(el, moves) {
   el.textContent = "";
   const groups = groupMoves(moves);
@@ -173,26 +227,9 @@ function renderMoveList(el, moves) {
     n.className = "n";
     n.textContent = g.moves.length;
     h.appendChild(n);
+    sec.appendChild(h);
 
-    const ul = document.createElement("ul");
-    for (const m of g.moves) {
-      const li = document.createElement("li");
-      li.className = moveClass(m);
-      li.dataset.san = m.san;
-      const san = document.createElement("span");
-      san.className = "san";
-      san.textContent = m.san;
-      const badge = document.createElement("span");
-      badge.className = "badge";
-      badge.textContent = moveBadge(m);
-      li.append(san, badge);
-      // Every row is clickable, including the dead ones: walking into a
-      // position with no helpmate is a legitimate thing to want to look at,
-      // and that is the behaviour the list has today.
-      li.addEventListener("click", () => { history.push(current); render(m.fen); });
-      ul.appendChild(li);
-    }
-    sec.append(h, ul);
+    renderGroup(sec, g);
     el.appendChild(sec);
   }
 }
@@ -229,8 +266,6 @@ async function render(fen, { push = true, retries = 0 } = {}) {
   const moveList = document.getElementById("move-list");
   const linesEl = document.getElementById("lines");
   const themesEl = document.getElementById("position-themes");
-  moveList.textContent = ""; linesEl.textContent = ""; themesEl.textContent = "";
-  linesEl.dataset.lines = "[]";
 
   // A position with a missing or duplicated king is one the editor produces
   // on the way to a real position; say so plainly instead of spending a round
@@ -241,6 +276,13 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     summary.classList.add("muted");
     clearBanner();
     lastMoves = [];
+    // No replacement is coming for this position: clear explicitly rather
+    // than leaving a previous position's moves, lines or themes on screen
+    // under it.
+    moveList.textContent = "";
+    linesEl.textContent = "";
+    linesEl.dataset.lines = "[]";
+    themesEl.textContent = "";
     showTableStats(null);
     return;
   }
@@ -250,12 +292,39 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     res = await api.moves(fen);
   } catch (err) {
     if (seq !== renderSeq) return;   // superseded by a newer render()
-    if (err instanceof ApiError) { showError(err); summary.textContent = ""; return; }
+    if (err instanceof ApiError) {
+      showError(err);
+      summary.textContent = "";
+      // The board must never match a drag against a move list belonging to a
+      // position that is no longer on screen: doing so navigates to that
+      // move's child, silently discarding whatever the user just built.
+      lastMoves = [];
+      // Same as kingProblem above: no replacement is coming, and leaving a
+      // previous position's moves on screen under a red banner would be
+      // worse than an empty list.
+      moveList.textContent = "";
+      linesEl.textContent = "";
+      linesEl.dataset.lines = "[]";
+      themesEl.textContent = "";
+      return;
+    }
     throw err;
   }
   if (seq !== renderSeq) return;     // superseded by a newer render()
 
   if (res.status === 202) {
+    // Neither exit below has a replacement to swap in for this position --
+    // board.setPosition() and syncControls() above have already moved the
+    // board and the FEN field here, so leaving the PREVIOUS position's
+    // lastMoves/move list/lines/themes on screen would let a click on a
+    // now-stale row navigate to a child of a position no longer displayed,
+    // exactly the H1 failure fixed above -- reachable here on nothing more
+    // than a routine "downloading…" banner, not a coincidental uci match.
+    lastMoves = [];
+    moveList.textContent = "";
+    linesEl.textContent = "";
+    linesEl.dataset.lines = "[]";
+    themesEl.textContent = "";
     if (retries >= DOWNLOAD_RETRY_CAP) {
       showError({
         message: "Still downloading",
@@ -299,48 +368,64 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     api.probe(fen, true).then(({ body }) => {
       if (seq !== renderSeq) return;         // superseded by a newer render()
       themesEl.textContent = body.themes_note || themeSummary(body.themes);
-    }).catch(() => { /* annotation is a nicety; never break the board on it */ });
+    }).catch(() => {
+      if (seq !== renderSeq) return;         // superseded by a newer render()
+      // Found while enumerating render()'s exits for the 202 fix above: a
+      // failed probe used to leave whatever the PREVIOUS position's themes
+      // were on screen, under this position's own (correct) summary --
+      // never a navigation bug like H1, since lastMoves/moveList are
+      // already this position's, but still exactly the staleness "replace,
+      // never clear-then-fill" exists to rule out. No replacement is
+      // coming for this position's themes; annotation is a nicety, but a
+      // wrong one is worse than an absent one.
+      themesEl.textContent = "";
+    });
+  } else {
+    // No probe call is coming for an unsolvable position: nothing will ever
+    // overwrite a previous position's themes note otherwise.
+    themesEl.textContent = "";
   }
 
-  renderMoveList(moveList, b.moves);
+  // Replace, never clear-then-fill. Emptying these before the await made
+  // everything below the list jump up ~286px for the duration of the fetch.
+  // The old code also cleared the move list, lines and themes but NOT the
+  // summary, which is why two tests were able to pass while reading the
+  // previous position's verdict.
+  const next = document.createElement("div");
+  renderMoveList(next, b.moves);
+  moveList.replaceChildren(...next.childNodes);
 
   if (b.solvable !== false) {
     try {
       const ls = await api.line(fen, true);
       if (seq !== renderSeq) return; // superseded by a newer render()
+      const nextLines = document.createElement("div");
       for (const line of ls.body.lines) {
         const li = document.createElement("li");
         li.textContent = line.join(" ");
-        linesEl.appendChild(li);
+        nextLines.appendChild(li);
       }
+      linesEl.replaceChildren(...nextLines.childNodes);
       linesEl.dataset.lines = JSON.stringify(ls.body.lines);
     } catch (err) {
       if (seq !== renderSeq) return; // superseded by a newer render()
       if (!(err instanceof ApiError)) throw err;
+      // Same finding as the /v1/probe catch above, for /v1/line: a
+      // partial-table-set 404 here (real -- app.py's /v1/line can 404 a
+      // solvable position whose optimal line runs through material this
+      // install hasn't generated) used to leave a previous position's
+      // lines on screen with no replacement ever coming.
+      linesEl.textContent = "";
+      linesEl.dataset.lines = "[]";
     }
+  } else {
+    // Same as themesEl above: no /v1/line call is coming.
+    linesEl.textContent = "";
+    linesEl.dataset.lines = "[]";
   }
 }
 
 // ---- position editor -------------------------------------------------
-
-// Read the placement back off the board and evaluate it. Called when the
-// user leaves edit mode, not on every click.
-function commitBoard() {
-  const fen = withPlacement(current, board.getPosition());
-  // The position this edit session started from -- NOT `current`, which every
-  // placement has already advanced to the edited FEN.
-  const before = editBaseline;
-  editBaseline = null;
-  // Arming and disarming without touching a square must not cost a request
-  // or leave a duplicate entry for Back to walk through -- but the panel
-  // still has to be redrawn, because entering edit mode retired the previous
-  // value. An edit that DID change something is a position in its own right:
-  // it goes into the hash (so a copied link reopens it) and onto the history
-  // stack (so Back returns to what the user started from).
-  const changed = before === null || fen !== before;
-  if (changed && before !== null) history.push(before);
-  render(fen, { push: changed });
-}
 
 // Dragging a piece out of the palette and onto a square. cm-chessboard has no
 // notion of an external drag source, so this is ours: capture the pointer,
@@ -356,9 +441,6 @@ function enablePaletteDrag(btn, piece) {
     const move = (e) => {
       if (!ghost) {
         if (!exceedsDragThreshold(from, { x: e.clientX, y: e.clientY })) return;
-        // Past the threshold this is a drag, so arm the piece (which puts the
-        // board in edit mode) and stop the click handler from also firing.
-        if (armed !== piece) setArmed(piece);
         ghost = btn.cloneNode(true);
         ghost.className = "drag-ghost";
         ghost.removeAttribute("id");
@@ -384,14 +466,9 @@ function enablePaletteDrag(btn, piece) {
       // scroll), so this path has to stay inert rather than guess at where
       // the pointer ended up.
       if (e.type === "pointercancel") return;
-      btn.dataset.dragged = "1";
       const square = squareFromTarget(document.elementFromPoint(e.clientX, e.clientY));
       if (!square) return;                      // dropped off the board: no-op
-      board.setPiece(square, piece).then(() => {
-        const fen = withPlacement(current, board.getPosition());
-        current = fen;
-        syncControls(fen);
-      });
+      board.setPiece(square, piece).then(commitPlacement);
     };
 
     btn.setPointerCapture(down.pointerId);
@@ -401,147 +478,94 @@ function enablePaletteDrag(btn, piece) {
   });
 }
 
-function onSquareClick(event) {
-  if (armed === null || !event.square) return;
-  // setPiece is async; the board is the source of truth for the placement, so
-  // update the FEN box only once it has actually applied.
-  board.setPiece(event.square, armed || null).then(() => {
-    const fen = withPlacement(current, board.getPosition());
-    current = fen;
-    syncControls(fen);
-  });
-}
-
-// `commit` is false when something else is about to set the position anyway
-// (typing a FEN, following a link): committing there would spend a request on
-// a position the very next line replaces, and push a bogus history entry.
-function setArmed(piece, { commit = true } = {}) {
-  const wasEditing = armed !== null;
-  armed = piece;
-  for (const btn of document.querySelectorAll("#palette button"))
-    btn.setAttribute("aria-pressed", String(btn.dataset.piece === piece && piece !== null));
-
-  const done = document.getElementById("btn-done-editing");
-
-  // Exactly one input binding is live at a time. Rebinding unconditionally is
-  // cheaper to reason about than working out which transitions need which
-  // call, and cm-chessboard's disable* calls are safe when nothing is bound.
-  board.disableSquareSelect(POINTER_EVENTS.pointerdown);
-  board.disableMoveInput();
-
-  if (armed === null) {
-    enableDragToPlay();
-    done.hidden = true;
-    if (wasEditing && commit) commitBoard();
-    // `commit: false` means something else is about to set the position: drop
-    // the baseline unconditionally so it can never leak into a later session.
-    editBaseline = null;
-    return;
-  }
-
-  if (armed === ARRANGE) enableDragToEdit();
-  else board.enableSquareSelect(POINTER_EVENTS.pointerdown, onSquareClick);
-  done.hidden = false;
-
-  if (!wasEditing) {
-    // The session opens here, so this is the last moment `current` still
-    // holds the position the user is editing away from.
-    editBaseline = current;
-    // The previous position's value belongs to a position that no longer
-    // exists. Leaving it on screen while pieces move around would present a
-    // stale dtm as the current one; say what is happening instead.
-    const summary = document.getElementById("position-summary");
-    summary.textContent = "editing — press Done to evaluate";
-    summary.classList.add("muted");
-    document.getElementById("position-themes").textContent = "";
-    document.getElementById("move-list").textContent = "";
-    const linesEl = document.getElementById("lines");
-    linesEl.textContent = ""; linesEl.dataset.lines = "[]";
-    lastMoves = [];
-    showTableStats(null);
-  }
-}
-
 function buildPalette() {
-  const box = document.getElementById("palette-pieces");
-  for (const piece of PALETTE) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.dataset.piece = piece;
-    btn.setAttribute("aria-pressed", "false");
-    btn.title = piece;
-    btn.setAttribute("aria-label", piece);
-    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
-    svg.setAttribute("viewBox", "0 0 40 40");
-    const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
-    use.setAttribute("href", `${SPRITE}#${piece}`);
-    svg.appendChild(use);
-    btn.appendChild(svg);
-    // Clicking the armed piece again puts the board back in play mode, so a
-    // round trip through the palette is never needed to resume exploring.
-    btn.addEventListener("click", () => {
-      if (btn.dataset.dragged === "1") { delete btn.dataset.dragged; return; }
-      setArmed(armed === piece ? null : piece);
-    });
-    enablePaletteDrag(btn, piece);
-    box.appendChild(btn);
+  for (const color of Object.keys(TRAY)) {
+    const box = document.querySelector(`.tray[data-color="${color}"]`);
+    for (const piece of TRAY[color]) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.dataset.piece = piece;
+      btn.title = piece;
+      btn.setAttribute("aria-label", piece);
+      const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("viewBox", "0 0 40 40");
+      const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", `${SPRITE}#${piece}`);
+      svg.appendChild(use);
+      btn.appendChild(svg);
+      enablePaletteDrag(btn, piece);
+      box.appendChild(btn);
+    }
   }
-  const erase = document.getElementById("btn-erase");
-  erase.setAttribute("aria-pressed", "false");
-  erase.addEventListener("click", () => setArmed(armed === "" ? null : ""));
-  const arrange = document.getElementById("btn-arrange");
-  arrange.setAttribute("aria-pressed", "false");
-  arrange.addEventListener("click", () => setArmed(armed === ARRANGE ? null : ARRANGE));
   document.getElementById("btn-clear-board").addEventListener("click", () => {
     board.setPosition(EMPTY_PLACEMENT, false).then(() => {
       const fen = composeFen(EMPTY_PLACEMENT, splitFen(current).stm);
-      current = fen;
-      syncControls(fen);
-      if (armed === null) render(fen);
+      history.push(current);
+      render(fen);
     });
   });
 }
 
 // ---- board input -----------------------------------------------------
 
-// While editing, a drag means "move this piece there" (any square, legal or
-// not) and a drag off the board means "remove it". cm-chessboard raises both;
-// we simply stopped ignoring them.
-function enableDragToEdit() {
+// One rule, no modes. A drag whose from/to matches a legal move plays it; any
+// other drag relocates the piece; a drag off the board deletes it. Editing is
+// never gated behind a control, which is what lets three buttons and the whole
+// armed-state machinery go.
+//
+// `playedMove` guards exactly one path: the multi-candidate promotion branch
+// below, where several underpromotion moves share one uci prefix and the
+// actual choice is deferred to the vendored dialog. The real event order
+// (read from vendor/cm-chessboard/view/VisualMoveInput.js): validateMoveInput
+// runs synchronously inside validateMoveInputCallback (:61-65), which then
+// resolves moveInputProcess; moveInputFinished fires one MICROTASK later, via
+// the `.then()` registered at :47-52 -- it does not wait for the drop's
+// visual animation. board.getPosition() reads state.position.getFen(), a
+// plain data model that Chessboard.js's movePiece/setPosition update
+// synchronously, never the DOM.
+//
+// On the plain-move and single-candidate paths that timing is harmless: our
+// own render() call already ran synchronously inside validateMoveInput (it
+// sets `current` and calls board.setPosition() before its first await), so
+// by the time moveInputFinished's commitPlacement() runs a microtask later,
+// board.getPosition() already agrees with `current` -- and commitPlacement's
+// own `fen === current` check would no-op regardless. The promotion branch
+// is different: showPromotionDialog() only calls render() once the user
+// picks a piece, so nothing has touched `current` yet when moveInputFinished
+// fires -- but cm-chessboard's own movePiece() has already moved the PAWN
+// (not yet a queen) onto the promotion square. Without this flag,
+// commitPlacement() would commit that mismatch as a bogus relocation -- an
+// unpromoted pawn on the back rank -- before the dialog's own render() ever
+// gets a chance to land the real, chosen move.
+let playedMove = false;
+
+function commitPlacement() {
+  const fen = withPlacement(current, board.getPosition());
+  if (fen === current) return;        // nothing actually moved
+  history.push(current);
+  render(fen);
+}
+
+function enableBoardInput() {
   board.enableMoveInput((event) => {
-    if (event.type === INPUT_EVENT_TYPE.validateMoveInput) return true;
-    if (event.type === INPUT_EVENT_TYPE.moveInputCanceled
-        && event.reason === MOVE_CANCELED_REASON.movedOutOfBoard) {
-      board.setPiece(event.squareFrom, null).then(syncFromBoard);
+    if (event.type === INPUT_EVENT_TYPE.moveInputCanceled) {
+      if (event.reason === MOVE_CANCELED_REASON.movedOutOfBoard)
+        board.setPiece(event.squareFrom, null).then(commitPlacement);
       return;
     }
-    if (event.type === INPUT_EVENT_TYPE.moveInputFinished) syncFromBoard();
-    return true;
-  });
-}
-
-function syncFromBoard() {
-  const fen = withPlacement(current, board.getPosition());
-  current = fen;
-  syncControls(fen);
-}
-
-function enableDragToPlay() {
-  // Dragging a piece plays the corresponding legal move, when there is one.
-  // The board is a view over the server's move list: we never invent a move
-  // client-side, we look up the drag in what /v1/moves returned.
-  //
-  // A drag only tells us from/to squares (a 4-char uci prefix); it never
-  // tells us which piece to promote to. If several promotion moves share
-  // that prefix (e.g. e7e8q/e7e8r/e7e8b/e7e8n) we must not guess -- show
-  // the vendored promotion dialog and play exactly the uci the user picks.
-  board.enableMoveInput((event) => {
+    if (event.type === INPUT_EVENT_TYPE.moveInputFinished) {
+      if (playedMove) { playedMove = false; return; }
+      commitPlacement();
+      return;
+    }
     if (event.type !== INPUT_EVENT_TYPE.validateMoveInput) return true;
+
     const uci = `${event.squareFrom}${event.squareTo}`;
     const moves = lastMoves || [];
 
     const exact = moves.find((m) => m.uci === uci);
     if (exact) {
+      playedMove = true;
       history.push(current);
       render(exact.fen);
       return true;
@@ -550,15 +574,20 @@ function enableDragToPlay() {
     const candidates = moves.filter(
       (m) => m.uci.length === uci.length + 1 && m.uci.startsWith(uci)
     );
-    if (candidates.length === 0) return false; // not a legal move: snap back
+    // Not a legal move: accept the drag anyway and let moveInputFinished
+    // commit it as a relocation. Returning false here would snap the piece
+    // back, which is the old play-only behaviour.
+    if (candidates.length === 0) return true;
 
     if (candidates.length === 1) {
+      playedMove = true;
       history.push(current);
       render(candidates[0].fen);
       return true;
     }
 
     // Several underpromotion choices are legal: ask the user which piece.
+    playedMove = true;
     const fromFen = current;
     const color = event.piece.charAt(0); // "wp" -> "w", matches COLOR.white/black
     board.showPromotionDialog(event.squareTo, color, (result) => {
@@ -572,8 +601,6 @@ function enableDragToPlay() {
       history.push(fromFen);
       render(chosen.fen);
     });
-    // Let the piece land visually now; the dialog callback above resolves
-    // the exact move (or snaps back to fromFen if the user cancels).
     return true;
   });
 }
@@ -582,32 +609,38 @@ export function initExplorer() {
   board = new Chessboard(document.getElementById("board"), {
     position: START.split(" ")[0],
     assetsUrl: "/vendor/cm-chessboard/assets/",
-    style: { borderType: "frame" },
+    // "none" draws the rank/file coordinates inline, on the squares
+    // themselves (the lichess/syzygy look), instead of in a "frame" border
+    // band inside the widget's visible bounds. That band carried no
+    // data-square attribute, so a drag released on it -- visually still on
+    // the board -- read as movedOutOfBoard and deleted the piece.
+    style: { borderType: BORDER_TYPE.none },
     extensions: [{ class: PromotionDialog }],
   });
-  enableDragToPlay();
+  enableBoardInput();
   buildPalette();
 
   document.getElementById("fen-form").addEventListener("submit", (e) => {
     e.preventDefault();
-    setArmed(null, { commit: false });    // typing a FEN ends any editing session
     history.push(current);
     render(document.getElementById("fen-input").value.trim());
   });
   document.getElementById("stm-select").addEventListener("change", (e) => {
     const fen = withSideToMove(current, e.target.value);
-    if (armed !== null) { current = fen; syncControls(fen); return; }
     history.push(current);
     render(fen);
   });
   document.getElementById("btn-flip").addEventListener("click", () => {
-    board.setOrientation(board.getOrientation() === COLOR.white ? COLOR.black : COLOR.white);
+    const black = board.getOrientation() === COLOR.white;   // after the flip below
+    board.setOrientation(black ? COLOR.black : COLOR.white);
+    // Each tray sits on the side of the board its own colour occupies; leaving
+    // them put after a flip would make them two anonymous rows of buttons.
+    document.querySelector(".board-pin").classList.toggle("flipped", black);
   });
   document.getElementById("btn-back").addEventListener("click", () => {
     const prev = history.pop();
     if (prev) render(prev);
   });
-  document.getElementById("btn-done-editing").addEventListener("click", () => setArmed(null));
   document.getElementById("btn-export-pgn").addEventListener("click", () => {
     const lines = JSON.parse(document.getElementById("lines").dataset.lines || "[]");
     const blob = new Blob([toPgn(current, lines)], { type: "application/x-chess-pgn" });
@@ -627,13 +660,27 @@ export function initExplorer() {
     if (li) li.click();
   });
   window.addEventListener("hashchange", () => {
+    // Before the first probe there is no position to keep in sync, and
+    // rendering one here would be the very network call the lazy start
+    // below exists to defer. whenPanelShown fires from showPanel(), which
+    // panels.js registers as a hashchange listener BEFORE this one, so a
+    // hash that both activates the explorer and carries a fen (a Search
+    // result click, say) has already started it by the time this runs --
+    // with that same fen, so the `fen !== current` guard then finds nothing
+    // to do.
+    if (!started) return;
     const { fen } = decodeState(location.hash);
-    if (fen && fen !== current) {
-      setArmed(null, { commit: false }); // a link wins over an unfinished edit
-      render(fen, { push: false });
-    }
+    if (fen && fen !== current) render(fen, { push: false });
   });
 
-  const { fen } = decodeState(location.hash);
-  window.__explorerReady = render(fen || START, { push: !fen });
+  // Deferred to the explorer panel's first activation. Probing the landing
+  // position at page load meant an install with no tables painted a red
+  // "no table for material 'KQvk'" over whatever screen a #panel= deep link
+  // had opened -- #error-banner sits outside <main>, so it is visible from
+  // every panel. See panels.js's whenPanelShown for the full rationale.
+  whenPanelShown("explorer", () => {
+    started = true;
+    const { fen } = decodeState(location.hash);
+    window.__explorerReady = render(fen || START, { push: !fen });
+  });
 }

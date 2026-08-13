@@ -64,30 +64,101 @@ from a Hugging Face dataset for tables not stored locally) and
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
 
-The same process serves a **web dashboard** at `/`. Every screen is a grey
-**rail** (what you manipulate) beside a white **readout** (what the tables
-say) — one skeleton, no new colours. The **explorer** has a grouped, sorted
-move list (Optimal ranked by how forcing each move is, then Slower, then No
-mate; a saturated solution count always renders `255+`, never `255`) and a
-statistics band for the table the current position came from. Editing a
-position works by drag — a piece from the palette onto a square, a piece
-already on the board to another square, or off the board to remove it — or by
-**Arrange** plus **Done — evaluate**; click-to-place is unchanged and remains
-the keyboard/touch path. **Materials** lands on **All tables**, the whole
-corpus at once (including materials with no helpmate and the generator
-versions that built them), scrolling and filterable, grouped by piece count;
+The same process serves a **web dashboard** at `/`, five screens behind one
+title and one footer. Every screen is a grey **rail** (what you manipulate)
+beside a white **readout** (what the tables say) — one skeleton, **one
+palette**: there is no colour-theme control, no light/dark switch, and no
+`prefers-color-scheme` cascade to keep in sync with one. The **explorer** has
+a grouped, sorted move list (Optimal ranked by how forcing each move is,
+then Slower — as chips under a shared distance label, not a repeated row per
+move — then No mate) and, below it, a one-line band naming the table the
+current position came from, its deepest mate and how much of it is solvable,
+with a link to its full histograms on Materials. Actionable controls (Flip,
+Clear board, Back, Download PGN, Open in Materials, and every move row) are
+weighted 600; inert text never is.
+
+The board has **no editing modes**. One rule covers every drag: a drag that
+matches a legal move plays it, any other drag relocates the piece, and a
+drag off the board deletes it — including a drag off a piece already on the
+board. A drag from either tray places that piece. **Back** undoes a
+relocation exactly as it undoes a move; the accepted risk is that relocating
+a piece onto a square that happens to be a legal destination for it *will
+play that move* rather than merely place it. **Two plain clicks on a piece
+also relocate it** — the board's click-to-move input treats a click-then-click
+the same as a drag that starts and ends on different squares, so it falls
+out of the same non-move-drag handling for free. There is no click-to-place
+from the tray, and honestly, no keyboard way to place a piece from it either;
+the **FEN** field, which applies on Enter, is the keyboard route to an
+arbitrary position. **Materials** lands on **All tables**, the whole corpus
+at once (including materials with no helpmate and the generator versions
+that built them), scrolling and filterable, grouped by piece count;
 selecting one shows its own mate-length and solution-count histograms.
 **Search** has the `starts`/`ends` shape filters, a theme multi-select, a
 **Stop** button, and elapsed time shown against the server's
-`--mine-timeout` budget. A three-state theme toggle (system/light/dark)
-remembers your choice and applies it before first paint. No build step, no
-CDN: plain ES modules with cm-chessboard vendored.
+`--mine-timeout` budget.
+
+**Puzzles** draws a session of ten one-solution positions from a committed
+EPD file, one per difficulty rung (mate length first, piece count second),
+easiest first. Solving means playing the *whole* line, both colours — a
+helpmate is cooperative, so proving you know the solution means supplying
+Black's moves too, not just answering "what does White play". Each ply gets
+a check or a cross; a wrong guess shows the right move without penalty
+beyond an error counter, and once that counter passes an error budget the
+rest of the line is revealed. A session is filtered down to whatever
+materials this installation actually has tables for — a puzzle whose
+material nobody has generated is not a harder puzzle, it is a 404 — and if
+none match, the screen names the missing materials and the `helpmate gen`
+command that builds one. The set itself
+(`src/packages/web/helpmate_web/static/puzzles.epd`, 930 positions) is a
+hand-editable EPD file, committed rather than generated on demand, so a
+custom problem can be added by typing one line; see [Puzzle set
+(EPD)](#puzzle-set-epd) below for the format and how to regenerate it from
+the corpus. **Themes** documents every motif this build's tablebase detects,
+grouped and introduced with a sentence per group, rendered straight from
+[`GET /v1/themes`](docs/USAGE.md#get-v1themes) — the live registry, not a
+list copied into this screen — so a motif the registry gains later shows up
+here with no code change.
+
+No build step, no CDN: plain ES modules with cm-chessboard vendored.
 
 ```bash
 helpmate-server --tables ~/tb --port 8642   # then open http://127.0.0.1:8642/
 ```
 
 See the ["Web dashboard" section of docs/USAGE.md](docs/USAGE.md#web-dashboard).
+
+### Puzzle set (EPD)
+
+The dashboard's Puzzles screen ships against
+[`src/packages/web/helpmate_web/static/puzzles.epd`](src/packages/web/helpmate_web/static/puzzles.epd),
+a plain [EPD](https://www.chessprogramming.org/Extended_Position_Description)
+file — chess's standard container for a collection of positions — committed
+to the repo, not generated on the fly. Custom problems are meant to be added
+by hand: one line per position, the four FEN fields (placement, side to
+move, castling rights, en passant target — EPD carries no move/halfmove
+clocks) followed by `;`-separated opcodes:
+
+```
+8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "KQvk.0001"
+```
+
+Exactly two opcodes are read: `hm`, the helpmate distance **in plies** (so
+`hm 4` is h#2, matching the dtm convention used everywhere else in this
+project), and `id`, a free-form label. Any other opcode is parsed and
+ignored, so a future field costs nothing to add; a line starting with `#` is
+a comment. A line without a positive `hm` is skipped.
+
+The committed file was mined from a real corpus with
+[`tools/mine_puzzles.py`](tools/mine_puzzles.py), which walks a ladder of
+ten (piece count, mate length) rungs and asks helpmate's mining API for
+positions with a unique solution (`count=1`) at each rung — read-only
+against `--tables`, deterministic given `--seed`, so regenerating the file
+produces a reviewable diff, not a reshuffle:
+
+```bash
+taskset -c 0-3 python3 tools/mine_puzzles.py --tables ~/tb \
+    --out src/packages/web/helpmate_web/static/puzzles.epd --seed 1
+```
 
 ## Quick start
 
@@ -352,7 +423,9 @@ result](#two-things-to-know-before-you-trust-a-result) below and
 [USAGE.md](docs/USAGE.md#needs-what-a-theme-actually-reads) for the full
 explanation. `helpmate themes` is the authoritative source for the
 vocabulary and always matches this build exactly; the table below is copied
-verbatim from its real output on this checkout (`helpmate 0.11.0`):
+verbatim from its real output on this checkout (`helpmate 0.13.0`; this
+release touches no C++, and `helpmate themes` was re-run to confirm the
+table is unchanged):
 
 | Theme | Needs | Definition |
 |---|---|---|

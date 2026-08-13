@@ -13,7 +13,15 @@ import helpmate
 @pytest.fixture(scope="session")
 def tables(tmp_path_factory):
     d = tmp_path_factory.mktemp("uitables")
-    helpmate.generate("KQvk", tables=str(d), threads=2)
+    # KPvk's own closure contains KQvk, KRvk, KBvk, KNvk and Kvk -- every
+    # material the previous KQvk-only fixture ever produced -- so this is a
+    # strict superset, not a swap. The extra cost (2.0s / 778 KB vs KQvk's
+    # 0.4s / 175 KB, measured 2026-08-12) buys a pawn that can actually
+    # promote, needed to exercise the promotion-dialog drag path (multiple
+    # legal moves sharing one uci prefix) that no KQvk-only position can
+    # reach -- a queen or rook never has more than one destination per
+    # square.
+    helpmate.generate("KPvk", tables=str(d), threads=2)
     return str(d)
 
 
