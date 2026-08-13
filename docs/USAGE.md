@@ -1410,10 +1410,12 @@ only ways to place or move a piece by hand — there is **no keyboard path**
 to placing a tray piece; the **FEN** field (which applies on Enter, no
 separate `Set` button) is the keyboard route to an arbitrary position.
 `Clear board` still empties every square in one action, and the `To move`
-selector still sets the side. The board is not probed on every drop — a
-half-built position is illegal by definition, and an error banner per placed
-piece would be noise — so a position with no king, or two of one colour,
-says so directly instead of spending a request to be told `invalid_fen`.
+selector still sets the side. Since v0.12.0 the board **is probed on every
+drop** — the consequence is that building a position piece by piece can raise
+the error banner on an intermediate step, because an intermediate material
+may have no table. The one case that still skips the round trip is a
+position with no king, or two of one colour: that says so directly instead
+of spending a request to be told `invalid_fen`.
 
 **What it needs from the server.** Only the read-only `/v1` routes. Every
 contract the API defines is surfaced rather than hidden: `202 fetching` shows

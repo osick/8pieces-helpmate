@@ -120,10 +120,11 @@ function clearBanner() {
   el.hidden = true; el.textContent = ""; el.classList.remove("info");
 }
 
-// Reflect a FEN in the controls without touching the API. Used both by
-// render() and by the editor, which deliberately does not probe on every
-// placement -- a half-built position is illegal by definition and an error
-// banner per placed piece would be noise, not information.
+// Reflect a FEN in the controls without touching the API. Used by render()
+// itself: this runs before the /v1/moves call below (and before the
+// kingProblem short-circuit), so the FEN field and the "to move" selector
+// always show what the user just built, even on a position the probe
+// below is about to reject.
 function syncControls(fen) {
   document.getElementById("fen-input").value = fen;
   document.getElementById("stm-select").value = splitFen(fen).stm;
@@ -281,7 +282,15 @@ async function render(fen, { push = true, retries = 0 } = {}) {
     res = await api.moves(fen);
   } catch (err) {
     if (seq !== renderSeq) return;   // superseded by a newer render()
-    if (err instanceof ApiError) { showError(err); summary.textContent = ""; return; }
+    if (err instanceof ApiError) {
+      showError(err);
+      summary.textContent = "";
+      // The board must never match a drag against a move list belonging to a
+      // position that is no longer on screen: doing so navigates to that
+      // move's child, silently discarding whatever the user just built.
+      lastMoves = [];
+      return;
+    }
     throw err;
   }
   if (seq !== renderSeq) return;     // superseded by a newer render()

@@ -166,6 +166,30 @@ def test_a_relocation_reaches_the_url(page, server):
     page.wait_for_function("() => location.hash.includes('3Q4')")
 
 
+def test_a_failed_evaluation_clears_the_move_lookup(page, server):
+    # H1 from the v0.12.0 whole-branch review. render()'s kingProblem branch
+    # clears lastMoves; the ApiError branch did not. A drag after a failed
+    # evaluation then matched against the PREVIOUS position's moves and
+    # navigated to that move's child -- discarding the user's edit and
+    # rewriting the URL to a position they never built.
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    # Put the kings adjacent: legal to build, impossible to probe.
+    _drag_square_to_square(page, "f6", "g6")
+    page.wait_for_selector("#error-banner:not([hidden])")
+    assert page.eval_on_selector_all("#move-list li", "e => e.length") == 0
+    broken = page.input_value("#fen-input")
+    # This drag corresponds to a move that was legal in the PREVIOUS position.
+    _drag_square_to_square(page, "h7", "h8")
+    page.wait_for_timeout(400)
+    final = page.input_value("#fen-input")
+    assert final != "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", \
+        "the board jumped back to a stale position"
+    assert "5K2" not in final, \
+        "the white king reappeared on f6 -- the stale move list was replayed"
+    assert final != broken, "the drag was silently swallowed"
+
+
 PROMOTION_START = "7k/4P3/5K2/8/8/8/8/8 w - - 0 1"
 
 
@@ -830,6 +854,40 @@ def test_the_board_stays_put_while_the_readout_scrolls(page, server):
     assert abs(offset_after - offset) < 1, (
         "#board's offset inside .board-pin shifted while scrolling "
         f"({offset} -> {offset_after})")
+
+
+def test_the_board_actually_sticks_when_the_page_scrolls(page, server):
+    # M5. The earlier structural-only checks passed even with `top` removed,
+    # which disables sticky entirely. .board-col's own height minus
+    # .board-pin's height leaves ~101.7px of slack on the landing position at
+    # 900px, so sticky is doing real work here and this can assert the real
+    # behaviour rather than the CSS declaration.
+    #
+    # That slack is room at the BOTTOM of the sticky range, not the amount of
+    # scroll needed to REACH it -- a distinction the review's own first draft
+    # of this test missed (scrolling by a bare 100px and expecting the pin to
+    # have mostly stopped moving already). Measured live on this fixture
+    # (2026-08-13, 900x700): .rail's 16px padding-top plus the header/nav
+    # above .board-col put the pin's resting top at ~154px, so the page must
+    # scroll ~138px before the pin reaches the sticky offset (var(--s3),
+    # 16px) at all; below that it tracks the scroll 1:1, which is correct,
+    # not broken. The stuck plateau (top pinned at exactly 16px) runs from
+    # scroll≈138 to scroll≈205 before .board-col's bottom edge starts pushing
+    # the pin off again. Scroll well inside that plateau -- with margin on
+    # both sides so this cannot flake on the boundary -- and prove the pin
+    # has actually stopped moving across a further scroll delta, which no
+    # amount of scrolling below the engagement point could show.
+    page.set_viewport_size({"width": 900, "height": 700})
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    page.evaluate("window.scrollBy(0, 170)")
+    page.wait_for_timeout(120)
+    mid = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
+    page.evaluate("window.scrollBy(0, 25)")
+    page.wait_for_timeout(120)
+    after = page.eval_on_selector(".board-pin", "e => e.getBoundingClientRect().top")
+    assert abs(after - mid) < 1, (
+        f"the pin kept moving with the page ({mid:.1f} -> {after:.1f}); sticky is inert")
 
 
 def test_the_explorer_shows_the_table_this_position_came_from(page, server):
