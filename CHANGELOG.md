@@ -6,6 +6,40 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.12.0] - 2026-08-13
+
+Dashboard UX round 2: no modes, and say the shared fact once.
+
+### Changed
+- **The board has no editing modes.** A drag matching a legal move plays it,
+  any other drag relocates the piece, and a drag off the board deletes it —
+  including a drag started on either piece tray, which places. **Erase**,
+  **Arrange** and **Done — evaluate** are gone, along with click-to-place and
+  the armed-state ring. Back undoes a relocation exactly as it undoes a move.
+  The accepted risk: relocating a piece onto a square that happens to be a
+  legal destination for it will play that move, not merely place it there.
+  Two plain clicks on a piece also relocate it, as a side effect of the same
+  handling. With click-to-place gone there is no keyboard path to placing a
+  tray piece; the FEN field, which applies on Enter, is the keyboard route to
+  an arbitrary position.
+- **The piece trays flank the board** — black above, white below, each on the
+  side of the board its colour occupies, swapping when the board is flipped.
+  Below the board, the FEN field keeps a row to itself (the longest datum
+  here, and the one field anyone might select or paste into); **To move**,
+  **Flip**, **Clear board** and **Back** share the row beneath it — two
+  deliberate rows, not the one line an earlier commit message on this branch
+  claimed before a follow-up fix corrected the layout itself.
+- **Slower and no-mate moves render as chips under a distance band.** Within
+  one distance every badge read the same string; the distance is now stated
+  once. The optimal group keeps its rows, because its per-move solution count
+  is what the list exists to show.
+- **The explorer's table band is one line** — the material, its deepest mate
+  and how much of it is solvable — with a link to Materials, where the
+  histograms already live, instead of repeating them under every position.
+- **Weight marks what you can act on**: actionable controls are 600, inert
+  text is not, and **Flip** and **Clear board** drop their borders now that
+  weight alone carries the affordance.
+
 ## [0.11.0] - 2026-08-12
 
 Dashboard UX: one skeleton for all three screens.

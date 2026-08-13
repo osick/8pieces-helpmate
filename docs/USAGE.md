@@ -1326,18 +1326,23 @@ Three screens:
   (keeps the shortest mate), **Slower** and **No mate**, with the optimal
   moves ordered by how forcing they are — the child position's optimal-line
   count, ascending, since mate length is constant across that group by
-  construction. A saturated count renders as `255+`, never `255`. Below it, the
-  optimal lines in SAN, exportable as PGN, and (since v0.8.0) the current
-  position's themes — fetched via `probe --themes` (opt-in on the client too),
-  showing `themes_note` in place of the list for a color-flipped position
-  rather than a blank field. The position is encoded in the URL
-  (`/#fen=<urlencoded>`), so every position is a shareable link and the
-  browser's back button walks the history. Since v0.11.0, a band below the
-  board and the move list shows the statistics of the table that answered the
-  current position (the `material` the API reports — see
+  construction. A saturated count renders as `255+`, never `255`. Slower and
+  No-mate moves render as chips under a shared distance label instead of a
+  full row each — within one distance every full row would have read the
+  same, so the distance is stated once and the moves that share it follow as
+  chips. Below the list, the optimal lines in SAN, exportable as PGN, and
+  (since v0.8.0) the current position's themes — fetched via `probe --themes`
+  (opt-in on the client too), showing `themes_note` in place of the list for
+  a color-flipped position rather than a blank field. The position is
+  encoded in the URL (`/#fen=<urlencoded>`), so every position is a
+  shareable link and the browser's back button walks the history. Since
+  v0.11.0, a band below the board and the move list names the table that
+  answered the current position (the `material` the API reports — see
   [`GET /v1/probe`](#get-v1probe) below — which is the mirrored table
-  whenever colours were flipped to find an answer), with a link straight into
-  Materials for that entry.
+  whenever colours were flipped to find an answer); since v0.12.0 that band
+  is one line — the material, its deepest mate and how much of it is
+  solvable — with a link straight into Materials for that entry's full
+  histograms, rather than repeating them under every position.
 - **Materials** — every table the server can reach, with piece count, size and
   location (`local` / `cached` / `remote`). Since v0.11.0 the list opens on a
   pinned **All tables** entry showing the corpus aggregate from
@@ -1377,25 +1382,38 @@ remembered (`localStorage`) and survives a reload. It is also applied
 of the page's own module — so a dark-mode user never sees a flash of the
 light page on load.
 
-**Editing a position.** Under the board, a palette places pieces. There are
-two ways to do it, and both stay available side by side:
+**Editing a position.** Since v0.12.0 the board has **no editing modes** —
+no armed piece, no `Erase`, no `Arrange`, no `Done — evaluate` button to
+commit a half-built position. One rule covers every drag:
 
-- **Click-to-place** — pick a palette piece, then click squares (this is also
-  the keyboard/touch path: it needs no drag gesture). Clicking the armed
-  piece again disarms it.
-- **Drag**, added in v0.11.0, in three gestures: drag a piece from the
-  palette onto a square to place it there; click **Arrange** and drag a piece
-  already on the board to another square to move it (legal or not — the
-  editor does not judge placement, only the final position); or drag a piece
-  off the edge of the board to remove it.
+- A drag whose start and end square match a legal move **plays that move**.
+- Any other drag **relocates** the piece to wherever it was dropped —
+  including a square already occupied, which is simply overwritten.
+- A drag released off the board **deletes** the piece.
+- A drag started on either **tray** — black's above the board, white's
+  below, each on the side of the board its colour occupies, swapping
+  position with `Flip` — **places** that piece on the square it lands on.
 
-`Erase` empties the squares you click, `Clear board` empties all of them, and
-the `To move` selector sets the side. While editing, the board is not probed
-on every click or drop — a half-built position is illegal by definition — so
-either click the armed palette entry again or press the visible **Done —
-evaluate** button to evaluate what you have built. A position with no king,
-or two of one colour, says so directly instead of spending a request to be
-told `invalid_fen`.
+`Back` undoes all four the same way: one entry in the same history stack the
+move list uses. The one deliberate risk this design accepts: relocating a
+piece onto a square that happens to be a legal destination for it **will
+play that move** rather than merely place it there — the board cannot tell
+"I am rearranging" from "I am moving" except by asking, and asking on every
+drop was the armed-mode overhead this removed. If that happens, `Back`
+undoes it exactly as it would undo an intended move.
+
+There is also a non-drag path: **two plain clicks on a piece relocate it**,
+a side effect of the board's own move-input handling treating a
+click-then-click the same as a drag that starts and ends on different
+squares. With click-to-place gone, this and dragging from a tray are the
+only ways to place or move a piece by hand — there is **no keyboard path**
+to placing a tray piece; the **FEN** field (which applies on Enter, no
+separate `Set` button) is the keyboard route to an arbitrary position.
+`Clear board` still empties every square in one action, and the `To move`
+selector still sets the side. The board is not probed on every drop — a
+half-built position is illegal by definition, and an error banner per placed
+piece would be noise — so a position with no king, or two of one colour,
+says so directly instead of spending a request to be told `invalid_fen`.
 
 **What it needs from the server.** Only the read-only `/v1` routes. Every
 contract the API defines is surfaced rather than hidden: `202 fetching` shows
@@ -1473,7 +1491,7 @@ uncaught exceptions) has the same shape:
 
 ```
 $ curl -s http://127.0.0.1:8642/v1/health
-{"status":"ok","version":"0.11.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
+{"status":"ok","version":"0.12.0","mine_timeout":30.0,"tables_local":2,"tables_remote":0}
 ```
 
 `mine_timeout` (since v0.11.0) echoes the server's `--mine-timeout` setting
