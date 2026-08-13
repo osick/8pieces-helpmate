@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseEpd, pieceCount, difficultyOf, pickSession, gradeMove, materialOf }
+import { parseEpd, pieceCount, difficultyOf, byDifficulty, pickSession, gradeMove, materialOf }
   from "../../helpmate_web/static/js/lib/puzzles.js";
 
 const EPD = `# a comment line is ignored
@@ -34,11 +34,20 @@ test("piece count counts men, not FEN characters", () => {
 });
 
 test("difficulty is mate length first, piece count second", () => {
-  const a = { fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 4 };   // h#2, 3 men
-  const b = { fen: "8/7k/5K2/8/6B1/8/8/6Q1 b - - 0 1", dtm: 4 }; // h#2, 4 men
-  const c = { fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 8 };   // h#4, 3 men
-  assert.deepEqual(difficultyOf(a) < difficultyOf(b) ? "a" : "b", "a");
-  const sorted = [c, b, a].sort((x, y) => (x.dtm - y.dtm) || (pieceCount(x.fen) - pieceCount(y.fen)));
+  const a = { fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 6 };    // h#3, 3 men
+  const b = { fen: "8/7k/5K2/8/6B1/8/8/6Q1 b - - 0 1", dtm: 6 };  // h#3, 4 men
+  const c = { fen: "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", dtm: 16 };   // h#8, 3 men
+  assert.deepEqual(difficultyOf(a), [6, 3]);
+  assert.deepEqual(difficultyOf(b), [6, 4]);
+  // byDifficulty, not `<` on difficultyOf's own array -- this crosses the
+  // single-digit/double-digit dtm boundary (6 vs 16) on purpose: JS array
+  // comparison stringifies, so [6, 3] < [16, 3] is FALSE ("16..." sorts
+  // before "6..." lexicographically) even though dtm 6 is clearly easier.
+  // byDifficulty compares the fields numerically and gets it right.
+  assert.equal(String(difficultyOf(a) < difficultyOf(c)), "false",
+    "demonstrates why difficultyOf's array must never be compared with <");
+  assert.ok(byDifficulty(a, c) < 0, "byDifficulty must still rank a before c");
+  const sorted = [c, b, a].sort(byDifficulty);
   assert.deepEqual(sorted, [a, b, c]);
 });
 
@@ -62,7 +71,13 @@ test("a session spans the range rather than clustering at one difficulty", () =>
   let seed = 7;
   const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
   const s = pickSession(all, 10, rnd);
-  assert.ok(s[9].dtm - s[0].dtm > 100, `span too narrow: ${s[0].dtm}..${s[9].dtm}`);
+  // 100 elements / 10 bands = exactly 10 elements (dtm step 20) per band, so
+  // correct banding guarantees band 0 (dtm 2..20) and band 9 (dtm 182..200)
+  // never overlap: the span can never be less than 182-20 = 162. A threshold
+  // below that (e.g. 100) is trivially satisfied even by broken banding, so
+  // it would not have caught banding regressing to something narrower than
+  // this file's own proven floor.
+  assert.ok(s[9].dtm - s[0].dtm >= 162, `span too narrow: ${s[0].dtm}..${s[9].dtm}`);
 });
 
 test("a session never exceeds what the set holds", () => {

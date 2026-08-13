@@ -3,9 +3,14 @@
 puzzle mode.
 
 Offline, run by hand; its output (an EPD file) is committed. It walks a
-small ladder of (piece count, mate length) buckets spanning the measured
-corpus -- 4 men at h#2 through 6 men at h#8.5-9.5 -- and for each bucket
-picks a handful of materials, ranked by how many unique-solution positions
+ladder of ten (piece count, mate length) rungs spanning the measured corpus
+-- 4 men at h#2 through 6 men at h#9, each rung a genuinely distinct
+(dtm, pieces) pair so a session drawn across the ladder actually increases
+in difficulty ten separate times, not five plateaus shown twice (fix round 1:
+the original five-rung ladder gave pickSession's equal-band selection only
+five distinct depths for a ten-puzzle session, so adjacent slots collapsed
+onto the same difficulty -- see task-4-report.md, "Fix round 1"). For each
+rung it picks a handful of materials, ranked by how many unique-solution positions
 they hold at that depth. That count is read straight out of each material's
 ``<material>.stats.json`` (the ``uniqueness`` histogram, keyed by side to
 move, dtm, and optimal-line count) -- no probing needed, since mining a
@@ -43,15 +48,39 @@ from pathlib import Path
 
 import helpmate
 
-# (label, pieces, [dtm, ...]) -- the ladder. h# is dtm/2; an odd dtm is a
-# "half" helpmate (White moves first). Values match the measured corpus
-# table in the task brief: 4|h#2, 5|h#3, 6|h#5, 6|h#8, 6|h#8.5-9.5.
+# (label, pieces, dtm) -- the ladder. h# is dtm/2; an odd dtm is a "half"
+# helpmate (White moves first). Ten rungs, each a distinct (dtm, pieces)
+# pair, monotonically increasing in both -- so that pickSession's
+# equal-band selection over a real corpus (many puzzles per rung) actually
+# produces ten different depths for a ten-puzzle session, not five shown
+# twice. Some depths are reachable by two different piece counts (dtm=6 at
+# 4 and 5 men; dtm=12 at 5 and 6 men) -- both are kept as separate rungs on
+# purpose: same mate length, more or fewer pieces is itself a difficulty
+# axis (piece count is difficultyOf's tiebreaker), and it is also how the
+# corpus actually looks -- 5-piece problems run deeper than 6-piece.
+# Availability (positions with a unique solution) measured against the
+# real corpus, read via the same uniqueness histogram this script uses:
+#   1.  4 men  h#2  dtm  4    1,691,640
+#   2.  4 men  h#3  dtm  6      607,628
+#   3.  5 men  h#3  dtm  6  152,760,522
+#   4.  6 men  h#4  dtm  8   21,646,697
+#   5.  6 men  h#5  dtm 10   12,190,532
+#   6.  5 men  h#6  dtm 12    4,285,739
+#   7.  6 men  h#6  dtm 12    3,849,934
+#   8.  6 men  h#7  dtm 14    1,106,081
+#   9.  6 men  h#8  dtm 16       53,300
+#  10.  6 men  h#9  dtm 18          317  -- genuinely scarce; expect THIN.
 LADDER = [
-    ("4 men, h#2", 4, [4]),
-    ("5 men, h#3", 5, [6]),
-    ("6 men, h#5", 6, [10]),
-    ("6 men, h#8", 6, [16]),
-    ("6 men, h#8.5-9.5", 6, [17, 18, 19]),
+    ("4 men, h#2", 4, 4),
+    ("4 men, h#3", 4, 6),
+    ("5 men, h#3", 5, 6),
+    ("6 men, h#4", 6, 8),
+    ("6 men, h#5", 6, 10),
+    ("5 men, h#6", 5, 12),
+    ("6 men, h#6", 6, 12),
+    ("6 men, h#7", 6, 14),
+    ("6 men, h#8", 6, 16),
+    ("6 men, h#9", 6, 18),
 ]
 
 # Materials considered per (pieces, dtm) bucket, ranked by how many
@@ -185,8 +214,9 @@ def main() -> int:
                          help="read-only tables directory (default: ~/tb)")
     parser.add_argument("--out", type=Path, required=True,
                          help="EPD file to write (must not resolve under ~/tb)")
-    parser.add_argument("--per-bucket", type=int, default=40,
-                         help="max positions taken per (material, dtm) bucket (default: 40)")
+    parser.add_argument("--per-bucket", type=int, default=20,
+                         help="max positions taken per (material, dtm) bucket (default: 20; "
+                              "ten rungs x up to 5 materials each keeps the total near 1000)")
     parser.add_argument("--seed", type=int, default=1,
                          help="RNG seed for which/how positions are sampled and ordered "
                               "within each bucket (default: 1)")
@@ -206,21 +236,30 @@ def main() -> int:
     rows: list[str] = []
     summary: list[tuple[str, str, int, int, int, int, float]] = []
     # (tier label, material, dtm, available, requested, found, seconds)
+    rung_totals: list[tuple[str, int, int, int]] = []
+    # (tier label, dtm, materials found, puzzles found) -- a rung can be
+    # thin two different ways a single material row cannot show: fewer
+    # eligible materials than TOP_K_MATERIALS (the depth is rare across the
+    # whole corpus, not just for one material), or a low total even when
+    # every individual material clears --per-bucket on its own.
 
-    for label, pieces, dtms in LADDER:
-        for dtm in dtms:
-            ranked = rank_materials(materials, pieces, dtm, stats)
-            if not ranked:
-                summary.append((label, "(none eligible)", dtm, 0, 0, 0, 0.0))
-                continue
-            for material, available in ranked:
-                fens, elapsed = mine_bucket(
-                    tb, material, dtm, available, args.per_bucket, rng)
-                for i, fen in enumerate(fens, start=1):
-                    puzzle_id = f"{material}.h{dtm}.{i:04d}"
-                    rows.append(to_epd_line(fen, dtm, puzzle_id))
-                summary.append((label, material, dtm, available,
-                                 min(args.per_bucket, available), len(fens), elapsed))
+    for label, pieces, dtm in LADDER:
+        ranked = rank_materials(materials, pieces, dtm, stats)
+        if not ranked:
+            summary.append((label, "(none eligible)", dtm, 0, 0, 0, 0.0))
+            rung_totals.append((label, dtm, 0, 0))
+            continue
+        rung_found = 0
+        for material, available in ranked:
+            fens, elapsed = mine_bucket(
+                tb, material, dtm, available, args.per_bucket, rng)
+            for i, fen in enumerate(fens, start=1):
+                puzzle_id = f"{material}.h{dtm}.{i:04d}"
+                rows.append(to_epd_line(fen, dtm, puzzle_id))
+            summary.append((label, material, dtm, available,
+                             min(args.per_bucket, available), len(fens), elapsed))
+            rung_found += len(fens)
+        rung_totals.append((label, dtm, len(ranked), rung_found))
 
     # --- bucket summary table -------------------------------------------
     print(f"{'tier':<20} {'material':<10} {'dtm':>4} {'available':>10} "
@@ -234,6 +273,18 @@ def main() -> int:
             "  <-- THIN" if available < args.per_bucket else "")
         print(f"{label:<20} {material:<10} {dtm:>4} {available:>10} "
               f"{requested:>10} {found:>6} {elapsed:>7.2f}{flag}")
+
+    # --- rung totals -- catches a rung that is thin ACROSS materials, not ---
+    # just one material below --per-bucket (e.g. only 2 of 5 materials exist
+    # at that depth at all, but each of those 2 individually clears
+    # --per-bucket, so no single row above would show it).
+    ideal = TOP_K_MATERIALS * args.per_bucket
+    print(f"\n{'tier':<20} {'dtm':>4} {'materials':>10} {'puzzles':>8}")
+    for label, dtm, n_materials, found in rung_totals:
+        flag = "  <-- EMPTY RUNG" if found == 0 else (
+            "  <-- THIN RUNG" if n_materials < TOP_K_MATERIALS or found < ideal else "")
+        print(f"{label:<20} {dtm:>4} {n_materials:>10} {found:>8}{flag}")
+
     print(f"\ntotal puzzles: {len(rows)}")
 
     # --- write --------------------------------------------------------

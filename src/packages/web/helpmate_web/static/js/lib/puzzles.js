@@ -66,12 +66,19 @@ export function pieceCount(fen) {
 }
 
 // Mate length first -- a longer helpmate is harder. Piece count second, at
-// equal length. Returned as an array so callers can compare lexicographically.
+// equal length. [dtm, pieces] -- a display/inspection tuple, NOT something
+// to compare with `<`: JS orders arrays by stringifying them, so
+// [6, 5] < [10, 6] is false even though dtm 6 is the easier puzzle (any
+// double-digit dtm against a single-digit one breaks this the same way).
+// For ordering, always use byDifficulty (below) or compare .dtm/pieceCount
+// numerically yourself -- never the array this function returns.
 export function difficultyOf(p) {
   return [p.dtm, pieceCount(p.fen)];
 }
 
-function byDifficulty(a, b) {
+// The safe, numeric comparator -- pass to Array#sort, never `<` on
+// difficultyOf's own return value (see the warning above).
+export function byDifficulty(a, b) {
   const [ad, ap] = difficultyOf(a), [bd, bp] = difficultyOf(b);
   return (ad - bd) || (ap - bp);
 }
