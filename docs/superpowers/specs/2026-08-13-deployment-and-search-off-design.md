@@ -168,6 +168,45 @@ current bill matters more and an arm64 image build is acceptable.
 corpus, and producing it is a long streaming job over every table. It is a work
 item, not a footnote.
 
+### What a deployment serves is not what generation produces
+
+The stated goal is the full 6-piece closure. That is **715 materials, 41.2 TB
+raw, roughly 4.5-6.3 TB compressed** — derived from
+`size = KK x prod(48 for pawns, 64 otherwise)` per `slice_index.cpp:14-18`, and
+checked against disk (predicted 28.88 GiB for a pawnless 6-piece table, measured
+29G).
+
+| pawns | tables | per table | subtotal | share |
+|---|---|---|---|---|
+| 0 | 330 | 31.0 GB | 10.2 TB | 24.8% |
+| 1 | 240 | 90.9 GB | 21.8 TB | 52.9% |
+| 2 | 108 | 68.2 GB | 7.4 TB | 17.9% |
+| 3 | 32 | 51.1 GB | 1.6 TB | 4.0% |
+| 4 | 5 | 38.3 GB | 0.2 TB | 0.5% |
+
+A pawn triples a table, because `KK` goes from 462 to 1806 the moment one
+appears and that outweighs the pawn's smaller 48-square radix. The 240
+one-pawn materials are over half the corpus on their own; the pawnless closure
+is only a quarter of it.
+
+**No affordable host stores that, and the deployment does not need to.** These
+are separate concerns and this design keeps them separate:
+
+- **Generation and archival** target the full corpus. Its home is the Hugging
+  Face dataset, not a VPS.
+- **The deployment** serves a chosen subset — the 23 puzzle materials plus
+  whatever else is worth exploring — sized to fit the mounted volume. Materials
+  outside it already have correct behaviour: `404 unknown_material`.
+
+Do **not** wire the deployment to `--hf-repo` as a fallback for missing
+materials. `RemoteSource` caches whole files, so a probe into a one-pawn
+6-piece material would trigger a 90 GB download behind a single HTTP request.
+An honest 404 is better than a request that appears to hang for hours.
+
+So the hosting recommendation above stands, scoped to a deployment subset. The
+full corpus is a storage and generation question, answered on Hugging Face,
+and out of scope here.
+
 ## Repositories
 
 A new **private deployment repository** holds the `Dockerfile`, the Coolify
