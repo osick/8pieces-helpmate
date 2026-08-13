@@ -156,6 +156,7 @@ button:disabled { color: var(--ink-soft); cursor: default; opacity: .6; }
    the two board controls below can drop their borders without becoming
    ambiguous -- and why nothing inert is ever 600. */
 nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
+#btn-puzzle-solution, #btn-puzzle-next,
 .move-group > ul > li, .chips li { font-weight: 600; }
 
 #btn-flip, #btn-clear-board { border-color: transparent; background: none; }
@@ -185,7 +186,7 @@ nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
 
    #panel-explorer, #panel-materials and #panel-mine all wrap their children
    in .rail/.readout, so all three share this border/background. */
-#panel-explorer, #panel-materials, #panel-mine, #panel-themes {
+#panel-explorer, #panel-puzzles, #panel-materials, #panel-mine, #panel-themes {
   border: 1px solid var(--rule); border-radius: var(--r);
   background: var(--readout);
 }
@@ -407,6 +408,64 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 .primer summary { cursor: pointer; color: var(--ink); font-weight: 600; }
 .primer p { max-width: 62ch; }
 .primer b { color: var(--ink); }
+
+/* ---------- puzzles ---------- */
+
+/* Same job as #panel-explorer, asking a different question: a rail carrying
+   a sticky board (.board-pin, .board-col, .side are the SAME classes the
+   explorer uses, so the sticky/stretch/breakpoint rules above already apply
+   here for free) beside a readout, this time listing a line to reproduce
+   instead of a move list to browse. Mobile-first single column, two columns
+   from 860px -- identical breakpoint and column widths to #panel-explorer,
+   so the two screens read as one product rather than two different grids
+   glued together by shared class names alone. */
+#panel-puzzles { display: flex; flex-direction: column; }
+#puzzle-board { width: 100%; max-width: 460px; margin-inline: auto; aspect-ratio: 1; }
+/* .eyebrow's text-transform: uppercase is right for a fixed section label
+   ("MOVES", "OPTIMAL LINES") but wrong for a live counter -- "Puzzle 3 of
+   10" is a sentence, not a label, and rendering it in caps would be the only
+   place on either screen where an eyebrow's rendered text no longer matches
+   what was written. Keep the rest of the family (size, weight, colour,
+   letter-spacing) and cancel only the case transform. */
+#puzzle-progress { text-transform: none; }
+
+@media (min-width: 860px) {
+  #panel-puzzles {
+    display: grid;
+    grid-template-columns: minmax(300px, 460px) minmax(320px, 1fr);
+  }
+}
+
+/* The line: one row per MOVE NUMBER, not per ply -- eight rows even at the
+   hardest tier's sixteen plies (h#8), not a wall of sixteen bare lines. Each
+   row holds up to two .ply cells (Black's half, White's half); a puzzle
+   whose line is a single ply (a very short h#0.5) still gets a row with one
+   empty second cell rather than a ragged grid. */
+#puzzle-line {
+  list-style: none; margin: var(--s2) 0 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--mono); font-size: var(--f1);
+}
+.move-row {
+  display: grid; grid-template-columns: 2.4rem 1fr 1fr; gap: var(--s2);
+  align-items: center; padding: .2rem 0;
+}
+.move-no { color: var(--ink-faint); }
+.ply { padding: .15rem .4rem; border-radius: 3px; min-height: 1.3em; }
+/* A check at --ink, a cross at --flag -- both already the tokens the rest of
+   the page uses for exactly this: --flag is already the error colour (see
+   #error-banner), and --ink is the top of the move-list's own ordinal scale.
+   No new colour, and the glyph carries the meaning together with the word
+   that follows it (the SAN), never colour alone. */
+.ply.correct { color: var(--ink); font-weight: 600; }
+.ply.correct::before { content: "✓ "; }
+.ply.wrong { color: var(--flag); font-weight: 600; }
+.ply.wrong::before { content: "✗ "; }
+/* Revealed-but-never-attempted plies (the rest of the line once Show
+   solution fires, or once the error budget trips) are neither a right nor a
+   wrong answer -- muted and unmarked, same family as the move list's own
+   "slower" tier. */
+.ply.revealed:not(.correct):not(.wrong) { color: var(--ink-soft); font-style: italic; }
 
 /* ---------- materials ---------- */
 

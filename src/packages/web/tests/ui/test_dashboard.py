@@ -1474,3 +1474,66 @@ def test_the_themes_screen_explains_every_motif_the_build_detects(page, server):
     # answer on a saturated position
     needs = page.eval_on_selector_all("#themes-doc .theme-needs", "e => e.length")
     assert needs == len(api)
+
+
+PUZZLE_URL = "/#panel=puzzles"
+
+# The `server` fixture's `tables` only generate the KPvk closure (KQvk, KRvk,
+# KBvk, KNvk, KPvk, Kvk -- see conftest.py) for speed, while the real
+# puzzles.epd Task 4 shipped spans materials well outside it entirely (up to
+# 6-man combinations like KBvkqrn, verified by inspection: zero overlap with
+# the closure) -- every one of those 404s against this fixture, whichever ten
+# pickSession happened to draw. Serve a ten-line EPD built from GOLDEN
+# instead, the same position already proven solvable against this exact
+# fixture by test_dashboard_renders_the_initial_position above -- so what
+# these tests exercise is the puzzle screen's own grading logic, not whether
+# this speed-oriented fixture happens to have generated the right table. The
+# ten entries share one FEN (harmless: nothing here asserts on per-puzzle
+# variety) so pickSession's `sorted.length <= n` branch returns all ten
+# verbatim, with no randomness left to make a test flaky.
+_PUZZLE_EPD_FIELDS = GOLDEN.rsplit(" ", 2)[0]   # placement/stm/castling/ep, no clocks
+
+
+def _mock_puzzle_set(page):
+    body = "\n".join(f'{_PUZZLE_EPD_FIELDS} ; hm 2 ; id "p{i}"' for i in range(10)) + "\n"
+    page.route("**/puzzles.epd", lambda route: route.fulfill(
+        status=200, content_type="text/plain", body=body))
+
+
+def test_a_puzzle_screen_opens_with_a_prompt_and_a_board(page, server):
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-board .cm-chessboard")
+    prompt = page.inner_text("#puzzle-prompt")
+    assert "h#" in prompt
+    assert "1 of 10" in page.inner_text("#puzzle-progress")
+
+
+def test_a_correct_move_is_marked_and_advances_the_line(page, server):
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line .ply")
+    page.click("#btn-puzzle-solution")           # reveal, then replay it
+    first = page.eval_on_selector("#puzzle-line .ply", "e => e.textContent.trim()")
+    assert first
+
+
+def test_a_wrong_move_is_marked_and_shows_the_right_one(page, server):
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line")
+    # drive a deliberately wrong first move via the test hook
+    page.evaluate("window.__puzzlePlay('a1a2')")
+    page.wait_for_selector("#puzzle-line .ply.wrong")
+    assert page.eval_on_selector_all("#puzzle-line .ply.wrong", "e => e.length") == 1
+    assert page.is_visible("#puzzle-correction")
+
+
+def test_exceeding_the_error_budget_reveals_the_solution(page, server):
+    _mock_puzzle_set(page)
+    page.goto(server + PUZZLE_URL)
+    page.wait_for_selector("#puzzle-line")
+    page.evaluate("window.__puzzleSetBudget(1)")
+    page.evaluate("window.__puzzlePlay('a1a2')")
+    page.evaluate("window.__puzzlePlay('a1a3')")
+    page.wait_for_selector("#puzzle-line.revealed")
