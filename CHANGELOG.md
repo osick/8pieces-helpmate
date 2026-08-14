@@ -6,6 +6,36 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.15.0] - 2026-08-14
+
+Dashboard polish for a public deployment: the chrome stays where you left it,
+and the site can now explain itself.
+
+### Added
+- **About, Technique and Privacy screens.** About is on the nav; Technique
+  (indexing, generation, storage, and why the numbers are trustworthy) and
+  Privacy have no nav button and are reached from About and the footer.
+  `panels.js` derives its panel list from the DOM, so all three needed no
+  registration. The explorer also carries a short About card under its primer.
+- A delegated handler for in-page `a[data-panel]` links, so following one
+  **keeps the position you were looking at** rather than dropping the `fen`
+  parameter when the hash is rewritten.
+- `--header-h` / `--pin-top`: the header's measured height, published from
+  `js/chrome.js` via a `ResizeObserver`, with a CSS fallback. The header wraps
+  to two lines between roughly 860px and 1100px, so a constant would put the
+  board behind it at one width and leave a gap at the other.
+
+### Changed
+- **The header is sticky**, and the board, the material list and the search
+  form now pin below it instead of at the top of the viewport. The board
+  already stuck; everything around it scrolled away, which left it jammed
+  against the window edge with its piece tray clipped.
+- The board is **lifted off the rail** with a three-layer shadow (hairline
+  edge, contact, cast), all in the palette's existing achromatic ink.
+- **The three footer placeholders are real links**: Source and Licence to the
+  repository, plus About and Privacy. `Dataset` is gone rather than dead — the
+  tables are not published yet, and About says so in a sentence.
+
 ## [0.14.0] - 2026-08-13
 
 ### Changed
