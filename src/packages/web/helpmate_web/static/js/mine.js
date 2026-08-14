@@ -125,7 +125,7 @@ async function runQuery(q, status, results, seq, retries = 0) {
   });
 }
 
-export function initMine() {
+export function initMine(health) {
   const form = document.getElementById("mine-form");
   const status = document.getElementById("mine-status");
   const results = document.getElementById("mine-results");
@@ -148,10 +148,13 @@ export function initMine() {
     }
   }).catch(() => { /* leave the picker empty; the numeric filters still work */ });
 
-  api.health().then(({ body }) => {
-    if (typeof body.mine_timeout === "number" && body.mine_timeout > 0)
-      budgetSeconds = body.mine_timeout;
-  }).catch(() => { /* keep the default; the countdown is a nicety */ });
+  // The caller (index.html) already fetched /v1/health once for the whole
+  // boot -- initMine only running when that response's mining_enabled is
+  // true, so `health` is always the real body here, never null. Reading the
+  // budget off it rather than issuing a second /v1/health keeps that "one
+  // boot, one request" promise true in the config that actually has search.
+  if (health && typeof health.mine_timeout === "number" && health.mine_timeout > 0)
+    budgetSeconds = health.mine_timeout;
 
   document.getElementById("btn-stop").addEventListener("click", () => {
     if (inFlight) inFlight.abort();

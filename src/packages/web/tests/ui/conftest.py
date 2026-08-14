@@ -46,13 +46,14 @@ def empty_tables(tmp_path_factory):
 # generator so each fixture below can `yield from` it: two session-scoped
 # servers (a populated corpus and an empty one) with one copy of the
 # start/wait/terminate dance between them.
-def _serve(tables):
+def _serve(tables, enable_mine=False):
     port = _free_port()
     log = tempfile.TemporaryFile(mode="w+")
     p = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "--factory",
          "helpmate_server.main:_app_for_tests", "--port", str(port)],
-        env={**os.environ, "HELPMATE_TABLES": tables},
+        env={**os.environ, "HELPMATE_TABLES": tables,
+             "HELPMATE_ENABLE_MINE": "1" if enable_mine else "0"},
         stdout=log, stderr=subprocess.STDOUT,
     )
     url = f"http://127.0.0.1:{port}"
@@ -82,6 +83,14 @@ def _serve(tables):
 @pytest.fixture(scope="session")
 def server(tables):
     yield from _serve(tables)
+
+
+@pytest.fixture(scope="session")
+def server_mining(tables):
+    """Search is off by default from 0.14.0, so the tests that exercise it
+    need a server that has opted in. Session-scoped like the others: this is
+    a second uvicorn, not a second corpus."""
+    yield from _serve(tables, enable_mine=True)
 
 
 @pytest.fixture(scope="session")

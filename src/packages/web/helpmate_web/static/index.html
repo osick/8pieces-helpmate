@@ -193,6 +193,7 @@
 </footer>
 
 <script type="module">
+  import { api } from "/js/api.js";
   import { initPanels } from "/js/panels.js";
   import { initExplorer } from "/js/explorer.js";
   import { initPuzzles } from "/js/puzzle.js";
@@ -200,7 +201,31 @@
   import { initMine } from "/js/mine.js";
   import { initServerChip } from "/js/chip.js";
   import { initThemesDoc } from "/js/themes-doc.js";
-  initPanels(); initExplorer(); initPuzzles(); initMaterials(); initMine(); initServerChip(); initThemesDoc();
+
+  // One /v1/health for the whole boot: the chip needs it and so does the
+  // decision below, so they share the response rather than racing for it.
+  //
+  // Bounded, because this `await` gates every init*() call below it: a
+  // reachable-but-slow server (an uncached hf_hub_download under a lock in
+  // --hf-repo mode, or LocalDir.catalog() re-parsing every .stats.json in a
+  // large corpus) must not leave the whole page inert. 5s is generous enough
+  // for a normal cold catalog read yet short enough that a hung server still
+  // yields a usable shell -- fetch has no default timeout of its own.
+  let health = null;
+  try { health = (await api.health({ signal: AbortSignal.timeout(5000) })).body; } catch { health = null; }
+
+  // Fail closed. An unreachable server is not evidence that search is on, and
+  // a search form on a page whose server cannot answer is worse than no form.
+  // Removed from the document, not hidden: a hidden form still submits on
+  // Enter and still starts its status ticker.
+  if (!health || health.mining_enabled !== true) {
+    document.getElementById("panel-mine")?.remove();
+    document.querySelector("nav button[data-panel='mine']")?.remove();
+  }
+
+  initPanels(); initExplorer(); initPuzzles(); initMaterials();
+  if (health && health.mining_enabled === true) initMine(health);
+  initServerChip(health); initThemesDoc();
 </script>
 </body>
 </html>

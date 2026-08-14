@@ -22,76 +22,134 @@ def test_mine_material_traversal_rejected(tmp_path):
     tables = tmp_path / "tables"; tables.mkdir()
     secret = tmp_path / "secret"; secret.mkdir()
     (secret / "target.hm").write_bytes(b"\x00" * 8)
-    c = TestClient(create_app(ChainSource([LocalDir(tables)])),
+    c = TestClient(create_app(ChainSource([LocalDir(tables)]), enable_mine=True),
                    raise_server_exceptions=False)
     r = c.get("/v1/mine", params={"material": "../secret/target", "dtm": 2})
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "invalid_material"
 
-def test_mine_golden(client):
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 1, "max": 5})
+def test_mine_golden(client_mining):
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 1, "max": 5})
     assert r.status_code == 200
     b = r.json()
     # KQvk has more than 5 dtm=2/count=1 positions, so max=5 is truncated.
     assert len(b["fens"]) == 5 and b["truncated"] is True
 
-def test_mine_exhausted_not_truncated(client):
+def test_mine_exhausted_not_truncated(client_mining):
     # Kvk is unsolvable everywhere: mining yields zero rows, nothing truncated.
-    b = client.get("/v1/mine", params={"material": "Kvk", "dtm": 2}).json()
+    b = client_mining.get("/v1/mine", params={"material": "Kvk", "dtm": 2}).json()
     assert b == {"fens": [], "truncated": False, "skipped_saturated": 0}
 
 def test_mine_cap_clamps(kqvk_dir):
-    app = create_app(ChainSource([LocalDir(kqvk_dir)]), mine_cap=3)
+    app = create_app(ChainSource([LocalDir(kqvk_dir)]), mine_cap=3, enable_mine=True)
     c = TestClient(app)
     b = c.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 50}).json()
     assert len(b["fens"]) == 3 and b["truncated"] is True
 
 def test_mine_timeout_truncates(kqvk_dir):
-    app = create_app(ChainSource([LocalDir(kqvk_dir)]), mine_timeout=0.0)
+    app = create_app(ChainSource([LocalDir(kqvk_dir)]), mine_timeout=0.0, enable_mine=True)
     c = TestClient(app)
     b = c.get("/v1/mine", params={"material": "KQvk", "dtm": 2}).json()
     assert b == {"fens": [], "truncated": True, "note": "timeout", "skipped_saturated": 0}
 
-def test_mine_unknown_material(client):
-    assert client.get("/v1/mine", params={"material": "KNvkqr", "dtm": 2}).status_code == 404
+def test_mine_unknown_material(client_mining):
+    assert client_mining.get("/v1/mine", params={"material": "KNvkqr", "dtm": 2}).status_code == 404
 
-def test_mine_shape_filters(client):
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,
+def test_mine_shape_filters(client_mining):
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,
                                        "starts": 2, "ends": 4, "max": 200})
     assert r.status_code == 200
     body = r.json()
     assert GOLDEN in body["fens"]
     assert body["skipped_saturated"] == 0
 
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 4,
                                        "starts": 3, "max": 200})
     assert r.status_code == 200 and GOLDEN not in r.json()["fens"]
 
-def test_mine_shape_validation(client):
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 2, "starts": 5})
+def test_mine_shape_validation(client_mining):
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "count": 2, "starts": 5})
     assert r.status_code == 400
     assert r.json()["error"]["code"] == "invalid_filter"
 
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "ends": 0})
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "ends": 0})
     assert r.status_code == 400 and r.json()["error"]["code"] == "invalid_filter"
 
-def test_mine_shape_negative_is_rejected(client):
+def test_mine_shape_negative_is_rejected(client_mining):
     # -1 must be a usage error, not silently "unset" (parity with the CLI)
     for params in ({"material": "KQvk", "dtm": 2, "starts": -1},
                    {"material": "KQvk", "dtm": 2, "ends": -1}):
-        r = client.get("/v1/mine", params=params)
+        r = client_mining.get("/v1/mine", params=params)
         assert r.status_code == 400, r.text
         assert r.json()["error"]["code"] == "invalid_filter"
 
-def test_mine_without_shape_filters_is_unfiltered(client):
+def test_mine_without_shape_filters_is_unfiltered(client_mining):
     # omitting the parameters must still work (None path)
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5})
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5})
     assert r.status_code == 200 and len(r.json()["fens"]) == 5
 
 def test_server_main_builds(monkeypatch, kqvk_dir):
     import helpmate_server.main as m
     captured = {}
-    monkeypatch.setattr(m, "_run", lambda app, host, port: captured.update(
-        host=host, port=port, routes={r.path for r in app.routes}))
+    monkeypatch.setattr(m, "_run", lambda app, host, port, limit_concurrency=None:
+        captured.update(host=host, port=port, routes={r.path for r in app.routes}))
     m.main(["--tables", str(kqvk_dir), "--port", "9999"])
     assert captured["port"] == 9999 and "/v1/probe" in captured["routes"]
+
+def test_server_main_wires_enable_mine_and_limit_concurrency(monkeypatch, kqvk_dir):
+    # test_server_main_builds only checks the port and the route set, and
+    # every _run monkeypatch in this file (including the one above) declares
+    # limit_concurrency=None as a *default* -- so deleting main()'s
+    # `a.limit_concurrency` pass-through would still satisfy every existing
+    # test. Pin both seams down for real: build the app through main() twice
+    # (default, then --enable-mine) and assert the two runs genuinely answer
+    # differently, and capture limit_concurrency with NO default so dropping
+    # the pass-through raises TypeError here instead of silently passing.
+    import helpmate_server.main as m
+    from fastapi.testclient import TestClient
+    captured = {}
+
+    def fake_run(app, host, port, limit_concurrency):
+        captured["app"] = app
+        captured["limit_concurrency"] = limit_concurrency
+
+    monkeypatch.setattr(m, "_run", fake_run)
+
+    m.main(["--tables", str(kqvk_dir), "--port", "9999"])
+    assert captured["limit_concurrency"] is None
+    default_client = TestClient(captured["app"])
+    assert default_client.get("/v1/health").json()["mining_enabled"] is False
+    r = default_client.get("/v1/mine", params={"material": "KQvk", "dtm": 2})
+    assert r.status_code == 503
+    assert r.json()["error"]["code"] == "mining_disabled"
+
+    m.main(["--tables", str(kqvk_dir), "--port", "9999", "--enable-mine",
+            "--limit-concurrency", "64"])
+    assert captured["limit_concurrency"] == 64
+    enabled_client = TestClient(captured["app"])
+    assert enabled_client.get("/v1/health").json()["mining_enabled"] is True
+    r = enabled_client.get("/v1/mine", params={"material": "KQvk", "dtm": 2})
+    assert r.status_code == 200
+    assert "fens" in r.json()
+
+def test_mine_is_disabled_by_default(client):
+    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 4})
+    assert r.status_code == 503
+    body = r.json()
+    assert body["error"]["code"] == "mining_disabled"
+    # The hint must name the flag: a 503 with no way forward is a dead end.
+    assert "--enable-mine" in body["error"]["hint"]
+
+
+def test_health_reports_mining_disabled_by_default(client):
+    assert client.get("/v1/health").json()["mining_enabled"] is False
+
+
+def test_health_reports_mining_enabled_when_on(client_mining):
+    assert client_mining.get("/v1/health").json()["mining_enabled"] is True
+
+
+def test_mine_answers_normally_when_enabled(client_mining):
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 4})
+    assert r.status_code == 200
+    assert "fens" in r.json()

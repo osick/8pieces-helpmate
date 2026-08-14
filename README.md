@@ -58,14 +58,17 @@ count — is an O(1) table lookup, not a fresh search.
 
 `pip install . ./src/packages/api` (or `make install`, which also adds the
 web package) gives you `helpmate-server` (a read-only HTTP API —
-health/catalog/stats/probe/line/moves/mine/themes, with on-demand fetching
-from a Hugging Face dataset for tables not stored locally) and
+health/catalog/stats/probe/line/moves/themes, plus mine when the server is
+started with `--enable-mine` — with on-demand fetching from a Hugging Face
+dataset for tables not stored locally) and
 `helpmate-tables` (push/pull tables to that dataset). See the
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
 
-The same process serves a **web dashboard** at `/`, five screens behind one
-title and one footer. Every screen is a grey **rail** (what you manipulate)
+The same process serves a **web dashboard** at `/`, four screens behind one
+title and one footer by default — Explorer, Puzzles, Materials, Themes — with
+a fifth, **Search**, appearing only when the server was started with
+`--enable-mine` (see below). Every screen is a grey **rail** (what you manipulate)
 beside a white **readout** (what the tables say) — one skeleton, **one
 palette**: there is no colour-theme control, no light/dark switch, and no
 `prefers-color-scheme` cascade to keep in sync with one. The **explorer** has
@@ -93,9 +96,14 @@ arbitrary position. **Materials** lands on **All tables**, the whole corpus
 at once (including materials with no helpmate and the generator versions
 that built them), scrolling and filterable, grouped by piece count;
 selecting one shows its own mate-length and solution-count histograms.
-**Search** has the `starts`/`ends` shape filters, a theme multi-select, a
-**Stop** button, and elapsed time shown against the server's
-`--mine-timeout` budget.
+**Search**, when the server was started with `--enable-mine`, has the
+`starts`/`ends` shape filters, a theme multi-select, a **Stop** button, and
+elapsed time shown against the server's `--mine-timeout` budget. Position
+search is off by default — `/v1/mine` answers `503 mining_disabled` and the
+dashboard removes the Search screen and its nav button entirely — because a
+scan is not interruptible and is not bounded under concurrent load; pass
+`--enable-mine` to turn it on, or use the CLI `helpmate mine` instead, which
+is unaffected by this flag.
 
 **Puzzles** draws a session of ten one-solution positions from a committed
 EPD file, one per difficulty rung (mate length first, piece count second),

@@ -30,3 +30,14 @@ def kqvk_only_dir(tmp_path_factory, kqvk_dir) -> Path:
 def client_partial(kqvk_only_dir) -> TestClient:
     app = create_app(ChainSource([LocalDir(kqvk_only_dir)]))
     return TestClient(app)
+
+@pytest.fixture()
+def client_mining(kqvk_dir) -> TestClient:
+    """A server with position search switched on.
+
+    Search is off by default from 0.14.0, so every test that exercises
+    /v1/mine needs this rather than `client`. Kept as a separate fixture, not
+    a flag on `client`, so the default fixture keeps testing the shipped
+    configuration."""
+    app = create_app(ChainSource([LocalDir(kqvk_dir)]), enable_mine=True)
+    return TestClient(app)

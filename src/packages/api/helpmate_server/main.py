@@ -4,16 +4,21 @@ import os
 from .storage import LocalDir, ChainSource, RemoteSource, HFHub
 from .app import create_app
 
-def _run(app, host: str, port: int) -> None:
+def _run(app, host: str, port: int, limit_concurrency: int | None = None) -> None:
     import uvicorn
-    uvicorn.run(app, host=host, port=port)
+    # None means uvicorn's own default (unbounded). A deployment that wants a
+    # ceiling passes one; nothing is silently capped for a local user.
+    uvicorn.run(app, host=host, port=port, limit_concurrency=limit_concurrency)
 
 def _app_for_tests():
     # Factory for `uvicorn --factory helpmate_server.main:_app_for_tests`,
-    # used by the browser test suite (src/packages/web/tests/ui) to serve a real
-    # helpmate-server against a scratch tables dir named by the environment.
+    # used by the browser test suite (src/packages/web/tests/ui) to serve a
+    # real helpmate-server against a scratch tables dir named by the
+    # environment. HELPMATE_ENABLE_MINE=1 selects the search-enabled server
+    # that the six search tests need.
     tables = os.environ["HELPMATE_TABLES"]
-    return create_app(ChainSource([LocalDir(tables)]))
+    return create_app(ChainSource([LocalDir(tables)]),
+                      enable_mine=os.environ.get("HELPMATE_ENABLE_MINE") == "1")
 
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser("helpmate-server")
@@ -28,6 +33,19 @@ def main(argv: list[str] | None = None) -> None:
                    help="serve the dashboard from DIR instead of the installed helpmate-web")
     p.add_argument("--no-web", action="store_true",
                    help="serve the API only, with no dashboard")
+    p.add_argument("--enable-mine", action="store_true",
+                   help="enable /v1/mine (position search). Off by default: a "
+                        "scan is not interruptible and is not bounded under "
+                        "concurrent load")
+    p.add_argument("--cors-origin", action="append", default=[],
+                   metavar="ORIGIN",
+                   help="allow cross-origin GETs from ORIGIN (repeatable). "
+                        "Omit for same-origin only")
+    p.add_argument("--limit-concurrency", type=int, default=None, metavar="N",
+                   help="beyond N connections in flight, uvicorn answers 503 "
+                        "and closes rather than refusing the connection "
+                        "(default: unlimited). Set this when exposing the "
+                        "server")
     a = p.parse_args(argv)
     remote = None
     if a.hf_repo:
@@ -37,7 +55,9 @@ def main(argv: list[str] | None = None) -> None:
     chain = ChainSource([LocalDir(d) for d in a.tables], remote)
     try:
         app = create_app(chain, a.mine_cap, a.mine_timeout,
-                         web_root=a.web_root, serve_web=not a.no_web)
+                         web_root=a.web_root, serve_web=not a.no_web,
+                         enable_mine=a.enable_mine,
+                         cors_origins=a.cors_origin)
     except ValueError as e:
         p.error(str(e))
-    _run(app, a.host, a.port)
+    _run(app, a.host, a.port, a.limit_concurrency)

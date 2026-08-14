@@ -51,7 +51,7 @@ export async function getJson(path, params = {}, { signal } = {}) {
 }
 
 export const api = {
-  health: () => getJson("/v1/health"),
+  health: (opts) => getJson("/v1/health", {}, opts),
   materials: () => getJson("/v1/materials"),
   stats: (name) => getJson(`/v1/materials/${encodeURIComponent(name)}/stats`),
   overall: () => getJson("/v1/stats"),

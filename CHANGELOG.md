@@ -6,6 +6,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [0.14.0] - 2026-08-13
+
+### Changed
+- **Position search (`/v1/mine`) is now off by default** and must be enabled
+  with `helpmate-server --enable-mine`. A disabled server answers
+  `503 mining_disabled`. A scan cannot be interrupted by `SIGTERM`, its
+  timeout is not deterministic under concurrent load, and nothing bounds how
+  many run at once — so it is not safe to expose until that work is done. The
+  dashboard reads `mining_enabled` from `/v1/health` and omits the Search
+  screen entirely when it is off. The CLI `helpmate mine` is unaffected.
+- **CORS is opt-in per origin.** `--cors-origin ORIGIN` is repeatable; with
+  none given no CORS middleware is installed, where previously every origin
+  was allowed. Same-origin use, including the dashboard, is unaffected.
+
+### Added
+- `mining_enabled` on `/v1/health`.
+
 ## [0.13.0] - 2026-08-13
 
 Puzzles, a motif reference, and a round of correctness/polish fixes to the

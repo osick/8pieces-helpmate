@@ -33,11 +33,24 @@ export function whenPanelShown(name, fn) {
   else pending.set(name, [fn]);
 }
 
+// Derived from the document, never hardcoded: a server with search disabled
+// removes #panel-mine and its nav button before initPanels() runs, and a
+// hardcoded "mine" would make getElementById return null here and throw --
+// taking showPanel, the nav and every other screen down with it.
+function panelIds() {
+  return [...document.querySelectorAll("section[id^='panel-']")]
+    .map((s) => s.id.slice("panel-".length));
+}
+
 export function showPanel(name) {
+  const ids = panelIds();
+  // A bookmarked #panel=mine must land somewhere real rather than hiding
+  // every section and painting a blank page.
+  if (!ids.includes(name)) name = "explorer";
   activePanel = name;
   for (const btn of document.querySelectorAll("nav button"))
     btn.classList.toggle("active", btn.dataset.panel === name);
-  for (const id of ["explorer", "puzzles", "materials", "mine", "themes"])
+  for (const id of ids)
     document.getElementById(`panel-${id}`).hidden = id !== name;
   const fns = pending.get(name);
   if (!fns) return;

@@ -72,7 +72,8 @@ def test_the_packaged_dashboard_is_found_by_import():
 def test_main_no_web_serves_no_dashboard(monkeypatch):
     import helpmate_server.main as m
     captured = {}
-    monkeypatch.setattr(m, "_run", lambda app, host, port: captured.update(app=app))
+    monkeypatch.setattr(m, "_run", lambda app, host, port, limit_concurrency=None:
+        captured.update(app=app))
     m.main(["--no-web"])
     c = TestClient(captured["app"])
     assert c.get("/").status_code == 404
@@ -83,7 +84,8 @@ def test_main_web_root_is_served(monkeypatch, tmp_path):
     import helpmate_server.main as m
     (tmp_path / "index.html").write_text("<p>custom-dashboard-marker</p>")
     captured = {}
-    monkeypatch.setattr(m, "_run", lambda app, host, port: captured.update(app=app))
+    monkeypatch.setattr(m, "_run", lambda app, host, port, limit_concurrency=None:
+        captured.update(app=app))
     m.main(["--web-root", str(tmp_path)])
     c = TestClient(captured["app"])
     r = c.get("/")
@@ -94,7 +96,8 @@ def test_main_web_root_is_served(monkeypatch, tmp_path):
 def test_main_web_root_not_a_directory_exits_via_parser_error(monkeypatch, tmp_path, capsys):
     import helpmate_server.main as m
     called = []
-    monkeypatch.setattr(m, "_run", lambda app, host, port: called.append(True))
+    monkeypatch.setattr(m, "_run", lambda app, host, port, limit_concurrency=None:
+        called.append(True))
     missing = tmp_path / "nope"
     with pytest.raises(SystemExit) as excinfo:
         m.main(["--web-root", str(missing)])

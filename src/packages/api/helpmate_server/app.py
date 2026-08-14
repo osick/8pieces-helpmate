@@ -51,9 +51,15 @@ def _resolve_web_root(explicit: str | None) -> Optional[Path]:
 
 def create_app(chain: ChainSource, mine_cap: int = 1000,
                mine_timeout: float = 30.0, web_root: str | None = None,
-               serve_web: bool = True) -> FastAPI:
+               serve_web: bool = True, enable_mine: bool = False,
+               cors_origins: list[str] | None = None) -> FastAPI:
     app = FastAPI(title="helpmate API", version=__version__)
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"])
+    # Not installed at all when no origin is configured. The dashboard is
+    # served from this same origin, so it needs no CORS header; anything that
+    # does need one is a cross-origin caller an operator has decided to allow.
+    if cors_origins:
+        app.add_middleware(CORSMiddleware, allow_origins=list(cors_origins),
+                           allow_methods=["GET"])
 
     @app.exception_handler(Exception)
     async def internal_error(request, exc):
@@ -153,10 +159,17 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     @app.get("/v1/health")
     def health():
         cat = chain.catalog()
-        return {"status": "ok", "version": __version__,
-                "mine_timeout": mine_timeout,
-                "tables_local": sum(1 for s in cat if s.location in ("local", "cached")),
-                "tables_remote": sum(1 for s in cat if s.location == "remote")}
+        # This response now decides whether the dashboard's Search screen
+        # exists at all (index.html reads mining_enabled at boot). Behind a
+        # cache (this deployment sits behind Cloudflare), a stale cached
+        # "mining_enabled": true would keep Search painted after an operator
+        # turned search off, so this route must never be cached.
+        return JSONResponse(headers={"Cache-Control": "no-store"}, content={
+            "status": "ok", "version": __version__,
+            "mine_timeout": mine_timeout,
+            "mining_enabled": enable_mine,
+            "tables_local": sum(1 for s in cat if s.location in ("local", "cached")),
+            "tables_remote": sum(1 for s in cat if s.location == "remote")})
 
     @app.get("/v1/materials")
     def materials():
@@ -406,6 +419,15 @@ def create_app(chain: ChainSource, mine_cap: int = 1000,
     def mine(material: str, dtm: int, count: int = -1, max: int = 100,
              starts: Optional[int] = None, ends: Optional[int] = None,
              theme: list[str] = Query(default=[])):
+        if not enable_mine:
+            # 503, not 404: the route exists and the server is simply not
+            # offering it. A 404 would tell a client probing the API surface
+            # that this build has no search at all, which is false and
+            # unfixable from the client's side.
+            return JSONResponse(status_code=503, content=error_json(
+                "mining_disabled",
+                "position search is disabled on this server",
+                hint="start helpmate-server with --enable-mine to turn it on"))
         for name, val in (("starts", starts), ("ends", ends)):
             if val is None:
                 continue

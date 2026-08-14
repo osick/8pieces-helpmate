@@ -32,28 +32,28 @@ def test_themes_endpoint_reports_needs(client):
     assert all("needs" in t for t in body["themes"])
 
 
-def test_mine_accepts_a_repeatable_theme_parameter(client):
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5,
+def test_mine_accepts_a_repeatable_theme_parameter(client_mining):
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 5,
                                        "theme": ["mirror"]})
     assert r.status_code == 200
     assert "fens" in r.json()
 
 
-def test_mine_theme_filter_actually_narrows(client):
+def test_mine_theme_filter_actually_narrows(client_mining):
     # KQvk dtm=2 true totals (measured): 580 unfiltered, 477 with theme
     # "mirror" -- max must exceed BOTH true totals, or comparing two
     # truncated-at-max lists would pass under any filter semantics, including
     # a no-op filter.
-    wide = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 600}).json()
-    narrow = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 600,
+    wide = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 600}).json()
+    narrow = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, "max": 600,
                                             "theme": ["mirror"]}).json()
     assert len(wide["fens"]) == 580 and len(narrow["fens"]) == 477
     assert len(narrow["fens"]) < len(wide["fens"])
     assert set(narrow["fens"]) <= set(wide["fens"])
 
 
-def test_unknown_theme_is_a_400_naming_the_valid_ones(client):
-    r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2,
+def test_unknown_theme_is_a_400_naming_the_valid_ones(client_mining):
+    r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2,
                                        "theme": ["nosuchtheme"]})
     assert r.status_code == 400
     err = r.json()["error"]
@@ -61,14 +61,14 @@ def test_unknown_theme_is_a_400_naming_the_valid_ones(client):
     assert "model" in (err.get("hint") or "")
 
 
-def test_one_bad_theme_rejects_the_whole_query(client):
+def test_one_bad_theme_rejects_the_whole_query(client_mining):
     # The repeatable case: a valid name alongside an invalid one must still be
     # a 400 naming the bad one, in either order. Silently honouring the valid
     # half would answer a narrower question than was asked, which is the
     # failure mode the --end/--ends incident is named after.
     for params in ({"theme": ["mirror", "nosuchtheme"]},
                    {"theme": ["nosuchtheme", "mirror"]}):
-        r = client.get("/v1/mine", params={"material": "KQvk", "dtm": 2, **params})
+        r = client_mining.get("/v1/mine", params={"material": "KQvk", "dtm": 2, **params})
         assert r.status_code == 400, params
         assert r.json()["error"]["code"] == "invalid_theme"
         assert "nosuchtheme" in r.json()["error"]["message"]
