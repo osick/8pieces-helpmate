@@ -48,7 +48,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+          # github.repository is in the key because FetchContent's *-subbuild
+          # trees contain a CMakeCache.txt that records its own absolute path,
+          # and the workspace path is /home/runner/work/<repo>/<repo>. Renaming
+          # the repository therefore restored a cache built under the old path
+          # into the new one, and CMake refused with "The current CMakeCache.txt
+          # directory ... is different than the directory ... where CMakeCache.txt
+          # was created". Keying on the repository makes any future rename miss
+          # the cache and repopulate instead of failing the build.
+          key: fetchcontent-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
 
       - name: Configure
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -241,7 +249,15 @@ jobs:
         uses: actions/cache@v4
         with:
           path: build/_deps
-          key: fetchcontent-${{ runner.os }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
+          # github.repository is in the key because FetchContent's *-subbuild
+          # trees contain a CMakeCache.txt that records its own absolute path,
+          # and the workspace path is /home/runner/work/<repo>/<repo>. Renaming
+          # the repository therefore restored a cache built under the old path
+          # into the new one, and CMake refused with "The current CMakeCache.txt
+          # directory ... is different than the directory ... where CMakeCache.txt
+          # was created". Keying on the repository makes any future rename miss
+          # the cache and repopulate instead of failing the build.
+          key: fetchcontent-${{ runner.os }}-${{ github.repository }}-${{ hashFiles('CMakeLists.txt', 'src/**/CMakeLists.txt') }}
 
       - uses: actions/setup-python@v5
         with:
