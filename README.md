@@ -1,870 +1,174 @@
-# helpmate
+# helpmate-tablebase
 
-A tablebase generator and query engine for chess **helpmates**.
+**Every helpmate in a material class, solved exhaustively.** Not a solver you
+point at one position — a table that already knows the answer for all of them.
 
-## What this is
+Complete through five pieces. MIT licensed. The tables are a free download.
 
-In a helpmate, both sides *cooperate*: Black moves first and helps White deliver
-checkmate in the fewest possible moves. Composers publish these as `h#n` problems
-("helpmate in n") — a starting position plus a claim that mate is reachable in
-exactly `n` Black moves and `n` (or `n−1`) White moves, ideally with a **unique**
-solution. Because both sides work toward the same goal, the underlying search is a
-plain cooperative shortest-path problem rather than the min/max game tree an ordinary
-(competitive) tablebase needs — which is what makes it practical to solve exhaustively
-for whole material classes rather than one position at a time. The design rationale is
-laid out in full in
-[`docs/superpowers/specs/2026-07-19-helpmate-tablebase-design.md`](docs/superpowers/specs/2026-07-19-helpmate-tablebase-design.md).
-
-This project builds, for a given material combination (say `KQvk` — White king and
-queen versus Black king), a table covering *every* legal position in that material and
-answering, for each one:
-
-- **dtm** — distance to mate, in half-moves (plies), assuming both sides cooperate
-  optimally;
-- **h#n notation** — the composer's convention, derived directly from dtm: a
-  Black-to-move position with dtm `2n` is `h#n`; a White-to-move position with dtm
-  `2n+1` is `h#n.5` (White needs one more half-move than Black's `n` full moves to
-  deliver the actual mate);
-- **count** — the number of *distinct* optimal continuations that reach mate in the
-  minimum number of plies. This is the number composers care about for soundness: 1
-  means the try has a unique solution, 2+ means it has duals (multiple solutions,
-  usually a flaw in a composition).
-
-Take the position `8/7k/5K2/8/8/8/8/6Q1 b - - 0 1` (Black king h7, White king f6,
-White queen g1, Black to move) as a concrete example: probing it gives `dtm=2`,
-i.e. `h#1` — one Black move, one White move to mate — with `count=4`: four distinct
-optimal lines tie for shortest. Black's king can go to h6, after which White has three
-different mates (`Qg6#`, `Qh1#`, `Qh2#`), or Black's king can go to h8, after which the
-only mate is `Qg7#`. Four lines total, all reaching mate at ply 2, so the tablebase
-reports `count=4`, `dtm=2`. This exact position is used as a golden test throughout the
-codebase and is reproduced live below.
-
-Everything in the table is computed by exhaustive fixed-point search over the whole
-material class (see [Architecture](#architecture)), not per-position search, so once a
-material combination is generated, every query against it — probing a position,
-listing its optimal lines, or scanning for compositions with a given dtm and solution
-count — is an O(1) table lookup, not a fresh search.
-
-## Documentation
-
-- [docs/BUILD.md](docs/BUILD.md) — full build guide: prerequisites, dependency
-  fetching (including the offline/pre-seeded `_deps` workflow), every Makefile
-  target, coverage, the Python package build, and troubleshooting.
-- [docs/USAGE.md](docs/USAGE.md) — full usage guide: table generation, probing,
-  optimal lines, the complete `stats.json` field reference, mining, exit codes,
-  DTM/h#n semantics, resource guidance per piece count, and the Python API.
-
-## API server and web dashboard
-
-`pip install . ./src/packages/api` (or `make install`, which also adds the
-web package) gives you `helpmate-server` (a read-only HTTP API —
-health/catalog/stats/probe/line/moves/themes, plus mine when the server is
-started with `--enable-mine` — with on-demand fetching from a Hugging Face
-dataset for tables not stored locally) and
-`helpmate-tables` (push/pull tables to that dataset). See the
-["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
-route, real curl examples, and the manifest format.
-
-The same process serves a **web dashboard** at `/`, five screens behind one
-title and one footer by default — Explorer, Puzzles, Materials, Themes, About
-— with a sixth, **Search**, appearing only when the server was started with
-`--enable-mine` (see below). Two further screens, **Technique** (how the
-tables are computed) and **Privacy**, have no nav button of their own and are
-reached from About and from the footer. The header is sticky and the board
-pins below it, so on a long move list the nav, the board and the position all
-stay on screen while only the answer scrolls.
-Every screen is a grey **rail** (what you manipulate)
-beside a white **readout** (what the tables say) — one skeleton, **one
-palette**: there is no colour-theme control, no light/dark switch, and no
-`prefers-color-scheme` cascade to keep in sync with one. The **explorer** has
-a grouped, sorted move list (Optimal ranked by how forcing each move is,
-then Slower — as chips under a shared distance label, not a repeated row per
-move — then No mate) and, below it, a one-line band naming the table the
-current position came from, its deepest mate and how much of it is solvable,
-with a link to its full histograms on Materials. Actionable controls (Flip,
-Clear board, Back, Download PGN, Open in Materials, and every move row) are
-weighted 600; inert text never is.
-
-The board has **no editing modes**. One rule covers every drag: a drag that
-matches a legal move plays it, any other drag relocates the piece, and a
-drag off the board deletes it — including a drag off a piece already on the
-board. A drag from either tray places that piece. **Back** undoes a
-relocation exactly as it undoes a move; the accepted risk is that relocating
-a piece onto a square that happens to be a legal destination for it *will
-play that move* rather than merely place it. **Two plain clicks on a piece
-also relocate it** — the board's click-to-move input treats a click-then-click
-the same as a drag that starts and ends on different squares, so it falls
-out of the same non-move-drag handling for free. There is no click-to-place
-from the tray, and honestly, no keyboard way to place a piece from it either;
-the **FEN** field, which applies on Enter, is the keyboard route to an
-arbitrary position. **Materials** lands on **All tables**, the whole corpus
-at once (including materials with no helpmate and the generator versions
-that built them), scrolling and filterable, grouped by piece count;
-selecting one shows its own mate-length and solution-count histograms.
-**Search**, when the server was started with `--enable-mine`, has the
-`starts`/`ends` shape filters, a theme multi-select, a **Stop** button, and
-elapsed time shown against the server's `--mine-timeout` budget. Position
-search is off by default — `/v1/mine` answers `503 mining_disabled` and the
-dashboard removes the Search screen and its nav button entirely — because a
-scan is not interruptible and is not bounded under concurrent load; pass
-`--enable-mine` to turn it on, or use the CLI `helpmate mine` instead, which
-is unaffected by this flag.
-
-**Puzzles** draws a session of ten one-solution positions from a committed
-EPD file, one per difficulty rung (mate length first, piece count second),
-easiest first. Solving means playing the *whole* line, both colours — a
-helpmate is cooperative, so proving you know the solution means supplying
-Black's moves too, not just answering "what does White play". Each ply gets
-a check or a cross; a wrong guess shows the right move without penalty
-beyond an error counter, and once that counter passes an error budget the
-rest of the line is revealed. A session is filtered down to whatever
-materials this installation actually has tables for — a puzzle whose
-material nobody has generated is not a harder puzzle, it is a 404 — and if
-none match, the screen names the missing materials and the `helpmate gen`
-command that builds one. The set itself
-(`src/packages/web/helpmate_web/static/puzzles.epd`, 930 positions) is a
-hand-editable EPD file, committed rather than generated on demand, so a
-custom problem can be added by typing one line; see [Puzzle set
-(EPD)](#puzzle-set-epd) below for the format and how to regenerate it from
-the corpus. **Themes** documents every motif this build's tablebase detects,
-grouped and introduced with a sentence per group, rendered straight from
-[`GET /v1/themes`](docs/USAGE.md#get-v1themes) — the live registry, not a
-list copied into this screen — so a motif the registry gains later shows up
-here with no code change.
-
-No build step, no CDN: plain ES modules with cm-chessboard vendored.
-
-```bash
-helpmate-server --tables ~/tb --port 8642   # then open http://127.0.0.1:8642/
-```
-
-See the ["Web dashboard" section of docs/USAGE.md](docs/USAGE.md#web-dashboard).
-
-### Puzzle set (EPD)
-
-The dashboard's Puzzles screen ships against
-[`src/packages/web/helpmate_web/static/puzzles.epd`](src/packages/web/helpmate_web/static/puzzles.epd),
-a plain [EPD](https://www.chessprogramming.org/Extended_Position_Description)
-file — chess's standard container for a collection of positions — committed
-to the repo, not generated on the fly. Custom problems are meant to be added
-by hand: one line per position, the four FEN fields (placement, side to
-move, castling rights, en passant target — EPD carries no move/halfmove
-clocks) followed by `;`-separated opcodes:
+> [!IMPORTANT]
+> **636 six-piece tablebases have never been computed, and 286 of them need
+> only 32 GiB of RAM and about a day of CPU each.** If you have a machine that
+> idles overnight, you can compute something nobody ever has — and get credited
+> for it.
+> **→ [How to contribute a tablebase](docs/CONTRIBUTING-TABLES.md)**
 
 ```
-8/7k/5K2/8/8/8/8/6Q1 b - - ; hm 4 ; id "KQvk.0001"
+$ helpmate mine KQvk --dtm 2 --count 1 --max 3
+8/8/8/8/8/8/8/k1KQ4 b - - 0 1
+8/8/8/8/8/2Q5/8/k1K5 b - - 0 1
+8/8/8/8/4Q3/8/8/k1K5 b - - 0 1
 ```
 
-Exactly two opcodes are read: `hm`, the helpmate distance **in plies** (so
-`hm 4` is h#2, matching the dtm convention used everywhere else in this
-project), and `id`, a free-form label. Any other opcode is parsed and
-ignored, so a future field costs nothing to add; a line starting with `#` is
-a comment. A line without a positive `hm` is skipped.
+Those are h#1 positions with **exactly one** solution — sound compositions,
+enumerated rather than found. That is what this is for.
 
-The committed file was mined from a real corpus with
-[`tools/mine_puzzles.py`](tools/mine_puzzles.py), which walks a ladder of
-ten (piece count, mate length) rungs and asks helpmate's mining API for
-positions with a unique solution (`count=1`) at each rung — read-only
-against `--tables`, deterministic given `--seed`, so regenerating the file
-produces a reviewable diff, not a reshuffle:
+## What a helpmate is
 
-```bash
-taskset -c 0-3 python3 tools/mine_puzzles.py --tables ~/tb \
-    --out src/packages/web/helpmate_web/static/puzzles.epd --seed 1
-```
+Both sides cooperate. Black moves first and *helps* White deliver mate in the
+fewest possible moves. Composers publish these as `h#n` problems: a position
+plus a claim that mate is reachable in exactly `n` moves, ideally by a
+**unique** solution — a second solution is usually a flaw.
 
-## Quick start
+Because both sides want the same thing, solving is a cooperative
+shortest-path problem rather than the min/max game tree an ordinary tablebase
+faces. That is what makes whole material classes tractable instead of one
+position at a time.
 
-### Build
+For every legal position in a class, the table stores:
 
-Requires **CMake ≥ 3.24** and a **C++20 compiler — GCC ≥ 13**. On older distributions
-where the default `g++`/`cc` predate GCC 13 (this repo was developed on openSUSE Leap,
-whose system compiler is too old), point the build at a newer one explicitly:
+- **dtm** — distance to mate in plies, under optimal cooperation.
+- **h#n** — the composer's notation, derived from dtm.
+- **count** — how many *distinct* optimal solutions tie for shortest.
+  `count=1` is a sound composition. `count=2` is a dual.
 
-```bash
-CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13 make test
-```
+That last field is the point. Anyone can search for a mate; the tablebase
+tells you whether it is **unique**, across every position at once.
 
-`make test` configures (`cmake -S . -B build`), builds, and runs the fast test suite
-via `ctest`. First configure uses CMake `FetchContent` to fetch three header/source
-dependencies — [osick/ChessMG](https://github.com/osick/ChessMG) (move generation
-core), [Catch2](https://github.com/catchorg/Catch2) (test framework), and
-[nlohmann/json](https://github.com/nlohmann/json) (used for the stats sidecar and
-Python-facing JSON) — into `build/_deps/`; after that first fetch, rebuilds are fully
-offline.
+## Sixty seconds
 
-```bash
-CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13 make test
-# ...
-# 100% tests passed out of 64
-```
+```console
+$ helpmate gen KQvk --tables tables
+tables/Kvk.hm max_dtm=255
+tables/KQvk.hm max_dtm=14
 
-A handful of exhaustive/multithreaded-determinism tests are tagged `[slow]` (tens of
-minutes: full closures, byte-identical N-thread vs 1-thread reruns) and are excluded
-from `make test` by default. Run them explicitly with:
-
-```bash
-./build/helpmate_tests "[slow]"
-```
-
-The CLI binary lands at `./build/helpmate`.
-
-### Step-by-step build (if `make test` gives you trouble)
-
-The three most common failure modes, in the order people hit them:
-
-1. **`cmake: command not found` or CMake too old** — you need CMake ≥ 3.24. If you
-   installed a newer CMake per-user (e.g. `pip install cmake` puts it in
-   `~/.local/bin`), make sure it's on `PATH` first:
-
-   ```bash
-   export PATH="$HOME/.local/bin:$PATH"
-   cmake --version   # must report >= 3.24
-   ```
-
-2. **Compiler errors mentioning C++20 / `-std=c++20`, or a baffling
-   `Could NOT find Threads`** — your default `g++` is too old. Set `CXX`/`CC`
-   explicitly:
-
-   ```bash
-   export CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13
-   ```
-
-   **Important:** CMake caches the compiler on the *first* configure and ignores
-   these variables afterwards. If you already ran `cmake` once without them
-   (typical symptom: the cache says `CMAKE_CXX_COMPILER:FILEPATH=/usr/bin/c++`
-   and every configure fails with `Could NOT find Threads`, because the old
-   compiler can't build the C++20 test program), delete the build tree and
-   configure again:
-
-   ```bash
-   rm -rf build
-   cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-   ```
-
-3. **An SSH passphrase prompt (or hang) during the first configure** — the first
-   configure clones the three dependencies from GitHub over HTTPS. If your global
-   gitconfig rewrites `https://github.com/` to SSH (`url.…insteadOf`), that clone
-   turns into an SSH fetch and asks for your key passphrase. Either enter it once
-   (the fetch is cached in `build/_deps/` and never repeated), or bypass your global
-   gitconfig for the one configure step:
-
-   ```bash
-   GIT_CONFIG_GLOBAL=/dev/null cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-   ```
-
-With those settled, the full sequence is:
-
-```bash
-export PATH="$HOME/.local/bin:$PATH"           # if your cmake lives there
-export CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13  # if your default gcc < 13
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release # configure (fetches deps once)
-cmake --build build -j"$(nproc)"               # build
-ctest --test-dir build --output-on-failure     # fast test suite (optional)
-```
-
-### Install
-
-The easiest path, and the one that sidesteps everything in "Step-by-step
-build" above except its passphrase caveat: `pip install .` runs its own
-CMake configure and build (via scikit-build-core) and puts the `helpmate`
-CLI command directly on `PATH` inside whatever Python environment you
-installed into — no separate `cmake --install` step, and no C++ toolchain
-needed on a machine that only installs the resulting wheel.
-
-```bash
-pip install .
-helpmate --help
-```
-
-The repo is three separately installable distributions — `helpmate` (core +
-CLI + Python bindings, above), `helpmate-api` (the HTTP server), and
-`helpmate-web` (the dashboard). Install all three, in dependency order
-(`helpmate-api` requires `helpmate`, and nothing is published to PyPI yet),
-with:
-
-```bash
-make install
-# or: pip install . ./src/packages/api ./src/packages/web
-```
-
-See [docs/BUILD.md](docs/BUILD.md) for the full Python packaging story,
-including the pre-seeded `_deps` workflow and a silent-hang gitconfig trap
-worth knowing about before your first `pip install`.
-
-Alternatively, install just the plain CMake-built binary without touching
-Python at all:
-
-```bash
-cmake --install build --prefix "$HOME/.local"  # installs ~/.local/bin/helpmate
-helpmate --help                                # works if ~/.local/bin is on PATH
-```
-
-Use `--prefix /usr/local` (with `sudo`) for a system-wide install, or simply copy
-the single self-contained binary wherever you like:
-
-```bash
-install -Dm755 build/helpmate ~/.local/bin/helpmate
-```
-
-### Coverage
-
-```bash
-pip install gcovr   # into whatever Python environment you use for dev tooling
-CXX=/usr/bin/g++-13 CC=/usr/bin/gcc-13 make coverage
-```
-
-`make coverage` configures a *separate* `build-cov/` tree with `-DHELPMATE_COVERAGE=ON`
-(adds `--coverage -O0 -g` to `helpmate_core` only — the normal `build/` tree is
-untouched), reuses the dependency sources already fetched under `build/_deps/` (run
-`make build` or `make test` at least once first) so it never re-clones anything, runs
-the fast suite, and prints a `gcovr` line/function/branch summary plus an HTML report
-at `build-cov/coverage/index.html`.
-
-## CLI usage
-
-All seven subcommands, run for real against this repo (`--tables` points at a scratch
-directory; a real workflow would reuse one directory across all seven commands).
-
-**`gen`** — build every table needed for a material class, including sub-slices
-reached by captures/promotions:
-
-```
-$ helpmate gen KQvk --tables tt
-tt/Kvk.hm max_dtm=255
-tt/KQvk.hm max_dtm=14
-```
-
-(`Kvk` — king vs king, unconditionally unsolvable, `max_dtm=255` — is built first
-because a Black king capturing the queen lands there; `KQvk` itself tops out at
-`max_dtm=14`, i.e. the longest optimal helpmate in this material is `h#7`.)
-
-**`probe`** — look up one position:
-
-```
-$ helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables tt
+$ helpmate probe "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1"
 dtm=2 (h#1) count=4
-```
 
-**`line`** — print one optimal line (SAN); `--all` prints every optimal line:
-
-```
-$ helpmate line "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables tt
-Kh6 Qh2#
-
-$ helpmate line "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --tables tt --all
+$ helpmate line "8/7k/5K2/8/8/8/8/6Q1 b - - 0 1" --all
 Kh6 Qh2#
 Kh6 Qh1#
 Kh6 Qg6#
 Kh8 Qg7#
 ```
 
-**`stats`** — generation-time statistics for a material class (dtm histogram, a
-uniqueness histogram — how many positions at each dtm have exactly 1, 2, … optimal
-solutions — deepest positions, deepest *uniquely*-solved positions):
+Black king h7, White king f6, White queen g1. Mate in one move each — and
+four different ways to do it, so as a composition it is unsound. The table
+answered in constant time; it did no search.
 
-```
-$ helpmate stats KQvk --tables tt
-{
-  "material": "KQvk",
-  "max_dtm": 14,
-  "plane_size": 29568,
-  "cells": { "invalid": {...}, "unsolvable": {...} },
-  "dtm_histogram": { "wtm": {...}, "btm": {...} },
-  "uniqueness": { "wtm": {...}, "btm": {...} },
-  "deepest": [ "8/6k1/5Q2/8/8/8/8/K7 b - - 0 1", ... ],
-  "deepest_unique": [ "8/8/7k/6Q1/8/8/8/K7 b - - 0 1", ... ],
-  ...
-}
-```
+Generation is a one-off cost. Every query afterwards is a table lookup.
 
-(output truncated above for readability; the real command prints the complete JSON)
+## What is solved today
 
-**`mine`** — scan a material class for composition candidates: positions matching an
-exact dtm and (optionally) an exact solution count:
+| pieces | classes | status |
+| --- | --- | --- |
+| 2–4 | 66 | **complete** |
+| 5 | 220 | **complete** |
+| 6 | 645 | 9 done, 636 to go |
+| 7+ | — | needs an out-of-core generator that does not exist |
 
-```
-$ helpmate mine KQvk --dtm 2 --count 1 --max 3 --tables tt
-8/8/8/8/8/8/8/k1KQ4 b - - 0 1
-8/8/8/8/8/2Q5/8/k1K5 b - - 0 1
-8/8/8/8/4Q3/8/8/k1K5 b - - 0 1
-```
-
-(three `h#1` positions with a *unique* solution — good raw material for a sound
-one-line helpmate composition)
-
-`--starts N` / `--ends N` (v0.6.2) narrow the scan further, to an exact number of
-distinct first moves / distinct mating moves among the optimal solutions — see
-[USAGE.md](docs/USAGE.md#mine--scan-for-composition-candidates) for the full
-semantics and a worked dual-shape example.
-
-`--theme NAME` (v0.8.0, repeatable) narrows the scan by named theme instead —
-a position matches when at least one optimal solution shows each named theme:
-
-```
-$ helpmate mine KRvkbn --dtm 8 --theme model --theme self-block --tables ~/tb
-```
-
-(positions at `h#4` where some optimal solution is a model mate and some
-optimal solution — not necessarily the same one — shows a self-block; see
-[USAGE.md](docs/USAGE.md#themes) for the full theme list, the CLI/API/probe
-surfaces, and the performance caveat on compressed tables)
-
-**`compact`** — rewrite already-fully-unsolvable tables (e.g. ones built before v0.6.1
-added pruning at generation time) as tiny marker files, reclaiming disk space with no
-change in queryable results; see [USAGE.md](docs/USAGE.md#compact--reclaim-disk-space-in-already-unsolvable-tables)
-for a worked example.
-
-**`themes`** (v0.8.0) — list every theme detector this build knows, with the
-definition it uses; this is the vocabulary `mine --theme` and `probe
---themes` accept. See [USAGE.md](docs/USAGE.md#themes) for the full list, the
-`any`-within-a-theme/`AND`-across-themes match rule, and the `probe --themes`
-surface for annotating a single position.
-
-Full usage/help text (`helpmate --help`) documents every flag and exit code
-(`0` success — including a reported "unsolvable" — `2` a required table is missing and
-which `helpmate gen` command builds it, `3` bad usage/unparseable input).
-
-## Themes
-
-Since v0.8.0, `mine --theme NAME` (repeatable) and `probe --themes` search and
-annotate by named composition theme — a property of a mate (`pure`, `model`,
-…) or of the moves in a solution (`promotion`, `switchback`, …). Since v0.9.0
-every theme also declares `needs` — `position`, `plane` or `solutions` — the
-input it actually reads; see [Two things to know before you trust a
-result](#two-things-to-know-before-you-trust-a-result) below and
-[USAGE.md](docs/USAGE.md#needs-what-a-theme-actually-reads) for the full
-explanation. `helpmate themes` is the authoritative source for the
-vocabulary and always matches this build exactly; the table below is copied
-verbatim from its real output on this checkout (`helpmate 0.13.0`; this
-release touches no C++, and `helpmate themes` was re-run to confirm the
-table is unchanged):
-
-| Theme | Needs | Definition |
-|---|---|---|
-| `set-play` | plane | The same position with the other side to move is solvable one move sooner (sibling dtm == this position's dtm - 1) — the mate is already available and the side to move merely delays it. A sibling one move longer is the opposite of set play, not set play. |
-| `pure` | solutions | Every square of the black king's field is unavailable for exactly one reason, and the king's square is attacked exactly once (so double check is impure). |
-| `model` | solutions | Pure, and every white unit except the king and pawns participates — attacks the king's square or a field square, or stands on one. |
-| `ideal` | solutions | Model with no exemptions — the white king and white pawns must participate too, and every black unit other than the king must stand on a field square. |
-| `mirror` | solutions | Every square adjacent to the black king is empty, of either colour. |
-| `promotion` | solutions | A pawn promotes during the solution. |
-| `underpromotion` | solutions | A pawn promotes to rook, bishop or knight. |
-| `excelsior` | solutions | A pawn standing on its own second rank at the start of the solution promotes during it (either colour). |
-| `excelsior:white` | solutions | Excelsior by a white pawn. |
-| `excelsior:black` | solutions | Excelsior by a black pawn. |
-| `switchback` | solutions | A unit leaves a square and returns to it, having visited exactly one intermediate square. |
-| `closed-walk` | solutions | Rundlauf: a unit returns to its departure square having visited two or more distinct intermediate squares, so it traverses a circuit rather than retracing its path. |
-| `self-block` | solutions | A black unit other than the king moves onto a square of its own king's field and stands there unattacked in the mating position, blocking a flight square. |
-| `single-piece` | solutions | Every move by one side is made by the same unit (either side). |
-| `single-piece:white` | solutions | Every white move is made by the same unit. |
-| `single-piece:black` | solutions | Every black move is made by the same unit; with the king, this is the Analyzer's "BK moves only". |
-| `en-passant` | solutions | A ply is an en-passant capture. |
-| `kniest` | solutions | A unit is captured on the square where the black king is later mated. |
-| `zajic` | solutions | A unit is captured on the square where the black king is mated, and the king recaptures there. |
-| `phoenix` | solutions | A unit is captured and a pawn of the same colour later promotes to that same type. |
-| `schnoebelen` | solutions | A promoted unit is captured on its promotion square without ever having moved. |
-| `pendulum` | solutions | A unit oscillates between exactly two squares, returning at least twice. |
-
-**v0.9.1 changed `set-play`'s definition — a behaviour change to a theme
-released in v0.9.0.** It used to mean "the other side to move is solvable, at
-any distance," which matched **423 of 580** (72.9%) `KQvk --dtm 2` positions
-and counted a sibling that is solvable *later* (the mate takes one move
-*longer* with the other side to move) as set play — the opposite of what set
-play means. It now means the sibling is solvable exactly one move *sooner*:
-**183 of 580** (31.6%) on the same query. See [USAGE.md](docs/USAGE.md#v091-set-plays-definition-changed--a-behaviour-change-to-a-released-theme)
-for both worked before/after examples.
-
-Eighteen themes, twenty-two registry entries: `excelsior` and
-`single-piece` each carry a broad form plus `:white`/`:black` variants,
-because a detector only answers yes/no and can't itself report which side
-showed it. See [USAGE.md](docs/USAGE.md#themes) for naming provenance (the
-[Helpmate Analyzer glossary](https://helpman.komtera.lt/themes.html)) and the
-API surfaces.
-
-### Worked example: mine, probe, line
-
-```
-$ helpmate mine KQvk --dtm 8 --theme switchback --max 3 --tables ~/tb/raw
-8/8/8/8/8/8/8/KQk5 b - - 0 1
-8/8/8/8/8/8/8/K1k1Q3 b - - 0 1
-8/8/8/8/8/8/1Q6/K1k5 b - - 0 1
-note: skipped 3 position(s) whose solution count is saturated (255+): their solutions cannot be enumerated exhaustively
-
-$ helpmate probe "8/8/8/8/8/8/8/KQk5 b - - 0 1" --themes --tables ~/tb/raw
-dtm=8 (h#4) count=190
-themes: pure model ideal mirror switchback closed-walk single-piece single-piece:black
-
-$ helpmate line "8/8/8/8/8/8/8/KQk5 b - - 0 1" --all --tables ~/tb/raw
-Kd2 Ka2 Ke2 Kb3 Kd2 Qa2+ Kc1 Qc2#
-Kd2 Ka2 Ke2 Kb3 Kd2 Qd3+ Kc1 Qc2#
-Kd2 Ka2 Ke2 Kb3 Kd2 Qe4 Kc1 Qc2#
-Kd2 Ka2 Ke2 Kb3 Kd2 Qe4 Kc1 Qe1#
-Kd2 Ka2 Ke2 Kb3 Kd2 Qf5 Kc1 Qc2#
-Kd2 Ka2 Ke2 Kb3 Kd2 Qg6 Kc1 Qc2#
-Kd2 Ka2 Ke2 Kb3 Kd2 Qh7 Kc1 Qc2#
-Kd2 Ka2 Ke2 Qe4+ Kd1 Kb3 Kc1 Qc2#
-Kd2 Ka2 Ke2 Qe4+ Kd1 Kb3 Kc1 Qe1#
-Kd2 Ka2 Ke2 Qe4+ Kd2 Kb3 Kc1 Qc2#
-```
-
-(`--all` caps at `--max`, default 10; this position has 190 optimal lines
-total, per its `count` above.) In the first line, the **black** king walks
-c1-d2-e2-d2-c1: it leaves d2 and comes back having visited exactly one
-intermediate square, e2 — that is the `switchback`, and it is also why the
-position reports `single-piece:black` (every black move is that same king).
-`closed-walk` is reported too, but no line among the first ten shows it;
-under `any` semantics one of the other 180 optimal solutions does. The
-`--dtm 12` row in the per-theme table below is a clearer place to look at a
-genuine circuit.
-
-### Match semantics: `any` within a theme, `AND` across themes
-
-A position matches `--theme X` when **at least one** of its optimal
-solutions shows theme `X`, not every solution. Naming several themes
-requires **all** of them to be shown, but not necessarily by the same
-solution — a position with one solution showing `mirror` and a different
-solution showing `self-block` matches `--theme mirror --theme self-block`
-even though no single line shows both:
-
-```
-$ helpmate mine KQvkq --dtm 4 --theme self-block --theme mirror --max 3 --tables ~/tb/raw
-8/8/8/8/8/k7/8/1K1Qq3 b - - 0 1
-8/8/8/8/8/k7/8/1K1Q1q2 b - - 0 1
-8/8/8/8/8/k7/8/1K1Q2q1 b - - 0 1
-
-$ helpmate probe "8/8/8/8/8/k7/8/1K1Qq3 b - - 0 1" --themes --tables ~/tb/raw
-dtm=4 (h#2) count=19
-themes: pure model mirror self-block single-piece single-piece:white single-piece:black
-```
-
-### A real example per theme
-
-Every FEN below was produced by `helpmate mine <MATERIAL> --dtm N --theme
-NAME`, then re-checked with `helpmate probe --themes` to confirm the named
-theme is actually in that position's output (shown as `pure`/`model`/etc. in
-the tables above and the worked example — the same `--tables ~/tb/raw`
-verification command works for every row).
-
-| Theme | FEN | Material |
-|---|---|---|
-| `pure`, `model`, `ideal`, `mirror`, `single-piece`, `single-piece:black` | `8/8/8/8/8/k7/8/1K2Q3 b - - 0 1` | `KQvk` |
-| `switchback`, `closed-walk` | `8/8/8/8/8/8/8/KQk5 b - - 0 1` | `KQvk` (`--dtm 8`) |
-| `closed-walk` (longer, `--dtm 12`) | `8/8/7k/5Q2/8/8/8/K7 b - - 0 1` | `KQvk` |
-| `self-block` | `8/8/8/8/8/8/2q5/K1k1Q3 b - - 0 1` | `KQvkq` |
-| `promotion`, `underpromotion` | `8/8/5p2/5P2/8/8/8/K1k5 b - - 0 1` | `KPvkp` (`--dtm 20`) |
-| `excelsior`, `excelsior:white` | `8/8/8/8/8/k1p5/2P5/K7 b - - 0 1` | `KPvkp` (`--dtm 20`) |
-| `excelsior:black` | `8/3p4/8/8/1P6/8/8/K1k5 b - - 0 1` | `KPvkp` (`--dtm 10`) |
-| `en-passant`, `single-piece:white` | `8/p7/8/1P6/8/8/8/k1K5 b - - 0 1` | `KPvkp` (`--dtm 6`) |
-
-That covers the pre-v0.9 sixteen registry entries with a verified real
-position — none omitted. `mine`ing `en-passant`/`excelsior`/`promotion`/
-`underpromotion` needs a material with pawns on both sides, so all four went
-against `KPvkp` (16 MB); some depths took over a minute to scan (`KPvkp
---dtm 8` in particular), most returned in well under a second. The six
-v0.9 themes (`set-play`, `kniest`, `zajic`, `phoenix`,
-`schnoebelen`, `pendulum`) are not in this table; see [USAGE.md](docs/USAGE.md#themes)
-for what has and hasn't been verified for those, honestly reported.
-
-### Two things to know before you trust a result
-
-**The solution cap is a false-negative source.** A position whose optimal-line
-count is saturated (255+, meaning "at least 255, exact count unknown") can
-never be enumerated, so it can never match a theme filter — `mine` reports
-these in a skipped tally rather than dropping them silently, as seen in the
-worked example above (`skipped 3 position(s)...`) and, at shallower dtm on
-bigger material, in the thousands (`KPvkp --dtm 22 --theme en-passant`
-skipped 29750 positions this way).
-
-**Colour-flipped positions cannot be annotated.** `probe` falls back to a
-color flip when only the flipped material's table exists — but every theme
-detector is hard-coded to the black king, so re-running detection on a
-flipped board would silently swap the four colour-labelled themes
-(`single-piece:white`/`:black`, `excelsior:white`/`:black`). Real output,
-against a scratch directory holding only `KQvk`'s closure (so the literal
-material of the FEN below, `Kvkq`, has no table of its own and must be
-answered via flip):
-
-```
-$ helpmate gen KQvk --tables tt
-tt/Kvk.hm max_dtm=255
-tt/KQvk.hm max_dtm=14
-
-$ helpmate probe "6q1/8/8/8/8/5k2/7K/8 w - - 0 1" --themes --tables tt
-dtm=2 (h#1, colors flipped) count=4
-themes: (unavailable: colors were flipped to find a table)
-note: themes are unavailable for a color-flipped probe. The mate detectors
-are hard-coded to the black king, so the colour-labelled themes would come
-out swapped. Re-run with the colours of the position exchanged to get a
-correct answer.
-```
-
-**Verification against published problems was deferred by explicit
-decision.** Every definition above is this project's own — precise enough to
-argue with, not checked against the Helpmate Analyzer or any other authority.
-A detector subtly at odds with composition convention returns a confident,
-wrong answer, and nothing in this project's test suite catches that; only
-comparison against known compositions would. Treat every theme match as this
-codebase's opinion, not an authoritative ruling.
-
-### Performance
-
-Theme filtering forces solution enumeration — the same work `--starts`/
-`--ends` already pay — and the detectors themselves are a small fraction of
-that cost. Measured on this checkout (`KQvk`, raw tables, `~/tb/raw`, 15-run
-averages, `taskset -c 0-3`):
-
-| Query | dtm=2 (shallow, few solutions/match) | dtm=6 (deep, up to 255 solutions/match) |
-|---|---|---|
-| process floor (`--version`) | 5.5 ms | — |
-| plain `--dtm` (no enumeration) | 5.9 ms | 6.0 ms |
-| `--starts 1` (enumerates solutions) | 13.1 ms | 929.5 ms |
-| `--theme mirror` (one detector) | 16.0 ms | 163.0 ms |
-| four `--theme` flags | 17.0 ms | 163.7 ms |
-
-Two things stand out: adding three more `--theme` flags cost under a
-millisecond at either depth — the detectors are cheap, confirming the "~5% of
-the cost" figure measured elsewhere in this project (see
-[USAGE.md](docs/USAGE.md#themes)); and at `dtm=6` a theme query
-(163 ms) came out substantially *cheaper* than `--starts 1` (929.5 ms) on the
-same material and depth.
-
-That second one is a measurement artifact, not a property of theme matching,
-and it is worth spelling out because the obvious explanation is wrong. Both
-filters enumerate a candidate's solutions the same way before any detector or
-counter runs. What differs is how far each query has to scan before `--max`
-(default 10) stops it: at `dtm=6`, `--theme mirror` matches 10,126 positions
-in this table while `--starts 1` matches only 2,977, so the theme query finds
-its ten hits far earlier in the sweep. Measured with `--max 100000` on both.
-Take these as this run's numbers on this material, not a universal ratio.
-
-This is the cost of enumeration itself, on raw and compressed tables alike.
-The separate block-compression mining penalty measured in v0.7.5 was fixed
-in v0.8.1 (see [Table format](#table-format) above): a
-freshly generated, page-cache-resident `KQvk` (146 KB) showed no measurable
-difference between raw and compressed (163.0 ms vs 170.8 ms, both `--theme
-mirror --dtm 6`) — too small to show the effect the 462 MiB `KRvkbn`
-measurement in v0.7.5 was based on. Mine against raw tables for large theme
-searches regardless; the penalty is real on tables that don't fit in the
-page cache, only invisible on toy ones like this.
-
-## Python API
+**295 tables, 38.5 GiB** block-compressed, published as a Hugging Face
+dataset. The deepest mate in the corpus is h#17.
 
 ```bash
-pip install .            # or: pip install -e .[dev] for the pytest/python-chess dev extras
+helpmate-tables pull --tables ./tables --repo osick/helpmate-tables
 ```
 
-Packaging is via [scikit-build-core](https://github.com/scikit-build/scikit-build-core)
-and pybind11 — `pip install` runs its own CMake configure (with `-DHELPMATE_PYTHON=ON`)
-and compiles the same `helpmate_core` C++ library into an extension module.
+The server can also stream tables on demand instead, fetching and caching
+each class the first time someone asks for it.
 
-```python
-import helpmate
+## Help solve the rest
 
-# build (or reuse, if already built) every table this material class needs
-helpmate.generate("KQvk", tables="tables/", threads=4)
+Six hundred machine-days of work remain at six pieces, and it will not come
+from one desk.
 
-tb = helpmate.Tablebase("tables/")
+**286 of the missing tables need only 32 GiB of RAM** and about a day each.
+If you have a machine that idles overnight, you can compute something nobody
+ever has. Contributions land as pull requests on the dataset, and every
+merged table is credited.
 
-dtm, count, flipped = tb.probe("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1")
-# dtm=2, count=4, flipped=False
+**→ [How to contribute a tablebase](docs/CONTRIBUTING-TABLES.md)**
 
-tb.line("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1")
-# ['Kh6', 'Qh2#']
+Two pieces of tooling are also wanted and would help more than any table: a
+`helpmate verify` command, and `--create-pr` support in the push CLI. Both
+are described in that guide.
 
-tb.lines("8/7k/5K2/8/8/8/8/6Q1 b - - 0 1", max=10)
-# [['Kh6', 'Qh2#'], ['Kh6', 'Qh1#'], ['Kh6', 'Qg6#'], ['Kh8', 'Qg7#']]
+## The command line is the front door
 
-list(tb.mine("KQvk", dtm=2, count=1, max=3))
-# ['8/8/8/8/8/8/8/k1KQ4 b - - 0 1', '8/8/8/8/8/2Q5/8/k1K5 b - - 0 1', ...]
+`helpmate` is the primary interface, and
+**[USAGE.md](docs/USAGE.md)** documents all of it:
 
-tb.stats("KQvk")["max_dtm"]
-# 14
-```
+| | |
+| --- | --- |
+| `gen` | build every table a material class needs |
+| `probe` | look up one position |
+| `line` | print optimal solutions as SAN |
+| `mine` | scan a class for compositions by dtm, solution count, and theme |
+| `stats` | generation statistics and corpus summaries |
+| `themes` | list the pattern detectors `mine --theme` accepts |
+| `compact` | compress tables, or shrink provably-unsolvable ones to markers |
 
-`tb.probe()` returns `None` for a legal but unsolvable position, and raises
-`helpmate.MissingTableError` (a `RuntimeError`) if the position's material has no
-generated table and no usable color-flip fallback — the message names the exact
-`helpmate gen` invocation that would build it. Malformed FENs/material strings raise
-`ValueError`.
+`mine --theme` recognises named composition patterns — model mates, echoes,
+battery mates and more. The **[theme catalogue](docs/THEME-CATALOG.md)** has
+the full list with the exact definition each detector uses.
 
-**Dev note — building from a fresh clone on a machine that rewrites GitHub HTTPS URLs
-to SSH** (e.g. via `insteadOf` in `.gitconfig`, which otherwise pops up an SSH
-passphrase prompt during `pip install`'s own CMake configure): pre-seed the same
-`FETCHCONTENT_SOURCE_DIR_*` overrides `make coverage` uses, pointing at whatever
-`build/_deps/*-src` you already have from an ordinary C++ build:
+### Also available
+
+- **Python.** `from helpmate import Tablebase` — probe, enumerate lines, and
+  mine from a script. See [USAGE.md](docs/USAGE.md#python-api).
+- **HTTP API and web dashboard.** `helpmate-server` serves a read-only JSON
+  API and a browser board for exploring positions. Secondary to the CLI, and
+  documented in [USAGE.md](docs/USAGE.md#api-server).
+
+## Documentation
+
+| | |
+| --- | --- |
+| [USAGE.md](docs/USAGE.md) | the full guide — every command, every flag, every field |
+| [BUILD.md](docs/BUILD.md) | prerequisites, build targets, offline dependencies, troubleshooting |
+| [CONTRIBUTING-TABLES.md](docs/CONTRIBUTING-TABLES.md) | **contribute CPU time and tables** |
+| [CONTRIBUTING.md](docs/CONTRIBUTING.md) | contribute code — CI checks and PR requirements |
+| [INTERNALS.md](docs/INTERNALS.md) | indexing, generation, storage format, verification, limits |
+| [THEME-CATALOG.md](docs/THEME-CATALOG.md) | every theme detector and its definition |
+| [ROADMAP.md](docs/ROADMAP.md) | where this is going |
+
+## Why you can trust it
+
+A tablebase is worth exactly as much as your reason to believe it. This one
+does not grade its own homework:
+
+- **An independent oracle** — a from-scratch cooperative search sharing only
+  the move generator with the real generator — re-solves sampled positions
+  from every slice and checks both dtm and solution count.
+- **Every one of the 368,452 legal `KQvk` positions** is cross-checked against
+  a reference implementation written directly on python-chess, with no
+  helpmate code involved in computing the expected answers.
+- **Multithreaded output is required to be byte-identical** to
+  single-threaded output, and that is asserted, not assumed.
+
+[INTERNALS.md](docs/INTERNALS.md) has the full account, including measured
+coverage and one unresolved bug stated plainly rather than buried.
+
+## Building
 
 ```bash
-SKBUILD_CMAKE_ARGS="-DFETCHCONTENT_FULLY_DISCONNECTED=ON;\
--DFETCHCONTENT_SOURCE_DIR_CHESSMG=$PWD/build/_deps/chessmg-src;\
--DFETCHCONTENT_SOURCE_DIR_CATCH2=$PWD/build/_deps/catch2-src;\
--DFETCHCONTENT_SOURCE_DIR_JSON=$PWD/build/_deps/json-src" \
-  pip install -e .[dev]
+git clone https://github.com/osick/helpmate-tablebase
+cd helpmate-tablebase
+make install
 ```
 
-(run an ordinary `make build` first so `build/_deps` is populated; scikit-build-core's
-configure is otherwise entirely separate from the plain-CMake `build/` tree.)
+Needs a C++20 compiler and CMake. No PyPI release yet.
+[BUILD.md](docs/BUILD.md) covers the rest.
 
-## Table format
+## Licence
 
-Each material class is one file, `tables/<SLICE>.hm` (e.g. `tables/KQvk.hm`): a 64-byte
-fixed header (magic, version, canonical material name, symmetry kind, index plane
-size, max dtm) followed by a length-prefixed JSON metadata blob, followed by four
-memory-mappable byte planes — DTM-white-to-move, DTM-black-to-move,
-count-white-to-move, count-black-to-move — one byte per index cell, sentinel `255` for
-unsolvable/invalid cells. `TableReader`/`TableWriter` (mmap-backed, atomic
-write-then-rename) are the whole implementation; see
-[`src/core/format/table_file.h`](src/core/format/table_file.h) for the exact layout.
-
-Since v0.7.5 there's a third table shape alongside the raw layout above and
-the all-unsolvable marker: a **block-compressed** table (`version = 3`,
-`encoding = 2`) that cuts the four planes into fixed-size blocks (64 KiB by
-default, tunable per run with `--block-size`) compressed independently with
-zstd, keeping random-access probing cheap while shrinking real multi-piece
-tables by 9-14x on disk. Mining a compressed table costs 1.14x raw on
-solution enumeration and 2.3x on a full plane scan as of v0.8.1 — the much
-larger penalty documented through v0.8.0 was two fixable bugs, not a
-property of compression; see [docs/USAGE.md's Table format
-section](docs/USAGE.md#table-format) for the measured trade-off. It's opt-in
-(`gen --compress`, `compact --compress`), requires a v0.7.5+ reader, and an
-already-compressed table can be re-blocked to a new `--block-size` in place
-without regenerating it — see USAGE.md for the full format, the measured
-numbers, and the `compact --compress` conversion mechanics.
-
-## Architecture
-
-- **Indexing** (`src/core/indexing/`): each position maps to a dense integer index within
-  its material's plane via a symmetry-reduced mixed-radix scheme. Both kings are
-  indexed jointly through a precomputed non-adjacent-kings table — 1806 states for
-  slices with pawns (left-right mirror symmetry only, since pawns break diagonal
-  symmetry), 462 for pawnless slices (full 8-fold board symmetry, White king
-  restricted to the a1-d1-d4 triangle). Every other piece indexes ×64 (×48 for a pawn,
-  ranks 2-7 only — pawns never index rank 1/8). En passant is *not* indexed: whenever
-  a double pawn push next to an enemy pawn is reachable, its value is folded in as
-  `min(table value, 1 + value of the EP-capture successor)`, looked up in whatever
-  (necessarily different-material) sub-slice table the EP capture lands in. Castling
-  is out of scope entirely — no castling rights ever appear in any FEN this project
-  reads or writes.
-- **Generation** (`src/core/generator/`): for material `M`, first compute the closure of
-  every sub-slice reachable via a capture or promotion (topologically sorted, built
-  before `M` itself, since `M`'s forward-scan needs their tables to look up capture/
-  promotion successors), then run an init pass (mark invalid cells; mark dtm=0 for
-  every Black-to-move checkmate) followed by forward-scan fixed-point passes: pass
-  `d` scans still-unresolved cells, generates their legal moves, and assigns `dtm=d`
-  to any cell with a successor at `dtm=d-1`; passes stop when one assigns nothing. A
-  second sweep in increasing dtm order computes the optimal-line count per cell
-  (`count(p) = Σ count(s)` over exactly the successors achieving the minimal dtm,
-  saturating at 255). Both sweeps parallelize over the index range across worker
-  threads: pass `d` only ever writes into cells that are still unresolved and only
-  ever reads values below `d`, so there is no read/write race between threads working
-  on different chunks of the same pass, and multithreaded output is required to be
-  byte-identical to single-threaded output (enforced by tests).
-- **Storage/probing** (`src/core/format/`, `src/core/probe/`): tables are written atomically
-  (temp file + rename) and read back via mmap, so probing a huge table costs a page
-  fault, not a full load. `Tablebase` lazily loads and caches whatever slices a query
-  touches, reconstructs optimal lines by greedy descent through the dtm planes (with
-  the same EP adjustment applied during descent), and falls back to a color-flip of
-  the position when only the flipped slice was generated (e.g. probing `KvkQ` when
-  only `KQvk` was built) — reflecting the reduced index's built-in "White always
-  delivers mate" canonicalization.
-
-## Verification story
-
-Because the entire point of a tablebase is that its answers are trustworthy, this
-project leans hard on independent cross-checks rather than trusting the generator to
-grade its own homework:
-
-- **An independent oracle.** `src/core/generator/oracle.cpp` is a from-scratch cooperative
-  iterative-deepening DFS solver that shares only the move generator with the
-  fixed-point generator — no shared indexing, no shared search structure. It re-solves
-  sampled positions from every generated slice, checking both dtm *and* the number of
-  optimal lines (which it enumerates itself, capped at 255), and any mismatch fails
-  the build.
-- **Exhaustive python-chess cross-validation — a third, wholly independent
-  implementation.** `src/packages/bindings/tests/test_crosscheck.py::test_exhaustive_kqvk` (marked
-  `slow`, run with `--run-slow`) enumerates *every one* of the 368,452 legal `KQvk`
-  positions, runs a plain forward-scan BFS written directly against
-  [python-chess](https://python-chess.readthedocs.io/) (no helpmate code involved in
-  computing the reference values), and asserts agreement with `tb.probe()` on both
-  dtm and optimal-line count for every single position, in both directions (no
-  reference-solvable position reported unsolvable by the tablebase, and vice versa).
-  The default (non-`slow`) suite still exercises the same movegen/perft
-  cross-validation on 200 random positions and 25 random perft(3) roots every run.
-- **Byte-identical multithreaded determinism.** Generation is required to produce
-  identical output files whether run with 1 thread or N; this is asserted directly
-  (including on `KPvkp`, a material class where en passant successors are actually
-  reachable, so the multithreading story is exercised on the one code path — the EP
-  two-ply lookup — whose safety depends on values already written by another slice/
-  thread).
-- **Golden compositions.** Known-answer positions (including the `KQvk` example
-  above) are checked exactly, including their full set of optimal lines, not just
-  their dtm.
-
-## Coverage
-
-Measured with `make coverage` (gcovr, GCC `--coverage` instrumentation, fast suite
-only, on `helpmate_core`'s sources under `src/`): **91.6% line coverage** (741/809
-lines), 97.2% function coverage, 61.8% branch coverage. The full per-file HTML report
-is at `build-cov/coverage/index.html` after running `make coverage`.
-
-The biggest measured gaps: `src/core/format/table_file.cpp` (85%) and `src/core/chess/board.cpp`
-(90%) — mostly defensive error paths for malformed/truncated table files and rare
-hash/copy edge cases; `src/core/generator/parallel.h` (68%) — the per-worker
-exception-propagation path, which by design only runs when a worker thread throws,
-not exercised by the happy-path tests; `src/core/generator/eval.h` (50% by gcov's line
-count, but see caveat below).
-
-Caveat worth stating plainly rather than hiding: `eval.h`'s en-passant branch and
-`parallel.h`'s hot loops are both exercised by dedicated tests with exact value
-assertions (`test_generator_pawns.cpp`'s "eval_board combines EP branch with table
-value" calls `eval_board` directly and checks its returned dtm/count for both a
-clear-winner and a tied-count case) and by real KPvk/KPvkp generation runs under
-multiple threads — but GCC's `--coverage` counters are not thread-safe (a known
-upstream limitation, gcc.gnu.org/bugzilla/show_bug.cgi?id=68080: concurrent
-non-atomic increments to the same line counter from multiple threads can corrupt or
-lose hits). This run's raw gcov output contained "suspicious hit"/negative-hit
-warnings on exactly the hot, multithreaded-generator-loop lines in `board.cpp`
-(silenced with `--gcov-ignore-parse-errors=all` to let gcovr complete), which is
-consistent with some genuinely-executed lines in the template-heavy, multithreaded
-`eval.h`/`parallel.h` code losing their counters to the same tool limitation rather
-than never having run. Net effect: the reported 91.6%/97.2%/61.8% numbers are honest
-and unmodified gcovr output, comfortably above the 80% line-coverage bar either way,
-but the two lowest-scoring files specifically should be read with that caveat rather
-than as "half the logic is untested."
-
-Earlier coverage runs also hit a known, separately-tracked issue: a pre-existing
-heap corruption bug in the root-slice generation scan (manifesting as a SIGSEGV in
-one run and a `map::at` exception in another, on different `test_probe.cpp` cases
-each time — same signature independently diagnosed for a user-reported 5-piece
-`KNvkqr` crash, also mentioned under [Limits](#limits) below). It is intermittent:
-across four full `make coverage` attempts, two hit this bug (on a different
-`test_probe.cpp` test each time) and two completed with all 64 fast-suite tests
-passing cleanly end to end — including the run that produced the 91.6%/97.2%/61.8%
-numbers quoted above (one unbroken `cmake` configure → build → `ctest` → `gcovr`
-log, no separate/unlogged steps). The affected tests pass reliably and repeatedly in
-the normal (`-O2`) build; the fix is tracked as a separate follow-up task and
-intentionally not addressed here.
-
-## Limits
-
-- **Materials**: any combination of the six piece types on both sides (2-8 pieces
-  total including both kings); castling is never supported (no FEN with castling
-  rights is accepted); the 50-move rule is ignored (irrelevant to a cooperative
-  shortest-path value — a helpmate solution is always shorter than 50 moves in
-  practice); en passant is exact.
-- **Practical scaling**: 3-4 piece classes generate in under a couple of seconds
-  (measured ~0.6s for `KQvk`); 5-piece classes take minutes to a couple of hours
-  depending on material (still 1 byte/cell, 4 planes, no compression); 6-piece
-  classes are feasible but heavy — roughly 14-28 GB of table storage/RAM and
-  multi-day generation runs at the current 1-byte/cell, uncompressed,
-  non-deduplicated encoding. 7-8 piece classes are out of scope for this version;
-  the storage format's versioned encoding field and the slice-DAG generation order
-  are deliberately designed so a future out-of-core/compressed encoding can be added
-  without invalidating already-generated tables. **5-piece generation currently has
-  a known, intermittent crash bug** (heap corruption in the root-slice generation
-  scan; tracked separately and being fixed — see the caveat in
-  [Coverage](#coverage) above for what's been observed so far).
-- **Slow tests**: the full-closure and multithreaded-determinism tests tagged `[slow]`
-  (tens of minutes each) are excluded from `make test` and from `pip install`'s default
-  test run; run them explicitly (`./build/helpmate_tests "[slow]"`,
-  `pytest src/packages/bindings/tests --run-slow`) when you want that level of assurance for a new
-  material class or after touching the generator.
+MIT. See [LICENSE](LICENSE).
