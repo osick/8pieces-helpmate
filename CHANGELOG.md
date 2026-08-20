@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
-## [Unreleased]
+## [0.16.0] - 2026-08-20
 
 ### Added
 - **`helpmate-tables push --create-pr`** opens a pull request on the dataset
