@@ -75,6 +75,19 @@
 
   --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* Overwritten from js/chrome.js with the header's measured height on every
+     resize. This value is the fallback, not the normal case: it is what pins
+     against between first paint and that module running, and on a browser
+     with no ResizeObserver. 66px is the unwrapped header at >=1100px; the
+     wrapped two-line header is taller, which is exactly why this is measured
+     rather than declared. */
+  --header-h: 66px;
+
+  /* Where every pinned column comes to rest: clear of the sticky header, plus
+     the same gap the panel already has above it. One token, so the board, the
+     materials list and the search form cannot drift apart. */
+  --pin-top: calc(var(--header-h) + var(--s3));
 }
 
 /* One palette, one state: the bare :root above is the whole system. There is
@@ -94,11 +107,30 @@ body {
 
 /* ---------- header ---------- */
 
-header {
+/* Sticky, so the nav, the brand and the server chip survive a scroll through
+   a 4,600px move list. This is half of "the board is fixed": the board itself
+   already pinned correctly, but everything above it scrolled away and left it
+   jammed against the top edge of the window with its piece tray clipped.
+
+   z-index because the pinned board (.board-pin, also a stacking context via
+   `position: sticky`) would otherwise paint over it -- later in document
+   order wins at equal z-index.
+
+   `body > header`, not a bare `header`: the About/Technique/Privacy screens
+   each open with their own <header class="doc-head">, and a bare element
+   selector would make those sticky flex rows with a panel fill and a bottom
+   rule -- three more things pinned to the top of the window. */
+body > header {
+  position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;
   padding: .8rem 1.25rem; background: var(--panel);
   border-bottom: 1px solid var(--rule);
 }
+
+/* Anything the browser scrolls to itself -- an in-page anchor, a focused
+   element brought into view by keyboard navigation -- must land below the
+   sticky header rather than behind it. */
+html { scroll-padding-top: calc(var(--header-h) + var(--s2)); }
 .brand { display: flex; align-items: baseline; gap: .7rem; flex-wrap: wrap; }
 .brand h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: -.02em; margin: 0; }
 .tagline { margin: 0; color: var(--ink-soft); font-size: var(--f1); }
@@ -128,7 +160,6 @@ footer {
 footer nav { display: flex; gap: var(--s3); margin-left: auto; }
 footer a { color: inherit; font-weight: 600; }
 footer a:hover { color: var(--accent); }
-footer a[data-placeholder] { text-decoration: underline dotted; }
 
 /* ---------- shared ---------- */
 
@@ -234,6 +265,37 @@ nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
    through. */
 .board-pin { display: flex; flex-direction: column; gap: var(--s2); }
 #board { width: 100%; max-width: 460px; margin-inline: auto; aspect-ratio: 1; }
+
+/* The board sits ON the rail rather than being painted into it. Three layers,
+   which is what separates a lifted object from a flat drop shadow:
+     1. a hairline edge, so the board's light squares have a defined boundary
+        against the rail instead of bleeding into it;
+     2. a tight, darker shadow for the contact point;
+     3. a wide, soft one for the cast.
+   All three are the SAME neutral -- the achromatic ink this palette already
+   uses -- at three opacities. A coloured or doubled-hue shadow is what makes
+   a "3D" board look plastic.
+
+   The edge is an OUTSET ring (`0 0 0 1px`), not `inset`: cm-chessboard fills
+   this element with an opaque <svg>, and an inset shadow paints behind its
+   own content, so an inset ring is invisible on both boards. It is not a
+   `border` either -- that would eat a pixel of the 460px square through
+   border-box sizing and put the eight ranks on fractional heights.
+
+   No border-radius: a chessboard is square, and rounding the ring while the
+   SVG under it stays square only creates four mismatched corners. It also
+   avoids needing `overflow: hidden` here, which would clip the promotion
+   dialog cm-chessboard draws over the board's own edge.
+
+   The trays keep their flat treatment on purpose: they are a palette you pick
+   from, not a surface play happens on, and lifting them too would flatten the
+   distinction the elevation is drawing. */
+#board, #puzzle-board {
+  box-shadow:
+    0 0 0 1px rgba(43, 43, 43, .20),
+    0 2px 3px rgba(43, 43, 43, .17),
+    0 12px 26px -8px rgba(43, 43, 43, .34);
+}
 .side { display: flex; flex-direction: column; gap: var(--s4); min-width: 0; }
 .side > * { margin: 0; }
 
@@ -249,7 +311,7 @@ nav button, .board-controls button, #btn-export-pgn, #btn-open-material,
      as when sticky sat directly on the (formerly short) .board-col inside
      the grid container -- only the element carrying the surface colour
      changed. */
-  .board-pin { position: sticky; top: var(--s3); }
+  .board-pin { position: sticky; top: var(--pin-top); }
 }
 
 /* The band spans both columns: it is context for the whole panel, not an
@@ -512,8 +574,13 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
   /* Its containing block for the sticky offset is .list-col, now stretched
      to the full row height -- same reasoning as .board-pin's media-query
      comment above. */
-  .materials-pin { position: sticky; top: var(--s3); }
-  #material-list { max-height: calc(100vh - 12rem); }
+  .materials-pin { position: sticky; top: var(--pin-top); }
+  /* Now that the header is sticky it permanently occupies the viewport, so
+     the list's own height has to come out of what is left. The 8rem is the
+     filter field, the section label and the panel's padding above and below
+     -- the same slack the old flat 12rem covered when the header still
+     scrolled away. */
+  #material-list { max-height: calc(100vh - var(--header-h) - 8rem); }
 }
 
 #material-list, #mine-results, #material-samples { list-style: none; padding: 0; margin: .75rem 0 0; }
@@ -626,7 +693,7 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
   /* Its containing block for the sticky offset is #mine-form/.rail, now
      stretched to the full row height -- same reasoning as .board-pin's and
      .materials-pin's media-query comments above. */
-  .mine-pin { position: sticky; top: var(--s3); }
+  .mine-pin { position: sticky; top: var(--pin-top); }
 }
 
 #mine-results li { display: flex; align-items: baseline; gap: var(--s2); }
@@ -671,3 +738,109 @@ label.inline { display: inline-flex; align-items: center; gap: var(--s1); color:
 .theme-variants .theme-entry { margin-top: 0; }
 .theme-variants .theme-entry ~ .theme-entry { padding-top: var(--s2); border-top: 1px solid var(--rule); }
 .theme-variants .theme-entry h3 { font-size: var(--f2); }
+
+/* ---------- prose screens (About, Technique, Privacy) ---------- */
+
+/* Same no-rail treatment as #panel-themes, and for the same reason: these
+   panels are one column of prose with nothing to manipulate, so the
+   rail/readout split would be a seam with nothing on either side of it.
+   `.readout` is deliberately NOT reused here -- it carries a border-left at
+   the 860px breakpoint, meant as the join between a rail and a readout. */
+#panel-about, #panel-technique, #panel-privacy {
+  border: 1px solid var(--rule); border-radius: var(--r); background: var(--readout);
+}
+.doc { padding: var(--s4) var(--s3); }
+
+/* A measure, not a width: running prose stops being readable somewhere past
+   ~75 characters, and this panel is 1200px wide. Everything inside the doc
+   inherits the same measure so headings, paragraphs and definition lists all
+   share one left edge and one right ragged edge. */
+.doc > * { max-width: 68ch; margin-inline: auto; }
+
+.doc-head { padding-bottom: var(--s3); border-bottom: 1px solid var(--rule); }
+.doc-head h2 { font-size: 1.5rem; font-weight: 700; letter-spacing: -.015em; text-wrap: balance; }
+.doc-lede {
+  margin: var(--s2) 0 0; color: var(--ink-soft); font-size: 1.02rem;
+  text-wrap: pretty;
+}
+
+.doc-section { margin-top: var(--s4); }
+.doc-section h3 {
+  margin: 0 0 var(--s2); font-size: var(--f4); font-weight: 650;
+  letter-spacing: -.01em; text-wrap: balance;
+}
+.doc-section p { margin: 0 0 var(--s2); text-wrap: pretty; }
+.doc-section p:last-child { margin-bottom: 0; }
+.doc b { font-weight: 650; }
+/* Inline code-ish spans: the same monospace every other datum on this site
+   uses, at the same optical size as the surrounding sans (mono runs larger
+   at equal font-size), with no box -- a fill would turn a phrase like
+   "min(table value, ...)" into a button. */
+.doc .mono { font-family: var(--mono); font-size: .92em; }
+
+/* At rest a link here is INK with an underline, not the accent -- the same
+   discipline the footer already follows, and the one tests/repo/
+   test_accent_confined_to_focus_and_hover.py enforces: the accent marks
+   interaction, so spending it on every link in three pages of prose would
+   make it mean nothing. The underline is what says "link"; the faint rule
+   colour keeps it from striping a paragraph. */
+.doc a {
+  color: var(--ink); text-decoration: underline;
+  text-decoration-color: var(--rule-strong); text-underline-offset: .15em;
+}
+.doc a:hover, .doc a:focus-visible {
+  color: var(--accent); text-decoration-color: currentColor;
+}
+
+/* Term-and-definition, as a two-column grid above the breakpoint: the term is
+   a label in the margin, which is what a <dl> means, rather than a bold line
+   the eye has to re-find above each paragraph. Single column below it, where
+   there is no margin to spare. */
+.doc-defs { margin: 0; display: grid; gap: var(--s2) var(--s3); }
+.doc-defs dt { font-weight: 650; font-size: var(--f2); }
+.doc-defs dd { margin: 0; }
+@media (min-width: 700px) {
+  .doc-defs { grid-template-columns: 8.5rem 1fr; }
+  .doc-defs dt { text-align: right; color: var(--ink-soft); padding-top: .08em; }
+}
+
+.doc-list { margin: 0; padding-left: 1.2rem; display: flex; flex-direction: column; gap: var(--s2); }
+.doc-list li { text-wrap: pretty; }
+
+/* A stated caveat, not a warning: the rule in the gutter marks it as an aside
+   without spending the error colour on something that is not an error. */
+/* Both of these are <p> inside .doc-section, so they must out-specify
+   `.doc-section p` (0,1,1) above -- a bare `.doc-note` (0,1,0) would lose its
+   margin-top to that rule's `margin: 0 0 var(--s2)` and sit flush against the
+   paragraph it is commenting on. */
+.doc-section .doc-note {
+  margin: var(--s3) 0 0; padding-left: var(--s3);
+  border-left: 2px solid var(--rule);
+  color: var(--ink-soft); font-size: var(--f2);
+}
+
+.doc-section .doc-links {
+  display: flex; flex-wrap: wrap; gap: var(--s3);
+  margin: var(--s4) 0 0; padding-top: var(--s3);
+  border-top: 1px solid var(--rule); font-size: var(--f2);
+}
+
+/* ---------- the About card on the explorer ---------- */
+
+/* The short form of the About screen, sitting under the primer on the screen
+   everyone lands on. It reads as a footnote to the readout, not a fifth
+   section of it: sunk fill, no border, and the same muted body colour the
+   primer above it uses. */
+.about-card {
+  background: var(--sunk); border-radius: var(--r); padding: var(--s3);
+  font-size: var(--f2); color: var(--ink-soft);
+}
+.about-card p { margin: var(--s2) 0 0; max-width: 62ch; text-wrap: pretty; }
+.about-card b { color: var(--ink); font-weight: 650; }
+.about-links { display: flex; flex-wrap: wrap; gap: var(--s3); }
+/* --ink, not the card's own --ink-soft: these are the only actionable things
+   in the card and must out-rank its body copy. Weight 600 is the site's
+   affordance cue (see the "Weight marks what you can act on" rule above), and
+   the accent is held back for hover -- same as the footer and .doc a. */
+.about-links a { color: var(--ink); font-weight: 600; text-underline-offset: .15em; }
+.about-links a:hover, .about-links a:focus-visible { color: var(--accent); }

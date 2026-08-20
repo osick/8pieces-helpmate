@@ -1321,8 +1321,19 @@ introduced to build the split. Since v0.13.0 that is **one palette, full
 stop** — there is no colour-theme control on this page any more; see
 [Palette](#palette) below.
 
-Four screens by default; a fifth, Search, only when the server was started
-with `--enable-mine` (see [`--enable-mine`](#api-server) below).
+Five screens on the nav by default; a sixth, Search, only when the server was
+started with `--enable-mine` (see [`--enable-mine`](#api-server) below). Two
+more — Technique and Privacy — exist without a nav button and are reached from
+About and from the footer.
+
+Since v0.15.0 the **header is sticky** and every pinned column (the board, the
+material list, the search form) comes to rest below it rather than at the top
+of the viewport. The board already stuck; what scrolled away was the nav, the
+title and the server chip, which left the board jammed against the window edge
+with its piece tray clipped. The offset is `--pin-top`, derived from
+`--header-h`, which `js/chrome.js` publishes from a `ResizeObserver` on the
+header — the header wraps to two lines between roughly 860px and 1100px, so a
+hard-coded offset is wrong at one width or the other.
 
 - **Explorer** — an interactive board. Drag a piece to play its move, or click
   one from the complete legal-move list, which is grouped into **Optimal**
@@ -1412,6 +1423,25 @@ with `--enable-mine` (see [`--enable-mine`](#api-server) below).
   reads](#needs-what-a-theme-actually-reads) above) — `solutions` detectors
   are silently skipped on such a position, `plane`/`position` ones still
   answer.
+- **About** (since v0.15.0) — what a helpmate is, what `dtm`, `count` and
+  themes actually mean, what each screen is for, the scope limits (no
+  castling, no 50-move rule, exact-but-unindexed en passant, saturation at
+  255), and the project's own links. It is the only screen of the three prose
+  screens with a nav button; it links onward to the other two. A short form of
+  it also sits on the explorer, under the primer, so the landing screen says
+  what the site is without a click.
+- **Technique** (since v0.15.0, no nav button) — how the tables are computed:
+  the symmetry-reduced joint king index (462 pawnless / 1806 with pawns), the
+  closure-then-fixed-point generation and the counting sweep, the four byte
+  planes and the three file versions, what answering a query costs, and the
+  verification story (the independent oracle, the exhaustive python-chess
+  cross-check, byte-identical multithreaded output, golden compositions).
+- **Privacy** (since v0.15.0, no nav button) — the dashboard sets no cookies
+  and uses neither local nor session storage; the position lives in the URL.
+  The page names Cloudflare's strictly-necessary cookies for a deployment
+  behind it, says what the access log contains, and states the legal basis.
+  The no-storage claim is asserted against a real page load in the UI suite,
+  not merely written down here.
 
 **Palette.** One palette, full stop. There is no colour-theme control on
 this page, and nothing to keep in sync with the OS's own
@@ -1422,12 +1452,29 @@ stored preference, that script, its drift test, and both dark token blocks
 in `app.css` (a net −200 lines). The bare `:root` in `app.css` is the whole
 system now.
 
-**Footer.** Every screen shares one footer: a live line naming the corpus
-the server is reading from left, and on the right a row of about-this-site
-links (`Source`, `Dataset`, `Licence`) that are marked as placeholders
-(`data-placeholder`, an underlined-dotted style) rather than silently
-pointing at `#` — they are wired up to real destinations once this project
-is public, not before.
+**Elevation.** Since v0.15.0 both boards sit *on* the rail rather than being
+painted into it: a hairline edge, a tight contact shadow and a wide cast, all
+three the same achromatic ink the palette already uses, at three opacities —
+no new colour and no second hue. The edge is an outset ring rather than an
+`inset` shadow, because cm-chessboard fills the element with an opaque `<svg>`
+and an inset shadow paints behind its own content. The trays stay flat on
+purpose: they are a palette you pick from, not a surface play happens on.
+
+**Footer.** Every screen shares one footer: a live line naming the corpus the
+server is reading from left, and on the right a row of about-this-site links.
+Through v0.14.0 those were three href-less placeholders (`Source`, `Dataset`,
+`Licence`, marked `data-placeholder`); since v0.15.0 they are real —
+`Source` and `Licence` to the repository, plus `About` and `Privacy`.
+`Dataset` was dropped rather than left dead: the tables are not published yet,
+and About says so in a sentence, which is better than a link that 404s.
+
+The two internal ones carry a real `#panel=x` href, never `href="#"`. That is
+not pedantry: `href="#"` *clears* `location.hash`, which fires `hashchange`,
+and `panels.js` reads an empty hash as the explorer — so clicking one
+mid-puzzle used to throw the position away and bounce the user to a screen
+they were not on. A delegated `a[data-panel]` handler in `panels.js` then
+re-encodes the current `fen` alongside the new panel, so following a footer
+link and coming back lands on the position you left.
 
 **Editing a position.** Since v0.12.0 the board has **no editing modes** —
 no armed piece, no `Erase`, no `Arrange`, no `Done — evaluate` button to

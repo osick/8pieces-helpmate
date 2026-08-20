@@ -65,10 +65,15 @@ dataset for tables not stored locally) and
 ["API server" section of docs/USAGE.md](docs/USAGE.md#api-server) for every
 route, real curl examples, and the manifest format.
 
-The same process serves a **web dashboard** at `/`, four screens behind one
-title and one footer by default — Explorer, Puzzles, Materials, Themes — with
-a fifth, **Search**, appearing only when the server was started with
-`--enable-mine` (see below). Every screen is a grey **rail** (what you manipulate)
+The same process serves a **web dashboard** at `/`, five screens behind one
+title and one footer by default — Explorer, Puzzles, Materials, Themes, About
+— with a sixth, **Search**, appearing only when the server was started with
+`--enable-mine` (see below). Two further screens, **Technique** (how the
+tables are computed) and **Privacy**, have no nav button of their own and are
+reached from About and from the footer. The header is sticky and the board
+pins below it, so on a long move list the nav, the board and the position all
+stay on screen while only the answer scrolls.
+Every screen is a grey **rail** (what you manipulate)
 beside a white **readout** (what the tables say) — one skeleton, **one
 palette**: there is no colour-theme control, no light/dark switch, and no
 `prefers-color-scheme` cascade to keep in sync with one. The **explorer** has

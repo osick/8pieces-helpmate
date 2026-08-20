@@ -20,6 +20,7 @@
     <button data-panel="materials">Materials</button>
     <button data-panel="mine">Search</button>
     <button data-panel="themes">Themes</button>
+    <button data-panel="about">About</button>
   </nav>
   <div class="header-end"><span id="server-chip" class="chip" hidden></span></div>
 </header>
@@ -82,6 +83,26 @@
         lines</b> reach mate in exactly that many plies. One line means a
         sound problem; several mean duals. The counter saturates at 255.</p>
       </details>
+
+      <!-- The short form of the About screen, on the screen everyone lands
+           on. Not a duplicate of the primer above it: the primer explains the
+           NOTATION in front of you, this explains what the site is and where
+           the numbers come from. Both links are real panels, routed through
+           the hash like every other screen (see panels.js), so they survive a
+           copy-paste of the address bar. -->
+      <aside class="about-card">
+        <h2 class="eyebrow">About this site</h2>
+        <p>Helpmates, solved exhaustively rather than searched. For each
+        material combination this project precomputes <b>every</b> legal
+        position, storing the distance to mate and how many distinct optimal
+        solutions reach it. Nothing here is an engine evaluation: an answer is
+        either in the table or the position is outside the corpus.</p>
+        <p class="about-links">
+          <a href="#panel=about" data-panel="about">What this is</a>
+          <a href="#panel=technique" data-panel="technique">How it is computed</a>
+              <a href="https://github.com/osick/8pieces-helpmate" rel="noopener">Source</a>
+        </p>
+      </aside>
     </div>
 
     <section id="table-stats" class="table-band" hidden>
@@ -174,20 +195,329 @@
   <section id="panel-themes" hidden>
     <div id="themes-doc"></div>
   </section>
+
+  <!-- About / Technique / Privacy are prose, so they use the same no-rail
+       single-column treatment as #panel-themes rather than the rail/readout
+       split: there is nothing here to manipulate, only something to read.
+       Technique and Privacy deliberately have NO nav button -- five screens
+       plus Search is already the ceiling for a header that has to wrap on a
+       narrow window -- and are reached from About and from the footer. That
+       works because panels.js derives its panel list from the DOM. -->
+  <section id="panel-about" hidden>
+    <div class="doc">
+      <header class="doc-head">
+        <h2>Helpmate tablebases</h2>
+        <p class="doc-lede">Every legal position in a material combination,
+        solved exhaustively — not searched on demand.</p>
+      </header>
+
+      <section class="doc-section">
+        <h3>What a helpmate is</h3>
+        <p>In an ordinary chess problem the two sides fight. In a
+        <b>helpmate</b> they cooperate: Black moves first and helps White
+        checkmate Black as quickly as possible. Composers publish these as
+        <b>h#n</b> — a position, plus the claim that mate is reachable in
+        exactly <i>n</i> Black moves and <i>n</i> White moves, ideally by a
+        single line of play.</p>
+        <p>Because both sides pull in the same direction, solving one is a
+        cooperative shortest-path problem rather than the minimax search a
+        competitive tablebase needs. That difference is what makes it
+        practical to solve entire material classes rather than one position at
+        a time.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>What the tables answer</h3>
+        <dl class="doc-defs">
+          <dt>dtm</dt>
+          <dd>Distance to mate in <b>plies</b> (half-moves), under optimal
+          cooperation. A Black-to-move position with dtm 2<i>n</i> is
+          h#<i>n</i>; a White-to-move position with dtm 2<i>n</i>+1 sits on the
+          half step, h#<i>n</i>.5.</dd>
+          <dt>count</dt>
+          <dd>How many <b>distinct optimal lines</b> reach mate in exactly
+          that many plies. One means a sound, unique solution; two or more
+          means duals, usually a flaw in a composition. The counter saturates
+          at 255, and the dashboard shows that as <span class="mono">255+</span>.</dd>
+          <dt>themes</dt>
+          <dd>Which composition motifs the solutions exhibit — model mates,
+          switchbacks, excelsior, underpromotion and eighteen others. See the
+          <a href="#panel=themes" data-panel="themes">Themes</a> screen for
+          what each one means and what it needs to be decidable.</dd>
+        </dl>
+        <p class="doc-note">There is no evaluation and no heuristic anywhere in
+        an answer. Either the position is in the corpus and the number is
+        exact, or it is outside the corpus and you get nothing.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>The screens</h3>
+        <dl class="doc-defs">
+          <dt>Explorer</dt>
+          <dd>Set up any position and walk it. Moves are grouped by how good
+          they are for the cooperative goal: those keeping the shortest mate,
+          those that take longer, those that throw it away. The position lives
+          in the address bar, so every link you copy reopens it.</dd>
+          <dt>Puzzles</dt>
+          <dd>Reproduce the optimal line of a composed position, ply by ply,
+          with the tablebase as referee.</dd>
+          <dt>Materials</dt>
+          <dd>The corpus itself: every generated table, its mate-length and
+          solution-count histograms, and how much of it is solvable at all.</dd>
+          <dt>Themes</dt>
+          <dd>The motif registry, read live from the running binary rather
+          than written down here, so it cannot drift from what the detector
+          actually implements.</dd>
+        </dl>
+      </section>
+
+      <section class="doc-section">
+        <h3>Scope and limits</h3>
+        <ul class="doc-list">
+          <li><b>Castling is out of scope entirely.</b> No position with
+          castling rights is read or written anywhere in this project.</li>
+          <li><b>The 50-move rule is ignored</b> — it has no meaning for a
+          cooperative shortest path.</li>
+          <li><b>En passant is exact</b> but is not part of the index; its
+          effect is folded in when the table is built and when it is probed.</li>
+          <li><b>Underpromotion is fully searched</b> — promotions to queen,
+          rook, bishop and knight are all considered.</li>
+          <li><b>The solution counter stops at 255.</b> Above that the true
+          number is unknown, and any theme that needs the full solution set
+          says so rather than guessing.</li>
+        </ul>
+      </section>
+
+      <section class="doc-section">
+        <h3>The project</h3>
+        <dl class="doc-defs">
+          <dt>Source</dt>
+          <dd><a href="https://github.com/osick/8pieces-helpmate" rel="noopener">github.com/osick/8pieces-helpmate</a>
+          — the generator, the prober, the CLI, this dashboard and its API.</dd>
+          <dt>Licence</dt>
+          <dd><a href="https://github.com/osick/8pieces-helpmate/blob/main/LICENSE" rel="noopener">MIT</a>,
+          © 2026 Oliver Sick. The generated tables are data, not code, and are
+          published under the same terms.</dd>
+          <dt>Dataset</dt>
+          <dd>The generated tables are not published yet. They are intended
+          for release as a Hugging Face dataset; until then the corpus exists
+          only on the machines that generated it, and this server reads a
+          local copy.</dd>
+          <dt>Built on</dt>
+          <dd><a href="https://github.com/osick/ChessMG" rel="noopener">ChessMG</a>
+          for move generation and
+          <a href="https://github.com/shaack/cm-chessboard" rel="noopener">cm-chessboard</a>
+          for the board.</dd>
+        </dl>
+        <p class="doc-links">
+          <a href="#panel=technique" data-panel="technique">How the tables are computed →</a>
+          <a href="#panel=privacy" data-panel="privacy">Privacy →</a>
+        </p>
+      </section>
+    </div>
+  </section>
+
+  <section id="panel-technique" hidden>
+    <div class="doc">
+      <header class="doc-head">
+        <h2>How the tables are computed</h2>
+        <p class="doc-lede">Exhaustive fixed-point search over a
+        symmetry-reduced index, verified against three independent
+        implementations.</p>
+      </header>
+
+      <section class="doc-section">
+        <h3>1 · Indexing</h3>
+        <p>Every position in a material class maps to one integer in a dense
+        plane, through a symmetry-reduced mixed-radix scheme. The two kings
+        index <i>jointly</i>, through a precomputed table of non-adjacent king
+        pairs: <b>462</b> classes for pawnless material — full eight-fold board
+        symmetry, with the white king confined to the a1–d1–d4 triangle — and
+        <b>1806</b> once a pawn is present, since a pawn breaks diagonal
+        symmetry and only the left–right mirror survives.</p>
+        <p>Each further piece multiplies the plane by 64, or by 48 for a pawn,
+        which can only stand on ranks 2 through 7. En passant gets no dimension
+        of its own: wherever a double push next to an enemy pawn is reachable,
+        its value is folded in as <span class="mono">min(table value, 1 + value
+        of the en-passant capture successor)</span>, looked up in whichever
+        smaller table that capture lands in.</p>
+        <p>The index bakes in <i>White delivers the mate</i>. Probing a
+        position where Black is the mating side is answered by an automatic
+        colour flip rather than by a second set of tables.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>2 · Generation</h3>
+        <p>For a material class <span class="mono">M</span>, the generator
+        first computes the closure of every sub-class reachable by a capture or
+        a promotion, topologically sorted, because <span class="mono">M</span>'s
+        own scan needs those tables to resolve its successors.</p>
+        <p>Then an init pass marks the illegal cells and assigns
+        <span class="mono">dtm = 0</span> to every Black-to-move checkmate.
+        After that, forward-scan passes run to a fixed point: pass
+        <i>d</i> visits the still-unresolved cells, generates their legal
+        moves, and assigns <span class="mono">dtm = d</span> to any cell with a
+        successor already at <span class="mono">d − 1</span>. The passes stop
+        when one of them assigns nothing.</p>
+        <p>A second sweep, in increasing dtm order, counts the optimal lines:
+        <span class="mono">count(p) = Σ count(s)</span> over exactly the
+        successors that achieve the minimal dtm, saturating at 255.</p>
+        <p>Both sweeps parallelise across the index range. Pass <i>d</i> only
+        writes cells that are still unresolved and only reads values strictly
+        below <i>d</i>, so two threads working on different chunks of the same
+        pass cannot race. Multithreaded output is <b>required to be
+        byte-identical</b> to single-threaded output, and that is asserted by
+        the test suite rather than assumed.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>3 · Storage</h3>
+        <p>A table is four contiguous byte planes over the same index —
+        distance and solution count, each for White to move and for Black to
+        move — so one cell costs four bytes. Files are written atomically and
+        read back through <span class="mono">mmap</span>, which is why probing
+        a thirty-gigabyte table costs a page fault rather than a load.</p>
+        <p>Three file versions exist. An ordinary table stores those planes
+        raw. A <b>marker</b> table is header and metadata with no payload at
+        all, written when a class turns out to have no solvable cell anywhere.
+        A <b>block-compressed</b> table treats the four planes as one logical
+        byte range, cuts it into 64 KiB blocks, and compresses each one
+        independently with zstd, alongside an offset index and a bounded cache
+        of decompressed blocks in the reader. Random access survives: a probe
+        decompresses at most one block, never the whole file.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>4 · Answering a query</h3>
+        <p>Because the search already happened, every query is a lookup rather
+        than a search. A probe is one indexed read. An optimal line is
+        reconstructed by greedy descent through the distance planes, applying
+        the same en-passant adjustment on the way down. A scan for
+        compositions walks the plane directly.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>5 · Why you should believe the numbers</h3>
+        <p>A tablebase is worth nothing if its answers are not trustworthy, so
+        the generator is not allowed to grade its own homework.</p>
+        <dl class="doc-defs">
+          <dt>An independent oracle</dt>
+          <dd>A from-scratch cooperative iterative-deepening solver that shares
+          only the move generator with the real generator — no shared indexing,
+          no shared search structure. It re-solves sampled positions from every
+          generated class, checking both the distance <i>and</i> the number of
+          optimal lines, which it enumerates itself. Any mismatch fails the
+          build.</dd>
+          <dt>A third implementation</dt>
+          <dd>Every one of the 368,452 legal <span class="mono">KQvk</span>
+          positions is re-solved by a plain breadth-first search written
+          directly against <a href="https://python-chess.readthedocs.io/" rel="noopener">python-chess</a>,
+          with no helpmate code involved in computing the reference values, and
+          checked for agreement on both distance and solution count in both
+          directions.</dd>
+          <dt>Determinism</dt>
+          <dd>Generation must produce identical files on one thread and on
+          many. This is asserted directly, including on a material class where
+          en-passant successors are genuinely reachable — the one code path
+          whose safety depends on values written by another thread.</dd>
+          <dt>Golden compositions</dt>
+          <dd>Known-answer positions are checked exactly, including their full
+          set of optimal lines, not merely their distance.</dd>
+        </dl>
+      </section>
+
+      <section class="doc-section">
+        <h3>6 · What this does not do</h3>
+        <p>The corpus is finite. A position whose material has not been
+        generated has no answer here, and the honest response is to say so
+        rather than to fall back on a search that would answer a different
+        question. Solution counts above 255 are reported as saturated, not
+        estimated. Theme detection on a saturated position reads only the
+        solutions it could enumerate, and the dashboard says when that
+        happened.</p>
+        <p class="doc-links">
+          <a href="https://github.com/osick/8pieces-helpmate/blob/main/docs/USAGE.md" rel="noopener">The full usage guide →</a>
+          <a href="#panel=about" data-panel="about">Back to About →</a>
+        </p>
+      </section>
+    </div>
+  </section>
+
+  <section id="panel-privacy" hidden>
+    <div class="doc">
+      <header class="doc-head">
+        <h2>Privacy</h2>
+        <p class="doc-lede">This site sets no cookies, runs no analytics and
+        has no accounts.</p>
+      </header>
+
+      <section class="doc-section">
+        <h3>What this site stores on your device</h3>
+        <p><b>Nothing.</b> The dashboard sets no cookies and writes to neither
+        local nor session storage. The position you are looking at lives in the
+        address bar, which is why a link reopens it — that is the URL, not
+        storage, and it never leaves your browser unless you share it.</p>
+        <p>There is no analytics script, no tracking pixel, no advertising and
+        no third-party embed. Every stylesheet, script, font and image is
+        served from this origin.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>Cookies set by the network in front of it</h3>
+        <p>This site is served through Cloudflare, which sets its own cookies
+        for security and bot management — typically
+        <span class="mono">__cf_bm</span>, and
+        <span class="mono">cf_clearance</span> if you are shown a challenge.
+        These are strictly necessary to deliver the site and carry no
+        advertising or profiling function, which is why you are not asked to
+        consent to them. See
+        <a href="https://developers.cloudflare.com/fundamentals/reference/policies-compliance/cloudflare-cookies/" rel="noopener">Cloudflare's cookie reference</a>.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>What the server logs</h3>
+        <p>The application writes an ordinary access log line per request: the
+        client IP address, the time, the request path and the response status.
+        No request body is logged, and the API takes no personal data to log —
+        a query is a chess position.</p>
+        <p>These logs are kept only as a rolling buffer on the host and are
+        overwritten as new requests arrive; they are not aggregated, not
+        exported and not used to build any profile. Cloudflare separately
+        processes connection metadata as described in its own privacy policy.</p>
+      </section>
+
+      <section class="doc-section">
+        <h3>Your rights and who to contact</h3>
+        <p>Where the access log constitutes personal data, the legal basis is
+        legitimate interest in operating and securing the service (Art. 6(1)(f)
+        GDPR). You have the right of access, rectification, erasure,
+        restriction, objection and complaint to a supervisory authority.</p>
+        <p>This is a non-commercial research project. Reach the operator
+        through <a href="https://github.com/osick/8pieces-helpmate/issues" rel="noopener">the project's issue tracker</a>.</p>
+        <p class="doc-links">
+          <a href="#panel=about" data-panel="about">Back to About →</a>
+        </p>
+      </section>
+    </div>
+  </section>
 </main>
 
 <footer>
   <p class="footer-corpus" id="footer-corpus"></p>
-  <!-- No href until these have somewhere real to point. `href="#"` is not
-       inert: it CLEARS location.hash, which fires hashchange, and panels.js
-       reads an empty hash as "explorer" -- so clicking a placeholder
-       mid-puzzle threw the position away and bounced the user to a screen
-       they were not on. An <a> without href is not focusable or activatable,
-       which is what "not a link yet" should actually mean. -->
-  <nav aria-label="About">
-    <a data-placeholder>Source</a>
-    <a data-placeholder>Dataset</a>
-    <a data-placeholder>Licence</a>
+  <!-- These used to be three href-less placeholders. The reason they had no
+       `href="#"` still holds and is why the two internal ones below carry a
+       real `#panel=x` instead: `href="#"` CLEARS location.hash, which fires
+       hashchange, and panels.js reads an empty hash as "explorer" -- so
+       clicking one mid-puzzle threw the position away and bounced the user to
+       a screen they were not on.
+       Dataset is absent rather than dead: the tables are not published yet,
+       and the About screen says so in a sentence. A link that 404s is worse
+       than no link. -->
+  <nav aria-label="About this site">
+    <a href="https://github.com/osick/8pieces-helpmate" rel="noopener">Source</a>
+    <a href="https://github.com/osick/8pieces-helpmate/blob/main/LICENSE" rel="noopener">Licence</a>
+    <a href="#panel=about" data-panel="about">About</a>
+    <a href="#panel=privacy" data-panel="privacy">Privacy</a>
   </nav>
   <p class="footer-note">Helpmate tablebases · distances in plies, h#n = 2n</p>
 </footer>
@@ -201,6 +531,13 @@
   import { initMine } from "/js/mine.js";
   import { initServerChip } from "/js/chip.js";
   import { initThemesDoc } from "/js/themes-doc.js";
+  import { initStickyChrome } from "/js/chrome.js";
+
+  // Before the awaited health call below, not after: the header is sticky
+  // from first paint, and everything that pins under it reads --header-h. A
+  // slow (up to 5s) /v1/health must not leave the offset at its CSS fallback
+  // while the user is already scrolling.
+  initStickyChrome();
 
   // One /v1/health for the whole boot: the chip needs it and so does the
   // decision below, so they share the response rather than racing for it.

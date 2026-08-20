@@ -497,6 +497,26 @@ def _rows(page, selector="#move-list li"):
     return page.eval_on_selector_all(selector, "els => els.map(e => e.dataset.san)")
 
 
+def _nav_panels(page):
+    """The screens the header offers, in order.
+
+    Named, not counted. These assertions used to be `count() == 4`, and adding
+    the About screen broke four tests that had nothing to do with About --
+    each reporting `assert 5 == 4`, which says nothing about which screen
+    appeared. The thing under test is whether SEARCH is on the nav, so the
+    assertion should name search.
+    """
+    return page.eval_on_selector_all(
+        "nav[aria-label='Screens'] button", "els => els.map(e => e.dataset.panel)")
+
+
+# Every screen a default (search-off) server offers. Search is the only one
+# whose presence depends on how the server was started, so the two constants
+# differ by exactly that one entry.
+NAV_WITHOUT_SEARCH = ["explorer", "puzzles", "materials", "themes", "about"]
+NAV_WITH_SEARCH = ["explorer", "puzzles", "materials", "mine", "themes", "about"]
+
+
 def _sticky_is_wired(page):
     """Structural proof that `.board-pin` CAN stick, independent of how much
     scroll room actually exists on the current position.
@@ -781,13 +801,31 @@ def test_the_title_is_the_most_prominent_text_in_the_header(page, server):
     assert title > nav, f"title {title}px vs nav {nav}px"
 
 
-def test_the_footer_renders_with_marked_placeholders(page, server):
+def test_every_footer_link_points_somewhere_real(page, server):
+    """The footer used to carry three href-less placeholders. They are now
+    real links, so the property worth asserting flipped: nothing in the footer
+    may be a placeholder any more, and nothing may be a bare `#`.
+
+    `href="#"` is the specific trap this guards (see
+    test_a_footer_link_keeps_the_position_it_was_clicked_from below): it
+    CLEARS location.hash, which panels.js reads as "explorer".
+    """
     page.goto(server)
     page.wait_for_selector("footer")
     assert page.is_visible("footer")
-    # Placeholder links are marked so none ships as a live-looking dead link.
-    holders = page.eval_on_selector_all("footer a[data-placeholder]", "e => e.length")
-    assert holders >= 3, f"only {holders} marked placeholders"
+    links = page.eval_on_selector_all(
+        "footer nav a",
+        "els => els.map(e => ({text: e.textContent.trim(),"
+        " href: e.getAttribute('href'), placeholder: e.hasAttribute('data-placeholder')}))")
+    assert len(links) >= 3, f"footer has only {len(links)} links"
+    for a in links:
+        assert not a["placeholder"], f"{a['text']} still marked as a placeholder"
+        assert a["href"], f"{a['text']} has no href"
+        assert a["href"] != "#", f"{a['text']} is a bare '#'"
+        assert a["href"].startswith(("https://", "#panel=")), a
+    # Dataset is deliberately NOT here: the tables are unpublished, and the
+    # About screen says so in a sentence rather than shipping a 404.
+    assert [a["text"] for a in links] == ["Source", "Licence", "About", "Privacy"]
 
 
 def test_the_drag_ghost_has_no_background_and_is_smaller_than_the_tray(page, server):
@@ -1277,7 +1315,7 @@ def test_search_is_absent_not_hidden_when_mining_is_disabled(page, server):
     that exact bug shipped once and left a ticker running forever."""
     page.goto(server)
     page.wait_for_function("() => window.__chipReady === true")
-    assert page.locator("nav[aria-label='Screens'] button").count() == 4
+    assert _nav_panels(page) == NAV_WITHOUT_SEARCH
     assert page.locator("nav button[data-panel='mine']").count() == 0
     assert page.locator("#panel-mine").count() == 0
     assert page.locator("#mine-form").count() == 0
@@ -1298,7 +1336,7 @@ def test_a_stale_search_deep_link_lands_on_the_explorer(page, server):
 def test_search_is_present_when_the_server_enables_it(page, server_mining):
     page.goto(server_mining)
     page.wait_for_function("() => window.__chipReady === true")
-    assert page.locator("nav[aria-label='Screens'] button").count() == 5
+    assert _nav_panels(page) == NAV_WITH_SEARCH
     assert page.locator("#panel-mine").count() == 1
 
 
@@ -1314,7 +1352,7 @@ def test_search_stays_absent_and_the_chip_still_resolves_when_health_is_unreacha
     page.route("**/v1/health**", lambda route: route.abort())
     page.goto(server)
     page.wait_for_function("() => window.__chipReady === true")
-    assert page.locator("nav[aria-label='Screens'] button").count() == 4
+    assert _nav_panels(page) == NAV_WITHOUT_SEARCH
     assert page.locator("#panel-mine").count() == 0
     assert "unreachable" in page.inner_text("#server-chip")
 
@@ -1334,7 +1372,7 @@ def test_boot_does_not_hang_when_health_is_slow(page, server):
     page.route("**/v1/health**", lambda route: None)
     page.goto(server)
     page.wait_for_function("() => window.__chipReady === true", timeout=10000)
-    assert page.locator("nav[aria-label='Screens'] button").count() == 4
+    assert _nav_panels(page) == NAV_WITHOUT_SEARCH
     assert page.locator("#panel-mine").count() == 0
     assert "unreachable" in page.inner_text("#server-chip")
     # The rest of the boot must have run too, not just the chip/panel-removal
@@ -1932,20 +1970,32 @@ def test_a_deep_link_to_another_screen_shows_no_explorer_error(page, empty_serve
     page.wait_for_selector("#error-banner:not([hidden])")
 
 
-def test_a_placeholder_footer_link_cannot_navigate(page, server):
-    # `href="#"` is not inert: it CLEARS location.hash, which fires
-    # hashchange, and panels.js reads an empty hash as "explorer" -- so
-    # clicking "Source" mid-puzzle threw the position away and bounced the
-    # user to the explorer.
-    _mock_puzzle_set(page)
-    page.goto(server + PUZZLE_URL)
-    page.wait_for_selector("#puzzle-line .ply")
-    before = page.url
-    page.click("footer a[data-placeholder]")
-    page.wait_for_timeout(200)
-    assert page.url == before, "a placeholder link navigated"
-    assert page.is_visible("#panel-puzzles")
+def test_a_footer_link_keeps_the_position_it_was_clicked_from(page, server):
+    # The successor to the placeholder-cannot-navigate test. Those links now
+    # DO navigate -- that is their job -- so the property that survived is
+    # the one the old `href="#"` bug actually violated: the position you were
+    # looking at must still be there when you come back.
+    #
+    # `href="#panel=privacy"` alone would drop the fen parameter, because it
+    # replaces the whole hash. panels.js's delegated a[data-panel] handler
+    # re-encodes the current fen alongside the new panel; this is what asserts
+    # that handler exists and is wired to the footer, not just to About.
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    page.click("footer a[data-panel='privacy']")
+    page.wait_for_selector("#panel-privacy:not([hidden])")
     assert not page.is_visible("#panel-explorer")
+    # Decoded, not string-matched: the handler re-encodes through
+    # URLSearchParams, which is free to spell a space `+` and a slash `%2F`.
+    # What matters is that the fen round-trips, not how it is spelt.
+    hash_state = parse_qs(urlparse(page.url).fragment)
+    assert hash_state.get("fen") == [SATURATED], page.url
+    assert hash_state.get("panel") == ["privacy"], page.url
+
+    # ...and back, onto the same position rather than the landing default.
+    page.click("nav button[data-panel=explorer]")
+    page.wait_for_selector("#panel-explorer:not([hidden])")
+    assert page.input_value("#fen-input") == SATURATED
 
 
 def test_a_session_nobody_solved_is_not_congratulated(page, server):
@@ -1998,3 +2048,142 @@ def test_the_puzzle_feedback_is_announced_to_assistive_tech(page, server):
     for sel in ("#puzzle-correction", "#puzzle-solved"):
         role = page.get_attribute(sel, "role")
         assert role == "status", f"{sel} has role {role!r}"
+
+
+# ---------------------------------------------------------------- chrome ----
+#
+# "The board must be fixed, the right side scrolls." The board itself already
+# pinned (see _sticky_is_wired above); what scrolled away was everything
+# around it -- the brand, the nav and the server chip -- which left the board
+# jammed against the top edge of the window with its piece tray clipped.
+
+
+def test_the_header_stays_put_while_the_page_scrolls(page, server):
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    page.mouse.wheel(0, 1200)
+    page.wait_for_function("() => window.scrollY > 0")
+    top = page.eval_on_selector("body > header", "e => e.getBoundingClientRect().top")
+    assert top == 0, f"header drifted to {top} after scrolling"
+
+
+def test_the_pinned_board_comes_to_rest_below_the_header_not_behind_it(page, server):
+    """Two failures in one assertion, and they fail in opposite directions.
+
+    Too small an offset and the board slides under a header that now
+    permanently occupies the top of the viewport -- which is worse than the
+    original bug, because the header is opaque. Too large and there is a strip
+    of scrolling move list visible above a board that claims to be pinned.
+    """
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{server}/#fen={quote(SATURATED)}")
+    page.wait_for_selector("#move-list li")
+    page.mouse.wheel(0, 1400)
+    page.wait_for_function("() => window.scrollY > 0")
+    m = page.evaluate("""() => ({
+      headerBottom: document.querySelector('body > header').getBoundingClientRect().bottom,
+      pinTop: document.querySelector('.board-pin').getBoundingClientRect().top,
+    })""")
+    gap = m["pinTop"] - m["headerBottom"]
+    assert gap >= 0, f"board overlaps the header by {-gap:.1f}px"
+    assert gap < 40, f"board rests {gap:.1f}px below the header"
+
+
+def test_the_pin_offset_is_measured_from_the_real_header(page, server):
+    """--header-h is a JS-published measurement with a CSS fallback, and the
+    fallback is only right for the unwrapped header. Between roughly 860 and
+    1100px the header wraps to two lines; if the fallback were being used
+    instead of the measurement, the board would pin behind it at that width.
+    Assert the published value tracks the element at BOTH widths, so a
+    regression that drops js/chrome.js is caught rather than passing at the
+    one width where the constant happens to be correct.
+    """
+    page.goto(server)
+    page.wait_for_function("() => window.__chipReady === true")
+    for width in (1440, 900):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.wait_for_timeout(150)
+        m = page.evaluate("""() => ({
+          real: document.querySelector('body > header').getBoundingClientRect().height,
+          token: parseFloat(getComputedStyle(document.documentElement)
+                   .getPropertyValue('--header-h')),
+        })""")
+        assert abs(m["real"] - m["token"]) < 1, f"at {width}px: {m}"
+
+
+def test_a_doc_screens_own_heading_is_not_sticky(page, server):
+    """`header { position: sticky }` is an element selector, and About,
+    Technique and Privacy each open with their own <header class="doc-head">.
+    Unscoped, that rule pinned three more bars to the top of the window."""
+    page.goto(f"{server}/#panel=about")
+    page.wait_for_selector("#panel-about:not([hidden])")
+    pos = page.eval_on_selector(
+        "#panel-about .doc-head", "e => getComputedStyle(e).position")
+    assert pos == "static", f"doc heading is {pos}"
+
+
+def test_the_board_is_lifted_off_the_rail(page, server):
+    page.goto(server)
+    page.wait_for_selector("#board svg")
+    shadow = page.eval_on_selector("#board", "e => getComputedStyle(e).boxShadow")
+    assert shadow != "none", "board has no shadow"
+    # Three layers: a hairline edge, a contact shadow and a cast. A single
+    # layer is a flat drop shadow, which is what this replaced.
+    assert shadow.count("rgba") >= 3, shadow
+
+
+# ------------------------------------------------------- about / technique --
+
+
+def test_the_explorer_carries_a_short_about_with_working_links(page, server):
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    assert page.is_visible(".about-card")
+    page.click(".about-links a[data-panel='technique']")
+    page.wait_for_selector("#panel-technique:not([hidden])")
+    assert not page.is_visible("#panel-explorer")
+
+
+@pytest.mark.parametrize("panel", ["about", "technique", "privacy"])
+def test_each_prose_screen_opens_on_its_own(page, server, panel):
+    """Reachable by deep link, and exclusive -- panels.js derives its list
+    from the DOM, so a new <section id="panel-*"> is wired the moment it
+    exists. That is the mechanism these three rely on, and Technique and
+    Privacy have no nav button of their own to fall back on."""
+    page.goto(f"{server}/#panel={panel}")
+    page.wait_for_selector(f"#panel-{panel}:not([hidden])")
+    shown = page.eval_on_selector_all(
+        "main > section[id^='panel-']:not([hidden])", "els => els.map(e => e.id)")
+    assert shown == [f"panel-{panel}"]
+    assert page.inner_text(f"#panel-{panel} .doc-head h2").strip()
+
+
+def test_the_prose_screens_hold_a_readable_measure(page, server):
+    """1200px of panel is roughly 170 characters of this body size. Prose that
+    wide is not readable, and these three screens are the only long-form text
+    on the site."""
+    page.set_viewport_size({"width": 1440, "height": 900})
+    page.goto(f"{server}/#panel=technique")
+    page.wait_for_selector("#panel-technique:not([hidden])")
+    width = page.eval_on_selector(
+        "#panel-technique .doc-section p", "e => e.getBoundingClientRect().width")
+    assert 380 <= width <= 720, f"prose column is {width:.0f}px"
+
+
+def test_privacy_states_the_no_storage_claim_the_code_actually_backs(page, server):
+    """The Privacy screen claims this site sets no cookies and uses neither
+    local nor session storage. That is a claim about the shipped JavaScript,
+    so assert it against a real page load rather than against the prose."""
+    page.goto(server)
+    page.wait_for_selector("#move-list li")
+    page.click("nav button[data-panel=puzzles]")
+    page.wait_for_selector("#panel-puzzles:not([hidden])")
+    page.click("nav button[data-panel=materials]")
+    page.wait_for_selector("#material-list li")
+    state = page.evaluate("""() => ({
+      cookie: document.cookie,
+      local: Object.keys(localStorage).length,
+      session: Object.keys(sessionStorage).length,
+    })""")
+    assert state == {"cookie": "", "local": 0, "session": 0}, state

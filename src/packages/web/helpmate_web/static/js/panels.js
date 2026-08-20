@@ -66,6 +66,26 @@ export function initPanels() {
       location.hash = encodeState({ fen, panel: name });
       showPanel(name);
     });
+
+  // In-page links to a screen that has no nav button of its own (About ->
+  // Technique, the footer -> Privacy). Delegated, so links inside panels
+  // rendered later -- the About screen's own body -- are covered too.
+  //
+  // The href is a real `#panel=x`, so the link is focusable, middle-clickable
+  // and works with this listener removed; the handler exists only to CARRY
+  // THE FEN ACROSS. Without it, reading About mid-analysis rewrites the hash
+  // without the fen parameter and the position is gone when you come back.
+  document.addEventListener("click", (e) => {
+    const a = e.target.closest?.("a[data-panel]");
+    if (!a || e.defaultPrevented || e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0)
+      return;
+    const name = a.dataset.panel;
+    if (!panelIds().includes(name)) return;   // fall through to the bare href
+    e.preventDefault();
+    const { fen } = decodeState(location.hash);
+    location.hash = encodeState({ fen, panel: name });
+    showPanel(name);
+  });
   showPanel(decodeState(location.hash).panel);
   window.addEventListener("hashchange", () => showPanel(decodeState(location.hash).panel));
 }
