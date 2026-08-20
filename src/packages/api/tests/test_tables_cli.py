@@ -130,3 +130,79 @@ def test_pull_defaults_to_all_materials(tmp_path):
     assert (dst / "KQvk.hm").read_bytes() == b"\x03" * 24
     assert (dst / "KQvk.stats.json").exists()
     assert (dst / "Kvk.hm").read_bytes() == b"\x04" * 8
+
+
+class PrHub(RecorderHub):
+    """A hub that can also open pull requests, for the contributor path."""
+    def __init__(self, url="https://huggingface.co/datasets/u/ds/discussions/7"):
+        super().__init__()
+        self.prs: list[tuple[list[str], str]] = []
+        self.url = url
+    def open_pr(self, paths, message):
+        self.prs.append(([Path(p).name for p in paths], message))
+        return self.url
+
+def test_create_pr_opens_one_request_for_the_whole_set(tmp_path, capsys):
+    # A table and its sidecar must arrive as ONE pull request. Opening one per
+    # file would leave a maintainer merging halves in lockstep.
+    seed(tmp_path)
+    hub = PrHub()
+    rc = tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                          "--material", "KQvk", "--create-pr"],
+                         hub_factory=lambda repo: hub)
+    assert rc == 0
+    assert len(hub.prs) == 1
+    files, message = hub.prs[0]
+    assert files == ["KQvk.hm", "KQvk.stats.json"]
+    assert "KQvk" in message
+    assert hub.url in capsys.readouterr().out
+
+def test_create_pr_touches_no_manifest_anywhere(tmp_path):
+    # Not the remote one -- the maintainer regenerates it, and a PR editing it
+    # would conflict with every other open PR. Not the local one either: a
+    # contributor's tables directory is not ours to write into.
+    seed(tmp_path)
+    hub = PrHub()
+    assert tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                            "--create-pr"], hub_factory=lambda repo: hub) == 0
+    assert hub.uploaded == []                       # nothing written directly
+    assert "manifest.json" not in hub.store
+    assert not (tmp_path / "manifest.json").exists()
+    proposed, _ = hub.prs[0]
+    assert "manifest.json" not in proposed
+
+def test_create_pr_without_material_proposes_every_table(tmp_path):
+    seed(tmp_path)
+    hub = PrHub()
+    assert tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                            "--create-pr"], hub_factory=lambda repo: hub) == 0
+    proposed, _ = hub.prs[0]
+    assert set(proposed) == {"KQvk.hm", "KQvk.stats.json", "Kvk.hm"}
+
+def test_create_pr_on_an_empty_directory_is_an_error(tmp_path):
+    hub = PrHub()
+    rc = tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                          "--create-pr"], hub_factory=lambda repo: hub)
+    assert rc == 2
+    assert hub.prs == []
+
+def test_create_pr_reports_failure_without_claiming_success(tmp_path, capsys):
+    seed(tmp_path)
+    class Failing(PrHub):
+        def open_pr(self, paths, message):
+            raise OSError("413 payload too large")
+    hub = Failing()
+    rc = tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                          "--create-pr"], hub_factory=lambda repo: hub)
+    assert rc == 1
+    assert "413 payload too large" in capsys.readouterr().err
+
+def test_push_without_create_pr_is_unchanged(tmp_path):
+    # The default path still writes directly and still maintains the manifest.
+    seed(tmp_path)
+    hub = PrHub()
+    assert tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds",
+                            "--material", "KQvk"],
+                           hub_factory=lambda repo: hub) == 0
+    assert hub.prs == []
+    assert "manifest.json" in hub.store
