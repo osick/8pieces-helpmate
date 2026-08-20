@@ -13,6 +13,20 @@ def _default_hub(repo_id: str):
                             repo_id=repo, repo_type="dataset")
     hub.upload = lambda path, repo=repo_id: upload(path, repo)  # type: ignore[attr-defined]
 
+    def open_pr(paths: list[Path], message: str, repo: str = repo_id) -> str | None:
+        # One commit for the whole set, not one per file: upload_file(create_pr=True)
+        # opens a SEPARATE pull request per call, so a contributor sending a table
+        # plus its sidecar would file two half-PRs that a maintainer has to merge
+        # in lockstep. create_commit takes all the operations at once.
+        from huggingface_hub import CommitOperationAdd, HfApi
+        ops = [CommitOperationAdd(path_in_repo=p.name, path_or_fileobj=str(p))
+               for p in paths]
+        info = HfApi().create_commit(repo_id=repo, repo_type="dataset",
+                                     operations=ops, commit_message=message,
+                                     create_pr=True)
+        return getattr(info, "pr_url", None)
+    hub.open_pr = open_pr  # type: ignore[attr-defined]
+
     real_fetch_manifest = hub.fetch_manifest
 
     def fetch_manifest():
@@ -34,6 +48,10 @@ def main(argv: list[str] | None = None, hub_factory=_default_hub) -> int:
         s.add_argument("--tables", required=True, metavar="DIR")
         s.add_argument("--repo", required=True, metavar="USER/DATASET")
         s.add_argument("--material", action="append", default=[])
+    sub.choices["push"].add_argument(
+        "--create-pr", action="store_true",
+        help="open a pull request on the dataset instead of writing to it "
+             "directly (the route for contributors without write access)")
     a = p.parse_args(argv)
     if a.cmd is None:
         p.print_usage()
@@ -43,6 +61,30 @@ def main(argv: list[str] | None = None, hub_factory=_default_hub) -> int:
         print(f"error: not a directory: {tables}", file=sys.stderr)
         return 2
     hub = hub_factory(a.repo)
+
+    if a.cmd == "push" and a.create_pr:
+        # A contributor has no write access, so this path must not touch
+        # manifest.json at all: not the remote one (the maintainer regenerates
+        # it after merging, and a PR that edits it would conflict with every
+        # other open PR), and not the local one either -- writing into someone
+        # else's tables directory is a side effect they did not ask for.
+        names = a.material or sorted({f.name[: -len(".hm")]
+                                      for f in tables.glob("*.hm")})
+        paths = [f for mat in names
+                 for f in (tables / f"{mat}.hm", tables / f"{mat}.stats.json")
+                 if f.exists()]
+        if not paths:
+            print(f"error: no tables to propose in {tables}", file=sys.stderr)
+            return 2
+        try:
+            url = hub.open_pr(paths, "Add " + ", ".join(names))
+        except Exception as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+        for f in paths:
+            print(f"proposed {f.name}")
+        print(f"opened pull request: {url}" if url else "opened pull request")
+        return 0
 
     if a.cmd == "push":
         try:

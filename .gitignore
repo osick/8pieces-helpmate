@@ -236,3 +236,6 @@ __marimo__/
 
 # Claude Code workspace (worktrees, session files)
 .claude/
+
+# Local release runbook, not part of the published repo
+rollout.md

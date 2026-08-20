@@ -6,6 +6,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/);
 version numbers follow [Semantic Versioning](https://semver.org/) (0.x: minor
 bumps may change behavior).
 
+## [Unreleased]
+
+### Added
+- **`helpmate-tables push --create-pr`** opens a pull request on the dataset
+  instead of writing to it directly — the route for contributors who have no
+  write access. The table and its sidecar go up as a *single* commit, because
+  `upload_file(create_pr=True)` opens one pull request per call and would
+  otherwise split a contribution into halves a maintainer has to merge in
+  lockstep. The path deliberately touches no `manifest.json`, remote or local:
+  the maintainer regenerates it after merging, and a pull request that edited
+  it would conflict with every other open one.
+- `docs/CONTRIBUTING-TABLES.md` — how to contribute generated tablebases:
+  what is missing and what it costs in RAM, how to claim a material, and the
+  verification the project can and cannot currently do.
+- `docs/INTERNALS.md` — indexing, generation, storage format, verification
+  story and limits, moved out of the README.
+
+### Changed
+- The README is now a front page rather than a manual: 865 lines to 167, with
+  the reference material relocated to `docs/`. Stale claims corrected —
+  compression has existed since v0.7.5, six-piece tables need 28.9–84.7 GiB
+  rather than "14–28 GB", and seven pieces is bounded by an out-of-core
+  generator that does not exist rather than being "out of scope".
+
 ## [0.15.0] - 2026-08-14
 
 Dashboard polish for a public deployment: the chrome stays where you left it,
