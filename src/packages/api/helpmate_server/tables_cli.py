@@ -3,6 +3,9 @@ import argparse, json, sys, tempfile
 from pathlib import Path
 from .manifest import build_manifest, verify_file
 
+# Files per commit. The Hub caps repository commits at 128/hour.
+_COMMIT_CHUNK = 64
+
 def _default_hub(repo_id: str):
     from .storage import HFHub
     hub = HFHub(repo_id)
@@ -13,19 +16,28 @@ def _default_hub(repo_id: str):
                             repo_id=repo, repo_type="dataset")
     hub.upload = lambda path, repo=repo_id: upload(path, repo)  # type: ignore[attr-defined]
 
-    def open_pr(paths: list[Path], message: str, repo: str = repo_id) -> str | None:
-        # One commit for the whole set, not one per file: upload_file(create_pr=True)
-        # opens a SEPARATE pull request per call, so a contributor sending a table
-        # plus its sidecar would file two half-PRs that a maintainer has to merge
-        # in lockstep. create_commit takes all the operations at once.
+    def commit_files(paths: list[Path], message: str, create_pr: bool = False,
+                     repo: str = repo_id) -> str | None:
+        """Upload every path in ONE commit.
+
+        One commit per file is what the obvious implementation does, and it is
+        wrong twice over. The Hub rate-limits repository commits (128/hour), so
+        pushing a real corpus -- 295 tables plus sidecars, ~590 files -- dies
+        partway with a 429 that no amount of retrying fixes. And with
+        create_pr=True, upload_file opens a SEPARATE pull request per call, so a
+        contributor sending a table and its sidecar would file two half-PRs a
+        maintainer has to merge in lockstep.
+        """
         from huggingface_hub import CommitOperationAdd, HfApi
         ops = [CommitOperationAdd(path_in_repo=p.name, path_or_fileobj=str(p))
                for p in paths]
         info = HfApi().create_commit(repo_id=repo, repo_type="dataset",
                                      operations=ops, commit_message=message,
-                                     create_pr=True)
-        return getattr(info, "pr_url", None)
-    hub.open_pr = open_pr  # type: ignore[attr-defined]
+                                     create_pr=create_pr)
+        return getattr(info, "pr_url", None) if create_pr else None
+    hub.commit_files = commit_files  # type: ignore[attr-defined]
+    hub.open_pr = (lambda paths, message:  # type: ignore[attr-defined]
+                   commit_files(paths, message, create_pr=True))
 
     real_fetch_manifest = hub.fetch_manifest
 
@@ -107,25 +119,42 @@ def main(argv: list[str] | None = None, hub_factory=_default_hub) -> int:
             remote_files = (dict(remote_manifest.get("files", {}))
                             if remote_manifest is not None else {})
 
-            uploaded_names: list[str] = []
-            for mat in names:
-                for f in (tables / f"{mat}.hm", tables / f"{mat}.stats.json"):
-                    if f.exists():
-                        hub.upload(f, a.repo)
-                        uploaded_names.append(f.name)
-                        print(f"pushed {f.name}")
-
-            for name in uploaded_names:
-                remote_files[name] = local_files[name]
+            paths = [f for mat in names
+                     for f in (tables / f"{mat}.hm", tables / f"{mat}.stats.json")
+                     if f.exists()]
+            for f in paths:
+                remote_files[f.name] = local_files[f.name]
             upload_manifest = {"schema": 1, "generator_version": gen_version,
                                 "files": remote_files}
 
             with tempfile.TemporaryDirectory() as tmpdir:
-                upload_manifest_path = Path(tmpdir) / "manifest.json"
-                upload_manifest_path.write_text(json.dumps(upload_manifest,
-                                                            indent=2, sort_keys=True))
-                hub.upload(upload_manifest_path, a.repo)
-            print("pushed manifest.json")
+                manifest_path = Path(tmpdir) / "manifest.json"
+                manifest_path.write_text(json.dumps(upload_manifest,
+                                                     indent=2, sort_keys=True))
+                # Chunked, not one commit per file. The Hub allows 128
+                # repository commits an hour, and a full corpus is ~590 files,
+                # so per-file commits die partway through with a 429 that
+                # retrying cannot fix. Chunking keeps each commit's payload
+                # reasonable while turning the whole push into ~10 commits.
+                #
+                # The manifest rides in the LAST chunk so it never advertises a
+                # file that is not there yet: if an earlier chunk fails, the
+                # uploaded tables are simply invisible until a re-run completes,
+                # which is the same failure mode as before and a safe one.
+                batches = [paths[i:i + _COMMIT_CHUNK]
+                           for i in range(0, len(paths), _COMMIT_CHUNK)] or [[]]
+                for n, batch in enumerate(batches, 1):
+                    files = list(batch)
+                    if n == len(batches):
+                        files = files + [manifest_path]
+                    hub.commit_files(
+                        files,
+                        f"Add {len(batch)} files ({n}/{len(batches)})"
+                        if len(batches) > 1 else f"Add {len(batch)} files")
+                    for f in batch:
+                        print(f"pushed {f.name}")
+                    if n == len(batches):
+                        print("pushed manifest.json")
             return 0
         except Exception as exc:
             print(f"error: {exc}", file=sys.stderr)

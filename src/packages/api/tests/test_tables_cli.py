@@ -6,9 +6,14 @@ class RecorderHub:
     def __init__(self):
         self.uploaded: list[str] = []
         self.store: dict[str, bytes] = {}
+        self.commits: list[list[str]] = []      # one entry per commit
+    def commit_files(self, paths, message: str) -> None:
+        self.commits.append([Path(p).name for p in paths])
+        for path in paths:
+            self.uploaded.append(Path(path).name)
+            self.store[Path(path).name] = Path(path).read_bytes()
     def upload(self, path: Path, repo_id: str) -> None:
-        self.uploaded.append(path.name)
-        self.store[path.name] = Path(path).read_bytes()
+        self.commit_files([path], "upload")
     def fetch_manifest(self) -> dict | None:
         if "manifest.json" not in self.store:
             return None
@@ -206,3 +211,30 @@ def test_push_without_create_pr_is_unchanged(tmp_path):
                            hub_factory=lambda repo: hub) == 0
     assert hub.prs == []
     assert "manifest.json" in hub.store
+
+
+def test_push_batches_files_into_few_commits(tmp_path):
+    # The Hub caps repository commits at 128/hour. One commit per file made a
+    # full-corpus push (295 tables + sidecars) die partway with a 429 that no
+    # retry could clear, so the file count and the commit count must decouple.
+    for i in range(80):
+        (tmp_path / f"K{i}vk.hm").write_bytes(b"\x03" * 8)
+        (tmp_path / f"K{i}vk.stats.json").write_text('{"material":"x"}')
+    hub = RecorderHub()
+    assert tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds"],
+                           hub_factory=lambda repo: hub) == 0
+    assert len(hub.uploaded) == 161            # 80 tables + 80 sidecars + manifest
+    assert len(hub.commits) <= 4               # not 161
+    assert all(len(c) <= 65 for c in hub.commits)
+
+def test_push_advertises_the_manifest_only_in_the_final_commit(tmp_path):
+    # A manifest that landed first would name files not yet uploaded, and a
+    # client reading it would 404 on every one of them.
+    for i in range(70):
+        (tmp_path / f"K{i}vk.hm").write_bytes(b"\x03" * 8)
+    hub = RecorderHub()
+    assert tables_cli.main(["push", "--tables", str(tmp_path), "--repo", "u/ds"],
+                           hub_factory=lambda repo: hub) == 0
+    assert len(hub.commits) > 1                                  # actually chunked
+    assert "manifest.json" not in sum(hub.commits[:-1], [])
+    assert "manifest.json" in hub.commits[-1]
