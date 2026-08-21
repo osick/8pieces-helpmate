@@ -1,5 +1,7 @@
 BUILD ?= build
 COVBUILD ?= build-cov
+# Where `make booklet` puts the typeset PDF and LaTeX's intermediate files.
+BOOKLET ?= build-booklet
 # gcov binary matching the GCC version the coverage build is compiled with (the
 # distro's default `gcov` is typically an older system-GCC version and hard-errors
 # with "Version mismatch gcc/gcov" against a GCC-13 build); override with
@@ -7,7 +9,7 @@ COVBUILD ?= build-cov
 GCOV ?= gcov-13
 .PHONY: configure build test slowtest stress coverage clean jstest \
 	install install-dev install-bin uninstall-bin test-core test-cli test-api test-web test-bindings test-repo test-all \
-	lint typecheck format-check format
+	lint typecheck format-check format docs-deepest booklet
 configure:
 	cmake -S . -B $(BUILD)
 build: configure
@@ -215,5 +217,26 @@ coverage:
 	  --gcov-executable $(GCOV) --gcov-ignore-parse-errors=all \
 	  --html-details $(COVBUILD)/coverage/index.html \
 	  --print-summary $(COVBUILD) | tee $(COVBUILD)/coverage-summary.txt
+# Re-render the deepest-sound-problem showcase from docs/DEEPEST.json. Both
+# outputs come from the same JSON, so they never need to be regenerated
+# separately. Refreshing the JSON itself needs the tables:
+#   python3 tools/deepest_showcase.py --tables ./tables
+docs-deepest:
+	python3 tools/render_deepest.py --data docs/DEEPEST.json --out docs/DEEPEST.md
+	python3 tools/deepest_booklet.py --data docs/DEEPEST.json --out docs/DEEPEST.tex
+
+# Typeset the booklet. Twice: the index carries page references, which are
+# only correct once the .aux from the first pass exists. Needs chessboard.sty
+# -- TeX Live ships it in texlive-games.
+booklet: docs-deepest
+	@kpsewhich chessboard.sty >/dev/null || \
+	  { echo "chessboard.sty not found -- install TeX Live's texlive-games"; exit 1; }
+	mkdir -p $(BOOKLET)
+	pdflatex -interaction=nonstopmode -halt-on-error \
+	  -output-directory=$(BOOKLET) docs/DEEPEST.tex >/dev/null
+	pdflatex -interaction=nonstopmode -halt-on-error \
+	  -output-directory=$(BOOKLET) docs/DEEPEST.tex >/dev/null
+	@echo "wrote $(BOOKLET)/DEEPEST.pdf"
+
 clean:
-	rm -rf $(BUILD) $(COVBUILD)
+	rm -rf $(BUILD) $(COVBUILD) $(BOOKLET)

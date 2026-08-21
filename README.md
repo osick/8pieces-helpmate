@@ -80,7 +80,10 @@ Generation is a one-off cost. Every query afterwards is a table lookup.
 dataset. The deepest mate in the corpus is h#17.
 
 [**The deepest sound problem in every material class →**](docs/DEEPEST.md)
-One position per material, with a diagram and its solutions.
+One position per material, with a diagram and its solution — and a link that
+opens each one in the [Helpmate Analyzer](https://helpman.komtera.lt/) with the
+stipulation already set. The same data is typeset as a print booklet:
+`make booklet`.
 
 ```bash
 helpmate-tables pull --tables ./tables --repo osick/helpmate-tables
@@ -138,6 +141,7 @@ the full list with the exact definition each detector uses.
 | --- | --- |
 | [USAGE.md](docs/USAGE.md) | the full guide — every command, every flag, every field |
 | [DEEPEST.md](docs/DEEPEST.md) | **the deepest sound problem in every material class**, with diagrams |
+| [DEEPEST.tex](docs/DEEPEST.tex) | the same showcase as an A5 booklet — `make booklet` |
 | [BUILD.md](docs/BUILD.md) | prerequisites, build targets, offline dependencies, troubleshooting |
 | [CONTRIBUTING-TABLES.md](docs/CONTRIBUTING-TABLES.md) | **contribute CPU time and tables** |
 | [CONTRIBUTING.md](docs/CONTRIBUTING.md) | contribute code — CI checks and PR requirements |

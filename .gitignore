@@ -10,6 +10,7 @@ __pycache__/
 .Python
 build/
 build-cov/
+build-booklet/
 build_asan/
 develop-eggs/
 dist/
@@ -239,3 +240,10 @@ __marimo__/
 
 # Local release runbook, not part of the published repo
 rollout.md
+
+# tmp dirs
+**/tmp/
+*.toc
+*.aux
+*.log
+*.out
